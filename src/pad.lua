@@ -61,10 +61,32 @@ return function(mod, deps)
     G.line(cx + s * 0.32, cy, cx + s, cy)
     G.circle("line", cx, cy, s * 0.32, 20)
   end
+  -- a running figure as an outlined silhouette: its limbs as thick strokes in the colour, then the
+  -- same strokes thinner in the button's face colour (bg), which leaves one outline round the whole
+  local RUN_JOINTS = {
+    -- the body and legs, the arms (pairs of points as fractions of s), the head
+    { 0.22, -0.4, -0.06, 0.16 },                                 -- torso
+    { -0.06, 0.16, 0.3, 0.42, 0.18, 0.86 },                      -- front leg
+    { -0.06, 0.16, -0.4, 0.4, -0.78, 0.28 },                     -- back leg
+    { 0.18, -0.3, 0.48, -0.08, 0.72, -0.34 },                    -- front arm
+    { 0.16, -0.32, -0.18, -0.2, -0.46, 0.02 },                   -- back arm
+  }
+  local function runFigure(G, cx, cy, s, widthK, extra)
+    for _, j in ipairs(RUN_JOINTS) do
+      local w = s * (j == RUN_JOINTS[1] and 0.34 or 0.24) * widthK + extra * 2
+      G.setLineWidth(max(1, w))
+      local p = {}
+      for q = 1, #j, 2 do p[#p + 1] = cx + j[q] * s; p[#p + 1] = cy + j[q + 1] * s end
+      G.line(p)
+      for q = 1, #j, 2 do G.circle("fill", cx + j[q] * s, cy + j[q + 1] * s, w / 2, 16) end
+    end
+    G.circle("fill", cx + 0.36 * s, cy - 0.72 * s, s * 0.21 + extra, 20)
+  end
   local EMBLEM = {
     fight = function(G, cx, cy, s)
-      burst(G, cx, cy, s, 8, 0.62)
-      ball(G, cx + s * 0.05, cy + s * 0.05, s * 0.36)
+      -- the burst, and a ball right in its middle
+      burst(G, cx, cy, s, 8, 0.66)
+      ball(G, cx, cy, s * 0.4)
     end,
     pokemon = function(G, cx, cy, s) ball(G, cx, cy, s * 0.9) end,
     bag = function(G, cx, cy, s)
@@ -74,19 +96,110 @@ return function(mod, deps)
       G.line(cx - bw / 2, cy + s * 0.05, cx + bw / 2, cy + s * 0.05)
       G.rectangle("line", cx - s * 0.2, cy - s * 0.05, s * 0.4, s * 0.28, s * 0.06, s * 0.06)
     end,
-    run = function(G, cx, cy, s)
-      G.circle("line", cx + s * 0.35, cy - s * 0.65, s * 0.2, 16)
-      G.line(cx + s * 0.2, cy - s * 0.35, cx - s * 0.15, cy + s * 0.2)          -- the body
-      G.line(cx - s * 0.15, cy + s * 0.2, cx + s * 0.35, cy + s * 0.55, cx + s * 0.25, cy + s * 0.95)
-      G.line(cx - s * 0.15, cy + s * 0.2, cx - s * 0.55, cy + s * 0.45, cx - s * 0.85, cy + s * 0.35)
-      G.line(cx + s * 0.1, cy - s * 0.2, cx + s * 0.55, cy - s * 0.05, cx + s * 0.75, cy - s * 0.35)
-      G.line(cx + s * 0.1, cy - s * 0.2, cx - s * 0.3, cy - s * 0.3, cx - s * 0.5, cy - s * 0.05)
-      for k = 0, 2 do                                                             -- speed lines
-        local y = cy - s * 0.4 + k * s * 0.3
-        G.line(cx - s * 1.0, y, cx - s * 0.65 + k * s * 0.08, y)
-      end
+    run = function(G, cx, cy, s, bg)
+      local r, g, b, a = G.getColor()
+      local lw = G.getLineWidth()
+      -- the outline (the colour, a stroke wider), then the face colour inside it
+      runFigure(G, cx, cy, s, 1, lw)
+      local f = bg or { 1, 1, 1 }
+      G.setColor(f[1], f[2], f[3], 1)
+      runFigure(G, cx, cy, s, 1, 0)
+      G.setColor(r, g, b, a)
+      G.setLineWidth(lw)
     end,
   }
+  Pad.EMBLEM = EMBLEM
+
+  -- ------- a button's face, textured: a rounded rect drawn by a shader - a lit gradient, a fine
+  -- brushed grain, a gloss over its upper half, a bevel (lit along the top, shaded along the foot;
+  -- pressed, turned over, with a shadow inside its top) and, where asked, a slanted corner in its
+  -- colour. Plain fills stand in where the device has no shaders.
+  --   Pad.face(G, x, y, w, h, rad, { dark, pressed, accent = rgb, corner = true, tint = 0..1 })
+  local FACE_GLSL = [[
+extern vec2 size;
+extern number radius;
+extern vec3 top;
+extern vec3 bottom;
+extern vec3 accent;
+extern number pressed;
+extern number corner;
+extern number tint;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float sdRound(vec2 p, vec2 b, float r) {
+  vec2 q = abs(p) - b + r;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  vec2 p = tc * size;
+  vec2 c = size * 0.5;
+  float d = sdRound(p - c, c, radius);
+  float a = 1.0 - smoothstep(-0.8, 0.8, d);
+  if (a <= 0.0) discard;
+  float y = tc.y;
+  vec3 col = mix(top, bottom, smoothstep(0.05, 1.0, y));
+  col = mix(col, accent, tint * (0.35 + 0.65 * tc.x) * 0.5);
+  // brushed: fine slanting lines and a grain
+  float lines = sin((p.x + p.y * 0.55) * 1.3) * 0.5 + 0.5;
+  float grain = hash(floor(p * 0.75));
+  col *= 0.965 + 0.03 * lines + 0.035 * (grain - 0.5);
+  // its corner in the colour, slanted, with a light seam along the cut
+  if (corner > 0.5) {
+    float k = tc.x + (1.0 - tc.y) * 0.0 + tc.y * 0.42;
+    float cut = 0.3 - k;
+    if (cut > 0.0) col = mix(col, accent * (1.0 - 0.25 * y), 0.92);
+    col += (1.0 - smoothstep(0.0, 0.012, abs(cut))) * 0.35;
+  }
+  // a gloss over the upper half (not when pressed)
+  col += (1.0 - smoothstep(0.0, 0.48, y)) * 0.12 * (1.0 - pressed);
+  // the bevel: the band just inside the edge, light at the top and shade at the foot (turned over
+  // when pressed)
+  float band = 1.0 - clamp(-d / max(2.0, size.y * 0.07), 0.0, 1.0);
+  float side = (y < 0.5) ? 1.0 : -1.0;
+  col += band * side * mix(0.2, -0.28, pressed);
+  col -= pressed * (1.0 - smoothstep(0.0, 0.22, y)) * 0.22;
+  return vec4(clamp(col, 0.0, 1.0), a * color.a);
+}
+]]
+  local faceShader, faceTexel, faceTried = nil, nil, false
+  local function faceReady()
+    if not faceTried then
+      faceTried = true
+      local G = love.graphics
+      local ok, sh = pcall(G.newShader, FACE_GLSL)
+      if ok then faceShader = sh end
+      local okI, img = pcall(function()
+        local d = love.image.newImageData(1, 1)
+        d:setPixel(0, 0, 1, 1, 1, 1)
+        return G.newImage(d)
+      end)
+      if okI then faceTexel = img end
+    end
+    return faceShader and faceTexel
+  end
+  local LIGHT_TOP, LIGHT_BOTTOM = { 1, 1, 1 }, { 0.82, 0.84, 0.89 }
+  local DARK_TOP, DARK_BOTTOM = { 0.22, 0.22, 0.27 }, { 0.03, 0.03, 0.05 }
+  local GREY = { 0.6, 0.6, 0.62 }
+  function Pad.face(G, x, y, w, h, rad, o)
+    o = o or {}
+    if not faceReady() then
+      if o.dark then G.setColor(0.05, 0.05, 0.06, 1) else G.setColor(1, 1, 1, 1) end
+      G.rectangle("fill", x, y, w, h, rad, rad)
+      return
+    end
+    local sh = faceShader
+    sh:send("size", { w, h })
+    sh:send("radius", min(rad, w / 2, h / 2))
+    sh:send("top", o.dark and DARK_TOP or LIGHT_TOP)
+    sh:send("bottom", o.dark and DARK_BOTTOM or LIGHT_BOTTOM)
+    sh:send("accent", o.accent or GREY)
+    sh:send("pressed", o.pressed and 1 or 0)
+    sh:send("corner", o.corner and 1 or 0)
+    sh:send("tint", o.tint or 0)
+    G.setShader(sh)
+    G.setColor(1, 1, 1, o.alpha or 1)
+    G.draw(faceTexel, x, y, 0, w, h)
+    G.setShader()
+  end
 
   -- one pill: white (black when selected), the words, the emblem at its right end
   local function pill(G, t, item, selected, live, u)
@@ -94,8 +207,7 @@ return function(mod, deps)
     -- a soft shadow under it
     G.setColor(0, 0, 0, 0.25)
     G.rectangle("fill", t.x + 2 * u, t.y + 3 * u, t.w, t.h, rad, rad)
-    if selected then G.setColor(0.05, 0.05, 0.06, 1) else G.setColor(1, 1, 1, 1) end
-    G.rectangle("fill", t.x, t.y, t.w, t.h, rad, rad)
+    Pad.face(G, t.x, t.y, t.w, t.h, rad, { dark = selected, accent = item.rgb, tint = selected and 0.25 or 0.12 })
     local c = item.rgb
     -- the selected one keeps a thin rim in its colour, so it reads against the dark den
     if selected then
@@ -109,7 +221,7 @@ return function(mod, deps)
     G.setLineJoin("bevel")
     local k = live and 1 or 0.45
     if selected then G.setColor(c[1], c[2], c[3], 1) else G.setColor(c[1], c[2], c[3], 0.85 * k) end
-    EMBLEM[item.id](G, ex, ey, s)
+    EMBLEM[item.id](G, ex, ey, s, selected and { 0.05, 0.05, 0.06 } or { 1, 1, 1 })
     G.setLineWidth(1)
     local f = font(t.h * 0.44)
     G.setFont(f)
@@ -167,9 +279,8 @@ return function(mod, deps)
     local rad = t.h / 2
     G.setColor(0, 0, 0, 0.25)
     G.rectangle("fill", t.x + 2 * u, t.y + 3 * u, t.w, t.h, rad, rad)
-    if selected then G.setColor(0.05, 0.05, 0.06, 1) else G.setColor(1, 1, 1, 1) end
-    G.rectangle("fill", t.x, t.y, t.w, t.h, rad, rad)
     local c = mv.rgb or { 0.6, 0.6, 0.6 }
+    Pad.face(G, t.x, t.y, t.w, t.h, rad, { dark = selected, accent = c, tint = selected and 0.25 or 0.1 })
     if selected then
       G.setColor(c[1], c[2], c[3], 0.9)
       G.setLineWidth(max(1.5, t.h * 0.035))
@@ -290,6 +401,248 @@ return function(mod, deps)
       if inRect(x, y, where[item.id]) then return item.id end
     end
     return "panel"
+  end
+
+  -- ------- the second screen: the commands as a quad (Kanto Gear's shape, the raid's own buttons)
+  -- over a background of its own - a deep navy to Dynamax magenta, light streaks, a faint hexagon
+  -- grid and the band's ring. A header names who is choosing; the four commands (or the moves, the
+  -- pouch, the targets, Yes / No) fill a 2 x 2 grid of large buttons, each its emblem over its words.
+  -- The selected button (and one held under a finger) is pressed in: lower, its shadow gone, a dark
+  -- inner edge along its top.
+  --   Pad.drawSecond(G, w, h, r, held) ; Pad.hitSecond(x, y) -> an id as Pad.hit's, or nil
+
+  local sWhere = { cells = {}, back = {} }
+  Pad.sWhere = sWhere
+
+  local bgMesh, bgW, bgH = nil, 0, 0
+  local function secondBackground(G, w, h, t)
+    if not bgMesh or bgW ~= w or bgH ~= h then
+      bgW, bgH = w, h
+      local ok, m = pcall(G.newMesh, {
+        { 0, 0, 0, 0, 0.05, 0.06, 0.13, 1 }, { w, 0, 0, 0, 0.07, 0.07, 0.16, 1 },
+        { w, h, 0, 0, 0.32, 0.04, 0.22, 1 }, { 0, h, 0, 0, 0.18, 0.04, 0.2, 1 } }, "fan", "static")
+      bgMesh = ok and m or false
+    end
+    if bgMesh then
+      G.setColor(1, 1, 1, 1)
+      G.draw(bgMesh)
+    else
+      G.setColor(0.08, 0.06, 0.15, 1)
+      G.rectangle("fill", 0, 0, w, h)
+    end
+    -- the band's ring, large and faint, low on the right
+    G.setLineWidth(max(2, h * 0.03))
+    G.setColor(1, 0.2, 0.45, 0.08)
+    G.circle("line", w * 0.82, h * 0.95, h * 0.55, 64)
+    G.setLineWidth(max(1, h * 0.008))
+    G.setColor(1, 0.35, 0.6, 0.12)
+    G.circle("line", w * 0.82, h * 0.95, h * 0.42, 64)
+    -- a hexagon grid, fading toward the top
+    local cell = h * 0.07
+    G.setLineWidth(1)
+    for row = 0, math.ceil(h / (cell * 0.87)) do
+      local y = row * cell * 0.87
+      local a = 0.06 * (y / h)
+      if a > 0.005 then
+        G.setColor(1, 0.4, 0.7, a)
+        for col = -1, math.ceil(w / (cell * 1.5)) do
+          local x = (col + (row % 2) * 0.5) * cell * 1.5
+          for i = 0, 5 do
+            local a0, a1 = i * pi / 3, (i + 1) * pi / 3
+            G.line(x + cos(a0) * cell * 0.5, y + sin(a0) * cell * 0.5, x + cos(a1) * cell * 0.5, y + sin(a1) * cell * 0.5)
+          end
+        end
+      end
+    end
+    -- light streaks, slanting and drifting
+    G.setBlendMode("add")
+    for i = 0, 6 do
+      local x0 = ((i * 0.19 + (t or 0) * 0.02) % 1.3 - 0.15) * w
+      G.setColor(1, 0.45, 0.75, 0.035 + 0.02 * (i % 3))
+      G.polygon("fill", x0, 0, x0 + w * 0.05, 0, x0 - w * 0.2, h, x0 - w * 0.25, h)
+    end
+    G.setBlendMode("alpha")
+  end
+
+  -- a large button: rounded, a light face lit from above with a soft shadow; pressed, it sits lower
+  -- with no shadow and a dark edge inside its top; sel turns it black with a rim in its colour
+  local function quadButton(G, t, rgb, sel, pressed, live, drawIcon, word, sub, iconY)
+    local rad = min(t.w, t.h) * 0.16
+    local depth = t.h * 0.045
+    local down = (pressed or sel) and depth or 0
+    local x, y, w, h = t.x, t.y + down, t.w, t.h
+    if down == 0 then
+      G.setColor(0, 0, 0, 0.35)
+      G.rectangle("fill", x + depth * 0.4, y + depth, w, h, rad, rad)
+    end
+    -- the face (textured; pressed, its bevel turned over and a shadow inside its top)
+    local c = rgb or { 0.6, 0.6, 0.6 }
+    Pad.face(G, x, y, w, h, rad, { dark = sel, pressed = pressed or sel, accent = c, corner = true,
+      tint = sel and 0.2 or 0.06 })
+    G.setColor(c[1], c[2], c[3], sel and 1 or 0.9)
+    G.setLineWidth(max(2, h * 0.025))
+    G.rectangle("line", x + h * 0.012, y + h * 0.012, w - h * 0.024, h - h * 0.024, rad, rad)
+    -- the emblem, the words (and a line under them)
+    local k = live and 1 or 0.45
+    if drawIcon then
+      G.setLineWidth(max(1.5, h * 0.03))
+      G.setLineJoin("bevel")
+      G.setColor(c[1], c[2], c[3], k)
+      drawIcon(G, x + w / 2, y + h * (iconY or 0.4), h * 0.22, sel and { 0.07, 0.07, 0.09 } or { 0.95, 0.95, 0.96 })
+    end
+    local f = font(h * (drawIcon and 0.17 or 0.2))
+    G.setFont(f)
+    if sel then G.setColor(1, 1, 1, 1) elseif live then G.setColor(0.08, 0.08, 0.1, 1) else G.setColor(0.6, 0.6, 0.62, 1) end
+    local ty = drawIcon and (iconY and (y + h * 0.5 - f:getHeight() / 2) or (y + h * 0.7))
+      or (y + h * (sub and 0.28 or 0.5) - f:getHeight() / 2)
+    local word2 = word or "?"
+    if f:getWidth(word2) > w * 0.9 then
+      f = font(h * 0.17 * w * 0.9 / f:getWidth(word2))
+      G.setFont(f)
+    end
+    G.printf(word2, x, ty, w, "center")
+    G.printf(word2, x + 1, ty, w, "center")
+    if sub then
+      local fs = font(h * 0.13)
+      G.setFont(fs)
+      if sel then G.setColor(0.8, 0.8, 0.85, 1) else G.setColor(0.3, 0.3, 0.35, 1) end
+      G.printf(sub, x, y + h * 0.62, w, "center")
+    end
+    G.setLineWidth(1)
+  end
+
+  -- a chip of the move's type above its words
+  local function typeChip(rgb, name)
+    return function(G, cx, cy, s, _)
+      local cw, ch = s * 2.6, s * 0.95
+      G.setColor(rgb[1], rgb[2], rgb[3], 1)
+      G.rectangle("fill", cx - cw / 2, cy - ch / 2, cw, ch, ch / 2, ch / 2)
+      local f = font(ch * 0.62)
+      G.setFont(f)
+      G.setColor(1, 1, 1, 1)
+      G.printf(name or "", cx - cw / 2, cy - f:getHeight() / 2, cw, "center")
+    end
+  end
+
+  function Pad.drawSecond(G, w, h, r, held)
+    G.push("all")
+    secondBackground(G, w, h, r and r.t or 0)
+    -- the header: who is choosing (or what is going on)
+    local hh = h * 0.13
+    G.setColor(0, 0, 0, 0.55)
+    G.rectangle("fill", 0, 0, w, hh)
+    G.setColor(1, 0.25, 0.5, 1)
+    G.rectangle("fill", 0, hh - h * 0.008, w, h * 0.008)
+    local fh = font(hh * 0.42)
+    G.setFont(fh)
+    G.setColor(1, 1, 1, 1)
+    local c = r and r.cmd
+    local cmdUp = r and r.phase == "command" and c and not r.say
+    local ask = r and r.phase == "after" and r.ask and r.ask.kind == "yesno"
+    local title
+    if cmdUp then
+      local m = c.actor and r.members and r.members[c.actor]
+      local nm = m and m.b and m.b.name or "your Pok\195\169mon"
+      if c.menu == "moves" then title = "Choose a move"
+      elseif c.menu == "items" then title = "Choose an item"
+      elseif c.menu == "target" then title = "Use it on whom?"
+      else title = ("What will %s do?"):format(nm) end
+    elseif ask then title = "Yes or no?"
+    else title = "Max Raid Battle" end
+    G.print(title, h * 0.04, (hh - fh:getHeight()) / 2)
+    for i = #sWhere.cells, 1, -1 do sWhere.cells[i] = nil end
+    rset(sWhere.back, 0, 0, 0, 0)
+    local pad = h * 0.045
+    local gx, gy, gw, gh = pad, hh + pad, w - pad * 2, h - hh - pad * 2
+    local cw, ch = (gw - pad) / 2, (gh - pad) / 2
+    local function cell(i) return gx + ((i - 1) % 2) * (cw + pad), gy + math.floor((i - 1) / 2) * (ch + pad) end
+    if cmdUp and c.menu == "main" then
+      -- Fight, Pokemon / Bag, Run
+      for i, item in ipairs(Pad.ITEMS) do
+        local x, y = cell(i)
+        local t = { x = x, y = y, w = cw, h = ch, id = item.id }
+        sWhere.cells[i] = t
+        local live = LIVE[item.id] and not (item.id == "bag" and c.bagEmpty)
+        quadButton(G, t, item.rgb, c.cursor == i, held == item.id, live, EMBLEM[item.id], item.word)
+      end
+    elseif cmdUp or ask then
+      -- a list: the moves (type chip, name, PP), the pouch, the targets, Yes / No
+      local list = c and c.moveList or {}
+      for i = 1, min(4, #list) do
+        local mv = list[i]
+        local x, y = cell(i)
+        local t = { x = x, y = y, w = cw, h = ch, id = "move" .. i }
+        sWhere.cells[i] = t
+        local live
+        if mv.live ~= nil then live = mv.live else live = (mv.pp or 0) > 0 end
+        local sub = mv.right or (mv.maxPp and ("PP %d/%d"):format(mv.pp or 0, mv.maxPp or 0)) or nil
+        local icon = nil
+        if mv.typeName and not mv.chip then
+          icon = typeChip(mv.rgb or { 0.6, 0.6, 0.6 }, (mv.typeName:sub(1, 1) .. mv.typeName:sub(2):lower()))
+        end
+        local subIn = nil
+        if not icon then subIn = sub end
+        quadButton(G, t, mv.rgb, c.cursor == i, held == t.id, live, icon, mv.name, subIn, icon and 0.24 or nil)
+        if icon then
+          -- a move: its PP, and how it does on the boss, under its name
+          local down = (c.cursor == i or held == t.id) and ch * 0.045 or 0
+          local fs = font(ch * 0.12)
+          G.setFont(fs)
+          if c.cursor == i then G.setColor(0.8, 0.8, 0.85, 1) else G.setColor(0.3, 0.3, 0.35, 1) end
+          if not live then G.setColor(0.9, 0.25, 0.25, 1) end
+          if sub then G.printf(sub, x, y + down + ch * 0.66, cw, "center") end
+          local EW = { super = "Super effective", weak = "Not very effective", none = "No effect" }
+          local ER = { super = { 0.2, 0.75, 0.3 }, weak = { 0.55, 0.55, 0.6 }, none = { 0.9, 0.25, 0.25 } }
+          if mv.eff and EW[mv.eff] then
+            local e = ER[mv.eff]
+            G.setFont(font(ch * 0.1))
+            G.setColor(e[1], e[2], e[3], 1)
+            G.printf(EW[mv.eff], x, y + down + ch * 0.8, cw, "center")
+          end
+        end
+      end
+      if not ask then
+        -- Back, in the header's right end
+        local bw, bh = hh * 2.2, hh * 0.66
+        local b = rset(sWhere.back, w - bw - h * 0.03, (hh - bh) / 2, bw, bh)
+        G.setColor(held == "back" and 0.75 or 1, held == "back" and 0.75 or 1, held == "back" and 0.78 or 1, 1)
+        G.rectangle("fill", b.x, b.y + (held == "back" and bh * 0.06 or 0), b.w, b.h, bh / 2, bh / 2)
+        local fb = font(bh * 0.5)
+        G.setFont(fb)
+        G.setColor(0.08, 0.08, 0.1, 1)
+        G.printf("Back", b.x, b.y + (bh - fb:getHeight()) / 2 + (held == "back" and bh * 0.06 or 0), b.w, "center")
+      end
+    else
+      -- between commands: the four and how they stand
+      local fm = font(h * 0.05)
+      for i = 1, 4 do
+        local m = r and r.members and r.members[i]
+        local x, y = cell(i)
+        G.setColor(1, 1, 1, 0.08)
+        G.rectangle("fill", x, y, cw, ch, ch * 0.12, ch * 0.12)
+        if m and m.b then
+          G.setFont(fm)
+          G.setColor(1, 1, 1, 0.9)
+          G.printf(m.b.name or "?", x, y + ch * 0.3, cw, "center")
+          local most = max(1, tonumber(m.b.mon and m.b.mon.maxHp) or 1)
+          local f = max(0, min(1, (m.b.dispHp or m.b.mon.hp or 0) / most))
+          local bx, by, bw2, bh2 = x + cw * 0.12, y + ch * 0.6, cw * 0.76, ch * 0.08
+          G.setColor(0, 0, 0, 0.5)
+          G.rectangle("fill", bx, by, bw2, bh2, bh2 / 2, bh2 / 2)
+          if f > 0.5 then G.setColor(0.3, 0.85, 0.4, 1) elseif f > 0.2 then G.setColor(0.95, 0.75, 0.2, 1) else G.setColor(0.9, 0.25, 0.25, 1) end
+          G.rectangle("fill", bx, by, bw2 * f, bh2, bh2 / 2, bh2 / 2)
+        end
+      end
+    end
+    G.pop()
+  end
+
+  function Pad.hitSecond(x, y)
+    if inRect(x, y, sWhere.back) then return "back" end
+    for _, t in ipairs(sWhere.cells) do
+      if inRect(x, y, t) then return t.id end
+    end
+    return nil
   end
 
   return Pad

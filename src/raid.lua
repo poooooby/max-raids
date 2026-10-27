@@ -1141,8 +1141,12 @@ return function(mod, deps)
     local rad = t.h / 2
     G.setColor(0, 0, 0, 0.25)
     G.rectangle("fill", t.x + 2, t.y + 3, t.w, t.h, rad, rad)
-    if sel then G.setColor(0.04, 0.04, 0.05, 1) else G.setColor(1, 1, 1, 1) end
-    G.rectangle("fill", t.x, t.y, t.w, t.h, rad, rad)
+    if Pad and Pad.face then
+      Pad.face(G, t.x, t.y, t.w, t.h, rad, { dark = sel })
+    else
+      if sel then G.setColor(0.04, 0.04, 0.05, 1) else G.setColor(1, 1, 1, 1) end
+      G.rectangle("fill", t.x, t.y, t.w, t.h, rad, rad)
+    end
     local f = Rd.font(t.h * 0.5)
     G.setFont(f)
     if sel then G.setColor(1, 1, 1, 1) elseif live then G.setColor(0.08, 0.08, 0.1, 1) else G.setColor(0.6, 0.6, 0.62, 1) end
@@ -1837,6 +1841,24 @@ return function(mod, deps)
       if ev.phase == "released" then Rd.choose(hit) end
     end
     return hit ~= nil
+  end
+
+  -- a press on the second screen's pad (src/screen2.lua): down puts the selection on it, up picks
+  function Rd.secondPress(id, released)
+    if not (r and id) then return end
+    local before = uiKey()
+    local slot = tonumber(id:match("^move(%d)$") or "")
+    if r.phase == "command" and r.cmd and not r.say and not r.summary then
+      if slot then r.cmd.cursor = slot end
+      if r.cmd.menu == "main" then
+        for i, item in ipairs(Pad.ITEMS) do if item.id == id then r.cmd.cursor = i end end
+      end
+      if released then Rd.choose(id) end
+    elseif r.phase == "after" and r.ask and r.ask.kind == "yesno" and slot then
+      r.cmd.cursor = slot
+      if released then Rd.answer(slot == 1) end
+    end
+    uiTick(before)
   end
 
   -- ------- drawing (window pixels)

@@ -507,6 +507,31 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - The end card: Next -> phase "outro" (`Rd.OUTRO`): the den once more (wide, the boss gone), a circle
     closing to black (`Rd.drawIris`), then the evolutions / moves over black.
   - Driver `tests/drivers/catch_probe.lua` (the roll made sure; `PROBE_FAIL=1` a miss).
+- **The battle pad on the second screen** (BATTLE PAD: SECOND SCREEN; 2026-10-26, Wooble: a quad like
+  Kanto Gear's, our buttons, a modern background, pressed in when selected): `src/screen2.lua` (S2) on
+  the engine's SecondScreen bridge (the Android display or the desktop companion): from the raid
+  layer's update (never in a draw) it draws `Pad.drawSecond` into a 960x840 canvas, reads it back
+  without a stall (requestImageData / pollImageData, else newImageData), pushes it ("secondary") at
+  most 30 a second and releases the pixels; taps come back by pollTouch (down holds a button - pressed
+  in, the selection on it -, up on it picks: `Rd.secondPress(id, released)`, which ticks SE_SELECT).
+  `padOnSecond()` (main) = the option AND the display detected, so without one the pad stays on the
+  main screen. `Pad.drawSecond`: a navy-to-magenta background (a gradient mesh, the band's ring, a
+  hexagon grid fading upward, drifting light streaks), a header (who is choosing / what to choose,
+  Back at its right), a 2 x 2 grid: Fight / Pokemon / Bag / Run (emblem over words), the moves (type
+  chip, name, PP, how it does on the boss), the pouch, the targets, Yes / No; between commands the four
+  with their HP. `quadButton`: a light face lit from above with a drop shadow; selected or held it sits
+  lower, no shadow, a dark lip inside its top (selected also black with a rim in its colour).
+  `Pad.hitSecond`, `Pad.sWhere`. Driver `tests/drivers/screen2_probe.lua` (the display stood in for:
+  frames saved as PNGs, taps queued; `_test.padSecond(on)` forces the option, `_test.screen2.bridge`).
+  The catch's choice and the ball box stay on the main screen for now.
+- **Textured buttons** (Wooble: modern, texture instead of flat): `Pad.face(G, x, y, w, h, rad, o)` - a
+  shader-drawn rounded face: a lit gradient (light, or dark when selected), a brushed grain, a gloss
+  over the upper half, a bevel (lit top, shaded foot; pressed: turned over, a shadow inside its top),
+  `tint` of its colour, `corner` a slanted wedge in its colour (the quad's buttons); plain fills
+  without shaders. Used by the command pills, the list pills, the quad and the catch's pills.
+- **The emblems** (Wooble: closer to the references): Fight's ball centred in its burst; Run an
+  outlined running figure (no speed lines) (`runFigure`: its limbs stroked in the colour, then again thinner in the
+  button's face colour, one outline round the whole; `EMBLEM.run(G, cx, cy, s, bg)`).
 - **Sound** (2026-10-26): `data/raid_sounds.lua` - Gen 3's own effects by SE name through `Audio.playSe`
   (`Rd.se`), so the game's settings and pack apply; every name checked against the engine's
   se_ids.lua. A move's look starts with its sound (`Sounds.moveSe(spec, type)`: a beam / plain shot by

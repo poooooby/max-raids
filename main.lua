@@ -60,6 +60,7 @@ return function(mod)
   local makeRaid = loadSibling(mod, "src/raid.lua")
   local makePadHide = loadSibling(mod, "src/pad_hide.lua")
   local makeDens = loadSibling(mod, "src/dens.lua")
+  local makeScreen2 = loadSibling(mod, "src/screen2.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
     mod.log:error("Max Raids is missing files; it stays off -- reinstall the mod")
     return
@@ -90,8 +91,15 @@ return function(mod)
   local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil }) or nil
   local PadHide = makePadHide and makePadHide(mod) or nil
 
-  local function padOnSecond()
+  -- the pad on the second screen: chosen, and the display there (else it stays on the main one)
+  local Screen2 = nil
+  local padForced = nil   -- (drivers: _test.padSecond)
+  local function padWanted()
+    if padForced ~= nil then return padForced end
     return mod.options:get("battle_pad") == "second"
+  end
+  local function padOnSecond()
+    return padWanted() and Screen2 ~= nil and Screen2.detected()
   end
 
   -- ------- the layer over the field (the engine's Gen 3 UI stack): it pauses the field, takes the
@@ -105,7 +113,14 @@ return function(mod)
   local Dens = nil
   local Layer = { isMenu = true }
   function Layer.handleInput(input) if Raid then Raid.input(input) end end
-  function Layer.update(dt) if Raid then Raid.update(dt) end end
+  function Layer.update(dt)
+    if Raid then Raid.update(dt) end
+    -- (the second screen's frame: drawn here, outside any draw)
+    if Screen2 then
+      local ok, err = pcall(Screen2.update)
+      if not ok then mod.log:warn("second screen failed: %s", tostring(err)) end
+    end
+  end
   function Layer.draw()
     local G = love and love.graphics
     if G then
@@ -133,6 +148,12 @@ return function(mod)
       if Stack then pcall(Stack.pop, LAYER_ID) end
     end,
   })
+
+  if makeScreen2 then
+    local ok, s2 = pcall(makeScreen2, mod, { Pad = Pad, raid = Raid, on = padWanted,
+      press = function(id, released) return Raid.secondPress(id, released) end })
+    if ok and type(s2) == "table" then Screen2 = s2 else mod.log:warn("the second screen failed to build: %s", tostring(s2)) end
+  end
 
   -- ------- dens on the routes: A on one opens its den screen (src/dens.lua)
   if makeDens then
@@ -216,6 +237,7 @@ return function(mod)
   mod.exports.bosses = function() return Bosses.ORDER end
   mod.exports.dens = Dens
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
-    rewards = Rewards, fx = Raid and Raid.Fx or nil }
+    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2,
+    padSecond = function(on) padForced = on end }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end
