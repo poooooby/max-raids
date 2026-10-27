@@ -1,7 +1,27 @@
+# Exact relative paths excluded from the distributed package (modkit matches whole paths only,
+# never folders): add every new file under tests/ or tools/.
 CLAUDE.md
 README.md
-tools/raid_pack.py
+.gitignore
 tests/dens_test.lua
-tests/drivers/raid_probe.lua
+tests/drivers/after_probe.lua
+tests/drivers/awaken_probe.lua
+tests/drivers/balance_probe.lua
+tests/drivers/catch_probe.lua
+tests/drivers/den_screen_probe.lua
 tests/drivers/dens_probe.lua
+tests/drivers/field_probe.lua
+tests/drivers/fx_probe.lua
+tests/drivers/gear_option_probe.lua
+tests/drivers/hitch_probe.lua
+tests/drivers/perf_parts.lua
+tests/drivers/raid_probe.lua
+tests/drivers/rewards_probe.lua
+tests/drivers/screen2_probe.lua
+tests/drivers/se_bake_probe.lua
+tests/drivers/shield_probe.lua
+tests/drivers/showcase.lua
 tests/raid_sim_test.lua
+tools/raid_pack.py
+.modkitignore
+.claude/skills/lua-developer/SKILL.md
