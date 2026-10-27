@@ -34,10 +34,15 @@ end
 
 return function(mod)
   mod.options:define({
+    -- Kanto Gear's display options decide where the battle pad goes (as PlayNav's K-GEAR): its
+    -- SEPARATE SCREENS puts it on the second screen, FULLSCREEN / COMBINED keep it on the main one;
+    -- without the Gear, a second display when one is there. Off: BATTLE PAD below decides.
+    { key = "kanto_gear", label = "KANTO GEAR", type = "toggle", default = true },
     -- where the battle pad goes: over the den on the main screen, or the device's second screen
     -- (the main screen then keeps the whole den)
     { key = "battle_pad", label = "BATTLE PAD", type = "choice", default = "main",
-      choices = { { "MAIN SCREEN", "main" }, { "SECOND SCREEN", "second" } } },
+      choices = { { "MAIN SCREEN", "main" }, { "SECOND SCREEN", "second" } },
+      visible_if = { key = "kanto_gear", equals = false } },
     -- dens on the routes (off: none spawn; those already chosen stay saved)
     { key = "dens", label = "RAID DENS", type = "toggle", default = true },
   })
@@ -102,10 +107,36 @@ return function(mod)
   end
 
   -- the pad on the second screen: chosen, and the display there (else it stays on the main one)
-  local Screen2 = nil
   local padForced = nil   -- (drivers: _test.padSecond)
+  -- one of Kanto Gear's options, read from the loader as the engine's own options:get does (stored,
+  -- else its default); nil when the Gear is not installed, disabled or failed (as PlayNav reads it)
+  local lastGame = nil   -- (the game, from the hooks)
+  local gearForced = nil -- (drivers: _test.gearOptions(t), a stand-in Gear's options; false = no Gear)
+  local function gearOption(key)
+    if gearForced ~= nil then return gearForced and gearForced[key] or nil end
+    local loader = lastGame and lastGame.mods
+    local rec = loader and loader.mods and loader.mods.kanto_gear
+    if not rec or rec.state == "disabled" or rec.state == "failed" then return nil end
+    local stored = loader.modOptions and loader.modOptions.kanto_gear
+    local v = stored and stored[key]
+    if v == nil then
+      for _, row in ipairs(loader.optionSchemas and loader.optionSchemas.kanto_gear or {}) do
+        if row.key == key then v = row.default end
+      end
+    end
+    return v
+  end
+  -- the battle pad on the second screen: KANTO GEAR on follows the Gear's DISPLAY MODE (SEPARATE
+  -- SCREENS -> second; FULLSCREEN, COMBINED, PHONE -> main; no Gear -> second when a display is
+  -- there), off follows BATTLE PAD
+  local Screen2 = nil
   local function padWanted()
     if padForced ~= nil then return padForced end
+    if mod.options:get("kanto_gear") ~= false then
+      local mode = gearOption("display_mode")
+      if mode ~= nil then return mode == "separate" end
+      return Screen2 ~= nil and Screen2.detected() == true
+    end
     return mod.options:get("battle_pad") == "second"
   end
   local function padOnSecond()
@@ -181,6 +212,7 @@ return function(mod)
 
   -- the raid over the whole window, after the engine's own HUD
   mod.hooks:wrap("render.hud", function(next, game, viewport)
+    lastGame = game or lastGame
     local res = next(game, viewport)
     -- (the game's summary over the raid: it draws itself, with the engine's touch pad)
     local up = Raid.active() and not Raid.summaryUp()
@@ -249,6 +281,7 @@ return function(mod)
   mod.exports.dens = Dens
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick,
-    padSecond = function(on) padForced = on end }
+    padSecond = function(on) padForced = on end,
+    gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end

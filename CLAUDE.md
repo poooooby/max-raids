@@ -13,10 +13,17 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
 
 ## Decisions (Wooble)
 
-- **One screen.** Everything is on the main window. Option BATTLE PAD (`battle_pad`, main | second)
-  sends the command menu to the device's second screen, like Kanto Gear, and leaves the main window
-  the whole den. The second-screen path isn't built yet: port PlayNav's `surface.lua` async readback,
-  `main.lua` 1667-1709 and `second_gate.lua`.
+- **One screen.** Everything is on the main window; the battle pad may go to the device's second
+  screen (src/screen2.lua), leaving the main window the whole den.
+  - Option KANTO GEAR (`kanto_gear`, on by default; 2026-10-27, Wooble: "the switch for second screen,
+    following KG's display options, same as PlayNav"): `padWanted` in main.lua reads the Gear's
+    DISPLAY MODE as PlayNav's `gearOption` does (`lastGame.mods`: the loader's record - nil when the
+    Gear is not installed, disabled or failed - its stored options, else its schema default):
+    `separate` -> the second screen; `fullscreen` / `combined` / `phone` -> the main one; no Gear ->
+    the second screen when one is detected. Off: BATTLE PAD (`battle_pad`, main | second, shown only
+    then: `visible_if kanto_gear == false`). The pad goes there only while a display is detected
+    (`padOnSecond`). Drivers: `_test.gearOptions(t | false | nil)` (a stand-in Gear, no Gear, the
+    real one), `_test.padWanted()`; `tests/drivers/gear_option_probe.lua`.
 - **Dens in the overworld,** generated on routes: 1–2 per outdoor route, seeded per save, saved once
   chosen, refreshing daily. Star tiers open with badges.
 - **Party.** The player picks 4 at the den. They fight as **simulated copies** (full HP, real stats and
