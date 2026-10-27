@@ -44,6 +44,12 @@ local function body(game, log)
     if lucario then Party.giveMon(s0, lucario, 30) end
     Party.giveMon(s0, C:require("species", "SPECIES_RALTS"), 30)
   end
+  -- balls for the catch (PROBE_FULL)
+  local Bag = require("src.core.game3.bag")
+  if s0 and s0.bag then
+    pcall(Bag.add, s0.bag, C:id("items", "ITEM_POKE_BALL"), 5)
+    pcall(Bag.add, s0.bag, C:id("items", "ITEM_GREAT_BALL"), 2)
+  end
   U.wait(30)
   local X = game.mods and game.mods.exports and game.mods.exports.max_raids
   if not check(X ~= nil, "max_raids is loaded") then return end
@@ -193,6 +199,35 @@ local function body(game, log)
     -- PROBE_FULL=1: play the raid to its end (every member's first move with PP), the words hurried
     if os.getenv("PROBE_FULL") == "1" then
       local turns = 0
+      -- the party's own Torchic one level short of evolving (its raid copy stays as it was): the
+      -- raid's Exp levels it, and it evolves after the raid
+      local c0 = R.current()
+      local tor = c0 and c0.members[1] and c0.members[1].orig
+      if tor then
+        local SD = require("src.core.game3.summary_data")
+        tor.level = 15
+        tor.exp = SD.expForLevel(Pokemon.growthRate(Pokemon.speciesOf(tor)), 16) - 10
+        Pokemon.applyStats(tor)
+        log("the party's Torchic set to Lv 15")
+      end
+      -- the party's Lucario (no evolution) one level short of learning a move (it knows four: the
+      -- forget prompt)
+      local zig = c0 and c0.members[3] and c0.members[3].orig
+      if zig then
+        local SD = require("src.core.game3.summary_data")
+        local sp = Pokemon.speciesOf(zig)
+        for lv = 31, 99 do
+          if #Pokemon.movesLearnedAt(sp, lv) > 0 then
+            zig.level = lv - 1
+            zig.exp = SD.expForLevel(Pokemon.growthRate(sp), lv) - 10
+            Pokemon.applyStats(zig)
+            log("the party's Lucario set to Lv", lv - 1, "(learns at", lv .. ")")
+            break
+          end
+        end
+      end
+      local yesnos = 0
+      local afterShots = 0
       while X.state().active and turns < 40 do
         if X.state().phase == "command" then
           local c = R.current()
@@ -206,10 +241,64 @@ local function body(game, log)
           end
         elseif X.state().phase == "battle" then
           R.playEvents(true)
+        elseif X.state().phase == "catch" then
+          -- the catch: the choice, then a throw of the first ball
+          local before = #(Runtime.getSession().party or {})
+          log("catch: rows", #R.current().cmd.moveList, "-", R.current().say)
+          shot("r20_catch")
+          check(R.pickBall(1), "a ball thrown")
+          after(1.0)
+          shot("r21a_throw_in")
+          after(1.4)
+          shot("r21_throw")
+          after(1.3)
+          shot("r21b_wobble")
+          after(2.0)
+          shot("r21c_caught")
+          waitFor(function() return X.state().phase ~= "throw" end, 30000)
+          local caught = X.state().caught
+          log("caught:", tostring(caught), "party", before, "->", #(Runtime.getSession().party or {}))
+          if caught then check(#(Runtime.getSession().party or {}) == before + 1, "the caught Pokemon joins the party") end
+          local out = X.state().rewards
+          check(X.state().phase == "rewards" and out ~= nil, "the rewards card")
+          for _, it in ipairs(out and out.items or {}) do log("  item", it.name, it.n) end
+          for _, tm in ipairs(out and out.team or {}) do
+            log(("  %s +%d Exp, Lv %s -> %s, +%d EVs, learned %s"):format(tm.name, tm.exp or 0, tostring(tm.from), tostring(tm.to),
+              tm.evs or 0, table.concat(tm.learned or {}, ",")))
+          end
+          after(0.6)
+          shot("r22_rewards")
+          U.tap(game, "a")
+          U.wait(10)
+        elseif X.state().phase == "after" then
+          -- after the raid: the evolution scene (the raid aside), the band's words, Yes / No (No)
+          local st2 = X.state()
+          if st2.aside then
+            if afterShots < 1 then U.wait(60); shot("r23_evolution"); afterShots = 1 end
+            U.tap(game, "a")
+            U.wait(8)
+          elseif st2.ask then
+            local cur = R.current()
+            if cur and cur.say and not cur.loggedSay then
+              cur.loggedSay = true
+              log("  after:", st2.ask, cur.say)
+              if afterShots < 2 then after(0.5); shot("r24_after_words"); afterShots = 2 end
+            end
+            if st2.ask == "yesno" then
+              if yesnos == 0 then shot("r25_yesno") end
+              -- No to deleting a move, then Yes to stop learning it
+              yesnos = yesnos + 1
+              R.answer(yesnos % 2 == 0)
+            elseif R.answer() and cur then
+              cur.loggedSay = nil
+            end
+          end
         end
         U.wait(1)
       end
       log("full raid: turns", turns, "active after", tostring(X.state().active))
+      local party = Runtime.getSession().party or {}
+      for i, pm in ipairs(party) do log("  party", i, Pokemon.displayName(pm), "Lv", pm.level) end
       check(not X.state().active, "the raid ends (won, or blown out)")
       return log(("%d failures"):format(fails))
     end

@@ -53,6 +53,7 @@ return function(mod)
   local makeBattlerHud = loadSibling(mod, "src/battler_hud.lua")
   local makeBattle = loadSibling(mod, "src/battle.lua")
   local Sim = loadSibling(mod, "src/raid_sim.lua")
+  local makeRewards = loadSibling(mod, "src/rewards.lua")
   local makeRaid = loadSibling(mod, "src/raid.lua")
   local makePadHide = loadSibling(mod, "src/pad_hide.lua")
   local makeDens = loadSibling(mod, "src/dens.lua")
@@ -68,6 +69,11 @@ return function(mod)
     if ok and type(sc) == "table" then Scene = sc else mod.log:warn("the den failed to build: %s", tostring(sc)) end
   end
   local Pad = makePad(mod, {})
+  local Rewards = nil
+  if makeRewards then
+    local ok, rw = pcall(makeRewards, mod, { N = N, Bosses = Bosses, Sprites = Sprites })
+    if ok and type(rw) == "table" then Rewards = rw else mod.log:warn("the raid's rewards failed to build: %s", tostring(rw)) end
+  end
   local Battle = nil
   if makeBattle then
     -- (the National Dex's exports: what its newer moves do besides their damage)
@@ -108,6 +114,7 @@ return function(mod)
 
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax,
+    Rewards = Rewards,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome)
       if outcome == "win" and den and Dens and Dens.finish then pcall(Dens.finish, den) end
@@ -205,6 +212,7 @@ return function(mod)
   mod.exports.state = function() return Raid.state() end
   mod.exports.bosses = function() return Bosses.ORDER end
   mod.exports.dens = Dens
-  mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim }
+  mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
+    rewards = Rewards }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end

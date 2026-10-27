@@ -37,8 +37,26 @@ N.RAID = {
     { id = "full_heal", n = 1 },
     { id = "revive", n = 1 },       -- a sitting-out member back now (its faint still counts)
   },
-  -- rewards on a win
-  REWARD = { NO_FAINT_MULT = 1.5, FIRST_WIN_MULT = 2, ITEM_ROLLS = { 1, 3 } },
+  -- rewards on a win: the items rolled from POOL (rows a tier may roll: { item, from stars, most of
+  -- it }, ITEM_ROLLS picks, +1 from 4 stars), the boss's Exp to each of the four (the Gen 3 formula,
+  -- one participant), the tier's EVs in the boss's best base stat; x NO_FAINT_MULT with no knock-out,
+  -- x FIRST_WIN_MULT the first time that boss is beaten
+  REWARD = { NO_FAINT_MULT = 1.5, FIRST_WIN_MULT = 2, ITEM_ROLLS = { 1, 3 },
+    POOL = {
+      { "ITEM_RARE_CANDY", 1, 3 }, { "ITEM_HP_UP", 1, 1 }, { "ITEM_PROTEIN", 1, 1 }, { "ITEM_IRON", 1, 1 },
+      { "ITEM_CARBOS", 1, 1 }, { "ITEM_CALCIUM", 1, 1 }, { "ITEM_ZINC", 1, 1 }, { "ITEM_NUGGET", 1, 2 },
+      { "ITEM_PP_UP", 2, 1 }, { "ITEM_STAR_PIECE", 2, 1 }, { "ITEM_BIG_PEARL", 3, 1 }, { "ITEM_PP_MAX", 4, 1 },
+    } },
+  -- the catch after a win: a chance by the tier, times the ball's (the engine's catch multipliers:
+  -- Great 1.5, Ultra 2; Master never misses); the balls offered in BALLS' order, those the bag holds
+  CATCH = {
+    CHANCE = { [1] = 90, [2] = 75, [3] = 60, [4] = 45, [5] = 30 },
+    BALLS = {
+      { "ITEM_POKE_BALL", 1 }, { "ITEM_GREAT_BALL", 1.5 }, { "ITEM_ULTRA_BALL", 2 }, { "ITEM_MASTER_BALL", 0 },
+      { "ITEM_PREMIER_BALL", 1 }, { "ITEM_LUXURY_BALL", 1 }, { "ITEM_NET_BALL", 1 }, { "ITEM_DIVE_BALL", 1 },
+      { "ITEM_NEST_BALL", 1 }, { "ITEM_REPEAT_BALL", 1 }, { "ITEM_TIMER_BALL", 1 },
+    },
+  },
   -- a boss's extras, run in order at the end of each turn
   SCRIPTS = {
     basic = { { kind = "shield" }, { kind = "gmax", every = 3, from = 2 } },
@@ -84,7 +102,8 @@ N.EVIDENCE = {
   ["RAID.SEGMENTS"] = { class = "ours", source = "the games: 2 to 8 segments, by the boss's defensive stats (Bulbapedia, Serebii); this formula is ours", confidence = "medium" },
   ["RAID.CHEER"] = { class = "verified", source = "Serebii: cheer heals, raises a stat, sets a screen or breaks the barrier, about 16% each, nothing 20%; the screens are a Defense / Sp. Def raise here", confidence = "medium" },
   ["RAID.POUCH"] = { class = "ours", source = "raids in the games have no bag; ITEM is ours", confidence = "high" },
-  ["RAID.REWARD"] = { class = "ours", source = "Super Training rewards, ours", confidence = "high" },
+  ["RAID.REWARD"] = { class = "ours", source = "the games give Exp. Candies, TRs, berries and the like from raids; this pool (Gen 3's items) and the multipliers are ours; the Exp is Gen 3's formula (engine Experience.gainFor)", confidence = "medium" },
+  ["RAID.CATCH"] = { class = "inferred", source = "the games: one throw after a win, the ball the player picks, the chance by the boss (Serebii Max Raid Battles); the tier chances are ours, the ball multipliers the engine's (battle/catching.lua BALL_BONUS)", confidence = "medium" },
   ["RAID.SCRIPTS"] = { class = "inferred", source = "the games: the boss may act more than once a turn (a Max Move, a wave cancelling the players' stat changes); how often is not published (Pokemon.com, GamerGuides, Serebii); these schedules are ours", confidence = "medium" },
   ["RAID.SIZE"] = { class = "ours", source = "the boss drawn 6.5 to 8.5 times a member's height (Sword / Shield's giants tower over the party)", confidence = "high" },
   ["RAID.BADGE_STARS"] = { class = "ours", source = "Wooble 2026-10-26: star tiers open with gym badges; Sword / Shield gates them by badges too, with other cut-offs", confidence = "medium" },

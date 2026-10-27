@@ -310,6 +310,33 @@ do
   check(boss.stages.attack == 1, "only once")
 end
 
+-- the catch's chance and the reward rolls (src/rewards.lua's pure parts; no engine here)
+do
+  local N = assert(loadstring(read("data/raid_rules.lua"), "@data/raid_rules.lua"))()
+  local store = {}
+  local mod = { log = { warn = function() end }, save = { get = function(_, k) return store[k] end, set = function(_, k, v) store[k] = v end } }
+  local Rw = assert(loadstring(read("src/rewards.lua"), "@src/rewards.lua"))()(mod, { N = N, Bosses = {}, Sprites = {} })
+  check(Rw.chance(1, 1) == 90 and Rw.chance(5, 1) == 30, "the tier's chance with a Poke Ball")
+  check(Rw.chance(3, 1.5) == 90 and Rw.chance(1, 2) == 100, "a Great / Ultra Ball's multiplier, held to 100")
+  check(Rw.chance(5, 0) == 100, "a Master Ball never misses")
+  local rng = rngOf(31)
+  local seenLow, seenHigh = false, false
+  for _ = 1, 200 do
+    for _, it in ipairs(Rw.rollItems(1, 1, rng)) do
+      if it.name == "ITEM_PP_MAX" or it.name == "ITEM_BIG_PEARL" then seenHigh = true end
+      seenLow = true
+    end
+  end
+  check(seenLow and not seenHigh, "a 1-star raid rolls only its tier's items")
+  local most = 0
+  for _ = 1, 200 do
+    local n = 0
+    for _, it in ipairs(Rw.rollItems(5, 3, rng)) do n = n + it.n end
+    most = math.max(most, n)
+  end
+  check(most > 4, ("a 5-star raid with both bonuses rolls more (%d)"):format(most))
+end
+
 -- the same seed, the same turn
 do
   local function run()

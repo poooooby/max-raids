@@ -97,6 +97,7 @@ return function(mod, deps)
   --   target  the boss attacking one member: almost directly behind it, low, looking up at the boss
   --           (Sc.targetShot(i))
   --   spread  the boss attacking all four: every member and the boss at once, nearer than wide
+  --   catch   the throw: past the party, low, on the boss's pad (the ball has the stage to itself)
   Sc.SHOTS = {
     field = { eye = { 0, 1.15, 6.6 }, look = { 0, 4.2, -9 }, fov = 54 },
     close = { eye = { 0, 1.7, 3.2 }, look = { 0, 0.45, -1.4 }, fov = 46 },
@@ -104,6 +105,7 @@ return function(mod, deps)
     boss = { eye = { 0, 1.5, 2.0 }, look = { 0, 6.4, -10 }, fov = 52 },
     wide = { eye = { 0, 2.4, 10.5 }, look = { 0, 3.8, -9 }, fov = 58 },
     spread = { eye = { 0, 2.3, 8.2 }, look = { 0, 2.9, -8 }, fov = 62 },
+    catch = { eye = { 0, 1.5, -2.4 }, look = { 0, 1.9, -9.2 }, fov = 58 },
   }
   -- almost directly behind the member, low, looking up past it at the boss: the member large in the
   -- foreground, the boss towering over it, the others mostly out past the sides
@@ -739,6 +741,27 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if not x then return end
     local k = hpx / bh
     local ox, oy = (box[1] + box[3]) / 2, box[4]
+    -- where it stands on screen, for the raid's throw (its middle and height)
+    Sc.lastBoss = Sc.lastBoss or {}
+    Sc.lastBoss.x, Sc.lastBoss.y, Sc.lastBoss.h = x, y - bh * k * 0.5, bh * k
+    -- being caught: drawn into the ball (pic.shrink 1 -> 0, about its middle, a red glow)
+    local shrink = pic.shrink or 1
+    if shrink < 1 then
+      if shrink <= 0.01 then return end
+      local cy = y - bh * k * 0.5
+      local ks = k * shrink
+      local s = sil()
+      if s then
+        G2.setShader(s)
+        G2.setColor(1, 0.25, 0.3, 0.85 * shrink)
+        for _, dd in ipairs(OUT) do G2.draw(pic.image, pic.quad, x + dd[1] * 2, cy + dd[2] * 2, 0, ks, ks, ox, (box[2] + box[4]) / 2) end
+        G2.setShader()
+      end
+      G2.setColor(1, 0.75, 0.75, shrink)
+      drawPixel(pic.image, pic.quad, x, cy, 0, ks, ks, ox, (box[2] + box[4]) / 2)
+      G2.setColor(1, 1, 1, 1)
+      return
+    end
     -- its shadow and the pad's glow under it
     G2.setColor(0, 0, 0, 0.45)
     G2.ellipse("fill", x, y, bw * k * 0.42, bw * k * 0.09, 32)

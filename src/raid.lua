@@ -14,6 +14,7 @@
 return function(mod, deps)
   local N, Bosses, Sprites, Scene, Pad = deps.N, deps.Bosses, deps.Sprites, deps.Scene, deps.Pad
   local BattlerHud = deps.BattlerHud
+  local Rewards = deps.Rewards
   local Battle, Sim = deps.Battle, deps.Sim
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
@@ -309,6 +310,7 @@ return function(mod, deps)
     r.boss = Battle.boss(r.key, rng)
     local list = {}
     for i, m in ipairs(members) do
+      m.orig = m.mon
       m.b = Battle.member(m.mon)
       m.mon = m.b.mon
       m.b.dispHp, m.b.dispTarget = tonumber(m.mon.hp) or 0, tonumber(m.mon.hp) or 0
@@ -458,6 +460,7 @@ return function(mod, deps)
       end
     end
     if r.phase == "battle" then Rd.playEvents() end
+    if r and r.phase == "throw" and Rd.stepThrow then Rd.stepThrow() end
     if not r then return end
     -- the HP bars drain (or fill) toward what the events have shown so far
     local function ease(b)
@@ -546,7 +549,7 @@ return function(mod, deps)
     end
     return true
   end
-  function Rd.summaryUp() return r ~= nil and r.summary == true end
+  function Rd.summaryUp() return r ~= nil and (r.summary == true or r.aside == true) end
 
   -- the pouch's items in the Bag's order, and how many of each are left once this turn's picks
   -- are taken out
@@ -792,7 +795,231 @@ return function(mod, deps)
   local function finish()
     local outcome = r.sim and r.sim.over
     if deps.onEnd then pcall(deps.onEnd, r.den, outcome, r) end
+    if outcome == "win" and Rewards then return Rd.startCatch() end
     Rd.close()
+  end
+
+  -- ------- the catch (Sword / Shield's: one throw after the win, a ball the player picks) and the
+  -- rewards card (src/rewards.lua does the giving)
+
+  -- the throw: FLY the arc, SUCK the boss drawn in, DROP to its feet, SPINS slow wobbles of SPIN s
+  -- each (the foot fixed, the top circling: a cone, LEAN radians off upright), SHRINK the caught ball
+  -- shrinking down; BALL_M its diameter in the scene's units at the boss (a member stands 1.1): a
+  -- giant ball, on screen about the size of the party near the camera
+  Rd.THROW = { FLY = 0.8, SUCK = 0.6, DROP = 0.4, SPIN = 1.3, SPINS = 3, LEAN = 0.32, SHRINK = 0.5,
+    BALL_M = 2.2 }
+  local BALL_RGB = {
+    ITEM_POKE_BALL = { 0.9, 0.15, 0.15 }, ITEM_GREAT_BALL = { 0.2, 0.45, 0.95 }, ITEM_ULTRA_BALL = { 0.95, 0.8, 0.15 },
+    ITEM_MASTER_BALL = { 0.55, 0.25, 0.75 }, ITEM_PREMIER_BALL = { 0.95, 0.95, 0.95 }, ITEM_LUXURY_BALL = { 0.15, 0.15, 0.18 },
+    ITEM_NET_BALL = { 0.2, 0.75, 0.75 }, ITEM_DIVE_BALL = { 0.3, 0.6, 0.95 }, ITEM_NEST_BALL = { 0.55, 0.8, 0.2 },
+    ITEM_REPEAT_BALL = { 0.95, 0.5, 0.15 }, ITEM_TIMER_BALL = { 0.95, 0.95, 0.95 },
+  }
+
+  -- the choice: the balls the bag holds (three at most), and not catching it
+  function Rd.startCatch()
+    r.phase = "catch"
+    r.events, r.rows, r.bossShow = nil, {}, true
+    if r.boss then r.boss.shieldShown = nil end
+    local balls = Rewards.balls()
+    local b = Bosses[r.key]
+    r.cmd = { menu = "balls", cursor = 1, moveList = {}, chosen = {} }
+    for i = 1, min(3, #balls) do
+      local bl = balls[i]
+      r.cmd.moveList[i] = { name = bl.name, chip = "Ball", right = "x" .. bl.n, rgb = BALL_RGB[bl.key],
+        live = true, ball = bl, eff = nil }
+      r.cmd.moveList[i].chip = ("%d%%"):format(Rewards.chance(b and b.stars or 1, bl.mult))
+    end
+    r.cmd.moveList[#r.cmd.moveList + 1] = { name = "Don't catch", chip = "Leave", right = "",
+      rgb = { 0.5, 0.5, 0.55 }, live = true, leave = true }
+    if Scene then Scene.shot("field", 0.8) end
+    if #balls == 0 then
+      Rd.say("You don't have any Pok\195\169 Balls...")
+    else
+      Rd.say(("Will you try to catch %s?"):format(b and b.name or "it"))
+    end
+    return true
+  end
+
+  -- a row of the choice picked: the throw, or straight to the rewards
+  function Rd.pickBall(slot)
+    if not (r and r.phase == "catch") then return false end
+    local row = r.cmd.moveList[slot or 0]
+    if not row then return false end
+    if row.leave or not row.ball then return Rd.startRewards() end
+    local level = r.boss and r.boss.mon.level or 20
+    local caught, info = Rewards.throw(r.key, level, row.ball, r.rng)
+    r.throw = { t0 = r.t, caught = caught, info = type(info) == "table" and info or nil, ball = row.ball,
+      rgb = BALL_RGB[row.ball.key] or BALL_RGB.ITEM_POKE_BALL, said = {} }
+    r.phase = "throw"
+    r.say = nil
+    -- (past the party onto the boss's pad: the ball's arc, the drop to its feet, the wobbles)
+    if Scene then Scene.shot("catch", 0.6) end
+    return true
+  end
+
+  -- the throw's timeline (update step): the arc, the boss drawn in, the drop, the wobbles, the outcome
+  local function throwTimes()
+    local T = Rd.THROW
+    local inAt = T.FLY
+    local dropAt = inAt + T.SUCK
+    local spinAt = dropAt + T.DROP
+    local endAt = spinAt + T.SPIN * T.SPINS
+    return inAt, dropAt, spinAt, endAt
+  end
+  Rd.throwTimes = throwTimes
+  local function stepThrow()
+    local T, th = Rd.THROW, r.throw
+    local u = r.t - th.t0
+    local inAt, dropAt, _, endAt = throwTimes()
+    -- the boss drawn into the ball, then (broken free) out again and gone
+    if u < inAt then r.shrink = 1
+    elseif u < dropAt then r.shrink = 1 - (u - inAt) / T.SUCK
+    else r.shrink = 0 end
+    local b = Bosses[r.key]
+    local name = b and b.name or "It"
+    if u >= endAt and not th.said.out then
+      th.said.out = true
+      if th.caught then
+        Rd.say(("Gotcha! %s was caught!"):format(name))
+      else
+        Rd.say(("Oh no! %s broke free!"):format(name))
+        th.burstAt = r.t
+      end
+    end
+    if th.burstAt then
+      local v = r.t - th.burstAt
+      r.shrink = v < 0.4 and (v / 0.4) or math.max(0, 1 - (v - 1.6) / 0.6)
+    end
+    local holdUntil = endAt + T.SHRINK + (#(r.say or "") / Rd.MSG.CPS) + 1.0 + (th.caught and 0 or 2.2)
+    if th.caught and th.info and th.info.toPC and u >= holdUntil and not th.said.pc then
+      th.said.pc = true
+      th.pcAt = u
+      Rd.say(("%s was sent to the PC."):format(name))
+    end
+    if not th.caught and u >= endAt + 2.0 and not th.said.gone then
+      th.said.gone = true
+      Rd.say(("%s disappeared..."):format(name))
+    end
+    local doneAt = holdUntil + (th.pcAt and 1.6 or 0)
+    if u >= doneAt then Rd.startRewards() end
+  end
+  Rd.stepThrow = stepThrow
+
+  -- the rewards, given (src/rewards.lua), then shown on a card until A or a tap
+  function Rd.startRewards()
+    r.phase = "rewards"
+    r.say = nil
+    r.shrink = r.throw and r.throw.caught and 0 or r.shrink
+    local ok, out = pcall(Rewards.give, r, r.rng)
+    if not ok then mod.log:warn("raid rewards failed: %s", tostring(out)); out = { items = {}, team = {} } end
+    r.rewards = out
+    r.rewardsT = r.t
+    return true
+  end
+
+  function Rd.endRewards()
+    if not (r and r.phase == "rewards") or r.t - (r.rewardsT or 0) < 0.5 then return false end
+    return Rd.startAfter()
+  end
+
+  -- ------- after the raid: in party order, each of the four that levelled - its evolution (the
+  -- engine's scene, the raid standing aside), then its new moves (the engine's LearnMove: its words
+  -- in the band, Yes / No on the pad, which to forget in the game's summary), one by one
+
+  local function partyIndex(mon)
+    local s = Runtime and Runtime.getSession and Runtime.getSession()
+    for i, p in ipairs(s and s.party or {}) do if p == mon then return i end end
+    return 99
+  end
+
+  -- the words in the band, then (A / a tap once typed) cb; or Yes / No on the pad
+  function Rd.ask(t)
+    r.ask = t
+    Rd.say(t.text or "")
+    if t.kind == "yesno" then
+      r.cmd = { menu = "yesno", cursor = 1, chosen = {}, moveList = {
+        { name = "Yes", chip = "", right = "", rgb = { 0.2, 0.75, 0.35 }, live = true, yes = true },
+        { name = "No", chip = "", right = "", rgb = { 0.85, 0.3, 0.3 }, live = true, yes = false },
+      } }
+    end
+  end
+  function Rd.answer(yes)
+    local t = r and r.ask
+    if not t then return false end
+    if t.kind == "msg" and r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS < #r.say then return false end
+    r.ask, r.say = nil, nil
+    if t.cb then t.cb(yes) end
+    return true
+  end
+
+  function Rd.startAfter()
+    r.phase = "after"
+    r.say = nil
+    local q = {}
+    for _, m in ipairs(r.members) do
+      if m.orig and (m.levelTo or 0) > (m.levelFrom or 0) then q[#q + 1] = m end
+    end
+    table.sort(q, function(a, b) return partyIndex(a.orig) < partyIndex(b.orig) end)
+    r.afterQ = q
+    Rd.afterStep(1)
+    return true
+  end
+
+  function Rd.afterStep(i)
+    if not r then return end
+    local m = r.afterQ and r.afterQ[i]
+    if not m then return Rd.close() end
+    local s = Runtime and Runtime.getSession and Runtime.getSession()
+    local Evolution = engine("src.core.game3.evolution")
+    local target = Evolution and Evolution.levelTarget and select(2, pcall(Evolution.levelTarget, m.orig, s)) or nil
+    local Scene3 = engine("src.ui.game3.evolution_scene")
+    if tonumber(target) and Scene3 and Scene3.start then
+      r.aside = true
+      local raid = r
+      local ok = pcall(Scene3.start, m.orig, target, { session = s, bag = s and s.bag, canStop = true,
+        savedSong = Audio and Audio._mapSong,
+        onDone = function(result)
+          raid.aside, raid.skipInput = false, true
+          -- (evolved, the scene taught the new form its moves at this level)
+          if r == raid then Rd.afterMoves(i, result == "evolved") end
+        end })
+      if ok then return end
+      r.aside = false
+    end
+    Rd.afterMoves(i, false)
+  end
+
+  function Rd.afterMoves(i, evolved)
+    local m = r.afterQ[i]
+    local levels = {}
+    for lv = (m.levelFrom or 0) + 1, (m.levelTo or 0) - (evolved and 1 or 0) do levels[#levels + 1] = lv end
+    local LearnMove = engine("src.core.game3.battle.learn_move")
+    if #levels == 0 or not (LearnMove and LearnMove.beginQueue) then return Rd.afterStep(i + 1) end
+    local name = m.b and m.b.name or "?"
+    local raid = r
+    local function nextOne() if r == raid then Rd.afterStep(i + 1) end end
+    local ok = pcall(LearnMove.beginQueue, m.orig, levels, {
+      displayName = name,
+      pushMsg = function(text, cb) Rd.ask({ kind = "msg", text = text, cb = cb }) end,
+      askYesNo = function(a, b)
+        local cb = (type(a) == "function") and a or b
+        local prompt = (type(a) == "string") and a or (r and r.say) or ""
+        Rd.ask({ kind = "yesno", text = prompt, cb = function(yes) if cb then cb(yes == true) end end })
+      end,
+      askForget = function(a, b, c)
+        local cb = (type(b) == "function") and b or c
+        local SummaryMenu = engine("src.ui.game3.summary_menu")
+        if not (SummaryMenu and SummaryMenu.openMenu) then if cb then cb(nil) end return end
+        raid.aside = true
+        SummaryMenu.openMenu({ m.orig }, 1, { mode = "select_move", moveToLearn = LearnMove._moveId,
+          onSelectMove = function(slot)
+            raid.aside, raid.skipInput = false, true
+            if cb then cb(slot) end
+          end })
+      end,
+      onDone = nextOne,
+    })
+    if not ok then nextOne() end
   end
 
   function Rd.playEvents(skip)
@@ -834,7 +1061,7 @@ return function(mod, deps)
   -- ------- input
 
   function Rd.input(input)
-    if not r or r.summary then return end
+    if not r or r.summary or r.aside then return end
     if r.skipInput then r.skipInput = nil; return end
     if r.phase == "den" then
       -- (the press that opened the den is still down on its first frames: not a toggle)
@@ -854,6 +1081,22 @@ return function(mod, deps)
       elseif input:wasPressed("down") then r.cmd.cursor = r.cmd.cursor % n + 1
       elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
       elseif input:wasPressed("b") then Rd.back() end
+    elseif r.phase == "catch" then
+      local n = #r.cmd.moveList
+      if input:wasPressed("up") then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
+      elseif input:wasPressed("down") then r.cmd.cursor = r.cmd.cursor % n + 1
+      elseif input:wasPressed("a") then Rd.pickBall(r.cmd.cursor)
+      elseif input:wasPressed("b") then Rd.pickBall(n) end
+    elseif r.phase == "rewards" then
+      if input:wasPressed("a") or input:wasPressed("b") then Rd.endRewards() end
+    elseif r.phase == "after" and r.ask then
+      if r.ask.kind == "yesno" then
+        if input:wasPressed("up") or input:wasPressed("down") then r.cmd.cursor = 3 - r.cmd.cursor
+        elseif input:wasPressed("a") then Rd.answer(r.cmd.cursor == 1)
+        elseif input:wasPressed("b") then Rd.answer(false) end
+      elseif input:wasPressed("a") or input:wasPressed("b") then
+        Rd.answer()
+      end
     elseif r.phase == "battle" and input:wasPressed("a") then
       -- A hurries the words: once typed, on to the next
       if r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS >= #r.say then Rd.playEvents(true) end
@@ -878,6 +1121,35 @@ return function(mod, deps)
         end
       end
       return true
+    end
+    if r and r.phase == "rewards" then
+      if ev.phase == "released" then Rd.endRewards() end
+      return true
+    end
+    if r and r.phase == "after" then
+      if r.summary or r.aside then return false end
+      if r.ask and r.ask.kind == "yesno" and Pad then
+        local hit = Pad.hit(ev.x, ev.y, "yesno")
+        local slot = hit and tonumber(hit:match("^move(%d)$") or "")
+        if slot then r.cmd.cursor = slot end
+        if ev.phase == "released" then
+          if slot then Rd.answer(slot == 1) elseif hit == "back" then Rd.answer(false) end
+        end
+      elseif ev.phase == "released" then
+        Rd.answer()
+      end
+      return true
+    end
+    if r and r.phase == "catch" and Pad and not deps.padOnSecond() then
+      local hit = Pad.hit(ev.x, ev.y, "balls")
+      if hit and hit ~= "panel" then
+        local slot = tonumber(hit:match("^move(%d)$") or "")
+        if slot then r.cmd.cursor = slot end
+        if ev.phase == "released" then
+          if hit == "back" then Rd.pickBall(#r.cmd.moveList) elseif slot then Rd.pickBall(slot) end
+        end
+      end
+      return hit ~= nil
     end
     if not (r and Pad) or deps.padOnSecond() or r.phase ~= "command" or r.say or r.summary then return false end
     local hit = Pad.hit(ev.x, ev.y, r.cmd.menu)
@@ -950,6 +1222,8 @@ return function(mod, deps)
     local b = Bosses[r.key]
     if not b then return end
     local a = (r.hud or 0) * (r.bossA or 1)
+    -- (no boss block once it is in the ball or gone, nor over the rewards and what follows)
+    if r.phase == "rewards" or r.phase == "after" or (r.throw and (r.shrink or 1) < 0.5) then a = 0 end
     if a > 0.01 then
       local B = Rd.BOSS_HUD
       local f = font(h * B.NAME)
@@ -1156,11 +1430,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   end
 
   function Rd.draw(G, w, h)
-    if not r or r.summary then return end
+    if not r or r.summary or r.aside then return end
     if r.phase == "den" then return drawDen(G, w, h) end
     local img, q = Rd.frameAt(r.key, r.t)
     if img and loaded then
       bossPic.image, bossPic.quad, bossPic.box, bossPic.size = img, q, loaded.box, Rd.sizeOf(r.key)
+      -- (drawn into the ball once thrown at: caught, or broken free and gone)
+      bossPic.shrink = r.throw and (r.shrink or 1) or 1
     end
     for i = 1, 4 do
       local m = r.members[i]
@@ -1178,7 +1454,192 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       if Pad and not deps.padOnSecond() then Pad.draw(G, w, h, r) end
     elseif r.phase == "battle" and BattlerHud and r.rows and #r.rows > 0 then
       BattlerHud.drawRows(G, w, h, r.rows, r.t)
+    elseif r.phase == "catch" then
+      if Pad and not deps.padOnSecond() then Pad.draw(G, w, h, r) end
+    elseif r.phase == "throw" then
+      Rd.drawThrow(G, w, h)
+    elseif r.phase == "rewards" then
+      Rd.drawRewards(G, w, h)
+    elseif r.phase == "after" then
+      if r.ask and r.ask.kind == "yesno" and Pad and not deps.padOnSecond() then Pad.draw(G, w, h, r) end
     end
+  end
+
+  -- a ball standing on its foot (x, foot): its top in the ball's colour, the white bottom, the black
+  -- band and button. lean tips it about its foot; tilt (-1..1) bows the band as its top comes toward
+  -- (+) or goes away from (-) the camera - together a wobble round a cone
+  local function drawBall(G, x, foot, rad, lean, tilt, rgb)
+    G.push()
+    G.translate(x, foot)
+    G.rotate(lean or 0)
+    G.translate(0, -rad)
+    G.setColor(1, 1, 1, 1)
+    G.circle("fill", 0, 0, rad, 40)
+    G.setColor(rgb[1], rgb[2], rgb[3], 1)
+    -- the coloured top, down to the band (bowed by the tilt)
+    local bow = rad * 0.32 * (tilt or 0)
+    local pts = {}
+    for k = 0, 24 do
+      local a = math.pi + k * math.pi / 24
+      pts[#pts + 1], pts[#pts + 2] = math.cos(a) * rad, math.sin(a) * rad
+    end
+    for k = 24, 0, -1 do
+      local a = k * math.pi / 24
+      pts[#pts + 1], pts[#pts + 2] = -math.cos(a) * rad, math.sin(a) * bow
+    end
+    -- (upright, the band straight: a plain half; tipped, the bowed shape)
+    if math.abs(bow) < rad * 0.03 then
+      G.arc("fill", "pie", 0, 0, rad, math.pi, 2 * math.pi, 32)
+    else
+      local ok, tris = pcall(love.math.triangulate, pts)
+      if ok then for _, tr in ipairs(tris) do G.polygon("fill", tr) end
+      else G.arc("fill", "pie", 0, 0, rad, math.pi, 2 * math.pi, 32) end
+    end
+    G.setColor(0.08, 0.08, 0.1, 1)
+    G.setLineWidth(max(1, rad * 0.12))
+    local band = {}
+    for k = 0, 24 do
+      local a = k * math.pi / 24
+      band[#band + 1], band[#band + 2] = -math.cos(a) * rad, math.sin(a) * bow
+    end
+    G.line(band)
+    G.circle("line", 0, 0, rad, 40)
+    local by = bow
+    G.setColor(1, 1, 1, 1)
+    G.circle("fill", 0, by, rad * 0.26, 20)
+    G.setColor(0.08, 0.08, 0.1, 1)
+    G.circle("line", 0, by, rad * 0.26, 20)
+    G.circle("line", 0, by, rad * 0.14, 16)
+    G.setLineWidth(1)
+    G.pop()
+  end
+
+  -- the throw: a giant ball (half a person, at the boss's distance) arcs from the foot of the screen,
+  -- takes the boss in (a red flash), drops to its feet and wobbles slowly round a cone, three times;
+  -- caught, it clicks and shrinks down with a burst of stars
+  function Rd.drawThrow(G, w, h)
+    local th = r.throw
+    if not th then return end
+    local T = Rd.THROW
+    local u = r.t - th.t0
+    local inAt, dropAt, spinAt, endAt = throwTimes()
+    local LB = Scene and Scene.lastBoss
+    local tx, ty = LB and LB.x or w / 2, LB and LB.y or h * 0.45
+    local feet = LB and (LB.y + LB.h * 0.5) or h * 0.7
+    -- its size: BALL_M scene units at the boss's distance (the boss's drawn height is its size x a member's)
+    local ppm = LB and LB.h and LB.h / ((Scene.MEMBER_H or 1.1) * Rd.sizeOf(r.key)) or h * 0.06
+    local rad = ppm * T.BALL_M / 2
+    local x, foot, lean, tilt, k = tx, ty + rad, 0, 0, 1
+    if u < inAt then
+      -- from near the camera: larger, settling to its size
+      local f = u / inAt
+      k = 1 + 1.6 * (1 - f)
+      x = w * 0.5 + (tx - w * 0.5) * f
+      foot = h * 1.1 + (ty + rad - h * 1.1) * f - h * 0.3 * math.sin(math.pi * f)
+      lean = f * 9
+    elseif u < dropAt then
+      local f = (u - inAt) / T.SUCK
+      G.setColor(1, 0.25, 0.3, 0.55 * (1 - f))
+      G.circle("fill", tx, ty, rad * (1.4 + 2.5 * f), 40)
+    elseif u < spinAt then
+      local f = (u - dropAt) / T.DROP
+      foot = ty + rad + (feet - ty - rad) * f * f
+    else
+      foot = feet
+      if u < endAt then
+        -- the wobble: the top circles round, slowly, SPINS times
+        local phi = (u - spinAt) / T.SPIN * 2 * math.pi
+        local ease = math.sin(math.min(1, (u - spinAt) / 0.3) * math.pi / 2)
+        lean = T.LEAN * ease * math.sin(phi)
+        tilt = ease * math.cos(phi)
+      end
+    end
+    -- broken free: the ball bursts open and is gone
+    if th.burstAt then
+      local v = r.t - th.burstAt
+      if v < 0.5 then
+        G.setColor(1, 1, 1, 0.8 * (1 - v / 0.5))
+        G.circle("fill", x, foot - rad, rad * (1 + v * 6), 40)
+      end
+      return
+    end
+    -- caught: it shrinks down after the click
+    if th.said.out and th.caught then
+      local v = u - endAt
+      k = math.max(0.3, 1 - 0.7 * math.min(1, v / T.SHRINK))
+      for s = 0, 5 do
+        local a = s * math.pi / 3 + v * 2
+        local d = rad * k * (1.3 + v * 2.5)
+        G.setColor(1, 0.9, 0.3, math.max(0, 1 - v))
+        drawStars(G, 1, x + math.cos(a) * d + rad * 0.25, foot - rad * k + math.sin(a) * d, rad * 0.5)
+      end
+    end
+    drawBall(G, x, foot, rad * k, lean, tilt, th.rgb)
+  end
+
+  -- the rewards card: what was caught, the items, each of the four's Exp, levels, moves and EVs
+  function Rd.drawRewards(G, w, h)
+    local out = r.rewards
+    if not out then return end
+    G.setColor(0, 0, 0, 0.55)
+    G.rectangle("fill", 0, 0, w, h)
+    local cw = min(w * 0.86, h * 1.15)
+    local fT, fB, fS = font(h * 0.045), font(h * 0.03), font(h * 0.024)
+    local lineH = fB:getHeight() * 1.25
+    local rows = #out.items + #out.team * 2 + 4
+    local ch = min(h * 0.92, lineH * rows + h * 0.12)
+    local cx, cy = (w - cw) / 2, (h - ch) / 2
+    G.setColor(0.13, 0.13, 0.15, 0.97)
+    G.rectangle("fill", cx, cy, cw, ch, h * 0.02, h * 0.02)
+    G.setColor(0.93, 0.18, 0.42, 1)
+    G.rectangle("fill", cx, cy, cw, h * 0.075, h * 0.02, h * 0.02)
+    G.rectangle("fill", cx, cy + h * 0.05, cw, h * 0.025)
+    G.setFont(fT)
+    G.setColor(1, 1, 1, 1)
+    G.printf("Rewards", cx, cy + (h * 0.075 - fT:getHeight()) / 2, cw, "center")
+    local x, y = cx + h * 0.04, cy + h * 0.1
+    G.setFont(fB)
+    local th = r.throw
+    if th and th.caught then
+      G.setColor(1, 0.85, 0.3, 1)
+      local b = Bosses[r.key]
+      G.print(("%s was caught!"):format(b and b.name or "It"), x, y)
+      y = y + lineH
+    end
+    local bonus = {}
+    if out.firstWin then bonus[#bonus + 1] = "first win x2" end
+    if r.sim and r.sim.faints == 0 then bonus[#bonus + 1] = "no knock-outs x1.5" end
+    if #bonus > 0 then
+      G.setFont(fS)
+      G.setColor(0.6, 0.85, 1, 1)
+      G.print("Bonus: " .. table.concat(bonus, ", "), x, y)
+      y = y + lineH
+      G.setFont(fB)
+    end
+    for _, it in ipairs(out.items) do
+      G.setColor(1, 1, 1, 1)
+      G.print(("%s  x%d"):format(it.name, it.n), x, y)
+      y = y + lineH
+    end
+    y = y + lineH * 0.3
+    local stat = Rewards and Rewards.STAT_WORD[out.evStat or "hp"] or ""
+    for _, tm in ipairs(out.team) do
+      G.setFont(fB)
+      G.setColor(1, 1, 1, 1)
+      local line = ("%s  +%d Exp."):format(tm.name, tm.exp or 0)
+      if tm.to and tm.from and tm.to > tm.from then line = line .. ("  Lv. %d -> %d"):format(tm.from, tm.to) end
+      G.print(line, x, y)
+      y = y + lineH
+      G.setFont(fS)
+      G.setColor(0.75, 0.75, 0.8, 1)
+      local sub = {}
+      if (tm.evs or 0) > 0 then sub[#sub + 1] = ("+%d %s EVs"):format(tm.evs, stat) end
+      if #sub > 0 then G.print("   " .. table.concat(sub, "   "), x, y) end
+      y = y + lineH * 0.9
+    end
+    G.setFont(fS)
+    G.setColor(0.7, 0.7, 0.75, 1)
+    G.printf("A: Continue", cx, cy + ch - fS:getHeight() * 1.6, cw - h * 0.04, "right")
   end
 
   -- ------- for drivers
@@ -1199,6 +1660,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if r and r.cmd then for _ in pairs(r.cmd.chosen) do n = n + 1 end end
     view.chosen = n
     view.menu = r and r.cmd and r.cmd.menu or nil
+    view.caught = r and r.throw and r.throw.caught or nil
+    view.rewards = r and r.rewards or nil
+    view.ask = r and r.ask and r.ask.kind or nil
+    view.aside = r and r.aside or nil
     return view
   end
 

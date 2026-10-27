@@ -87,8 +87,34 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
     the top left (`r.rows`, `Bh.drawRows`: its icon, its action's mark `r.actions[i]`, its HP draining) -
     a member's move on itself (Work Up) is about the member; "fail" keeps what was shown.
     The last event done: the next turn, or (`sim.over`)
-    `deps.onEnd(den, outcome)` - main marks a won den done (`Dens.finish`) - and the raid closes.
-    Not yet: the catch and rewards on a win.
+    `deps.onEnd(den, outcome)` - main marks a won den done (`Dens.finish`) - then a loss closes the
+    raid and a win goes to the catch.
+  - **The catch** (`Rd.startCatch`, phase "catch"; Sword / Shield's: one throw after a win, any ball
+    in the bag, used up - checked against iMore / PokeCommunity's raid guides 2026-10-26): the pad's
+    list (`menu` "balls") of up to three balls the bag holds, each with its chance as its chip, and
+    "Don't catch"; B or Back leaves it. `Rd.pickBall` throws (src/rewards.lua `Rw.throw` decides at
+    once), phase "throw" (`Rd.THROW`, `Rd.stepThrow` in the update; Wooble 2026-10-26): the `catch`
+    shot (past the party onto the boss's pad), a giant ball (`BALL_M` 2.2 scene units at the boss -
+    a member stands 1.1 -, sized through `Scene.lastBoss`, where drawBoss put the boss) arcs in from
+    the screen's foot, larger near the camera; the boss is drawn into it (`bossPic.shrink`, raid_scene
+    drawBoss' red-glow path), it drops to the boss's feet and wobbles slowly round a cone `SPINS` 3
+    times (`SPIN` 1.3 s each: its foot fixed, its top circling - `lean` tips it about its foot, `tilt`
+    bows its band toward / away from the camera, `drawBall`); caught: "Gotcha!", the giant ball
+    shrinks down (`SHRINK`) with stars; else a burst, "broke free", "disappeared"; "sent to the PC"
+    when the party was full. Once thrown at, the boss stays drawn in (`r.shrink`) and its block is
+    gone.
+  - **The rewards** (`Rd.startRewards`, phase "rewards"; `Rw.give`): a card over the dimmed den -
+    what was caught, the bonuses, the items, each of the four's Exp (levels) and EVs; A, B or a tap
+    (`Rd.endRewards`, after 0.5 s) goes on.
+  - **After the raid** (`Rd.startAfter`, phase "after"; Wooble 2026-10-26): each of the four that
+    levelled, in party order (`partyIndex`), one by one - its evolution first (`Evolution.levelTarget`;
+    the engine's `EvolutionScene.start`, the raid standing aside: `r.aside`, as for the summary; its
+    `onDone` result "evolved" | "stopped"), then its new moves (`LearnMove.beginQueue` on the levels
+    gained - less the last when it evolved: the scene teaches the new form that level's moves - with
+    the raid's askers: `Rd.ask` msg = the words in the band, A / a tap once typed (`Rd.answer`);
+    yesno = Yes / No on the pad (menu "yesno"); which move to forget = the game's summary in
+    "select_move" mode, its slot passed on as the engine's party menu does). The queue done, the raid
+    closes. `Rd.state()` gives `ask`, `aside`.
   - **The summary** (`Rd.summary`, Wooble 2026-10-26): the game's own (`SummaryMenu.openMenu`, which
     hands Emerald / R/S their own screens) on the four, from the one choosing, so L / R step through
     them; `context = "factory"` keeps it read only (that context is the only one the engine checks
@@ -243,6 +269,15 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
   the pouch (`RAID.POUCH`, `ITEM_PRIORITY` first: Potion half the HP, Full Heal, Revive back at once
   at half HP, the knock-out still counted; used up only when it works). Its events carry their
   words (English).
+- `src/rewards.lua` (Rw), after a win, on the engine: `Rw.balls()` (RAID.CATCH.BALLS the bag holds,
+  `Bag.get`), `Rw.chance(stars, mult)` (pure: the tier's % x the ball's; Master 0 = always),
+  `Rw.throw(key, level, ball, rng)` (the ball out of the bag, the roll, `Party.giveMonToPlayer` - the
+  PC when the party is full -, `mon.pokeball`, `Dex.registerCapture`), `Rw.give(r, rng)` (the save's
+  "wins" per boss: x FIRST_WIN_MULT the first time, x NO_FAINT_MULT with no knock-out; `rollItems`
+  from RAID.REWARD.POOL by tier into the bag, `Bag.add`; to each of the four's OWN Pokemon -
+  `m.orig`, kept by setupBattle -: the boss's Exp, `Experience.gainFor` (one participant) x the
+  multiplier, `Experience.apply`, a friendship step a level - `m.levelFrom / levelTo` for the
+  after-raid evolutions and moves -; the tier's EVs in the boss's best base stat, 252 / 510).
 - `src/battler_hud.lua` (Bh), the command phase's HUD, same capture: `Bh.drawOrder` - the four down the
   top left in choosing order (`Bh.ORDER`), white boxes with a dark edge, the party icon, a thought
   bubble while waiting (its dots ripple on the one choosing, which is wider with a pink stripe) or,
@@ -389,7 +424,8 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - Phase 3a, the raid's rules (2026-10-26): barriers (drawn as Wooble's capture shows: red slanted
     pills under the boss's bar, grey once broken, gone with the last), G-Max moves and their effects,
     the boss's scripts, cheers, the pouch (Bag -> item -> target).
-- **Next.** The catch and rewards on a win; the boss's attack cinematics and G-Max effects drawn
+  - Phase 3b, the catch and rewards (2026-10-26).
+- **Next.** The boss's attack cinematics and G-Max effects drawn
   (shaders), sound; the second-screen pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4:
   polish and the Thor. Weather moves (the video's sandstorm) are not in the sim.
 - **Not in the sim yet:** confusion, flinch, multi-hit (Surging Strikes' three), Spectral Thief's
