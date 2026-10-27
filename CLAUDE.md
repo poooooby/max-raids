@@ -65,15 +65,20 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
     Pokemon opens the summary, Fight opens the moves - `menu` "moves", `Rd.moveList` fills
     `r.cmd.moveList` in the update step (effectiveness on the boss) - and a move "moveN" (PP left) is
     taken, `chosen[i] = { move = N }`, the next member's turn beginning, the camera easing over its
-    shoulder in `SWAP_S`; Bag is greyed until the pouch exists). B (`Rd.back`): the moves back to the
-    commands, else the member before, its pick undone. Up / down move `cursor`, A picks; a press on a
+    shoulder in `SWAP_S`; Bag opens the pouch - `menu` "items" (`Rd.POUCH_ORDER`, counts less this
+    turn's picks; greyed once empty, `r.cmd.bagEmpty`) - then whom it is for - "target" (the four with
+    their HP; a Revive only on one sitting out, the others on one on the field) - `chosen[i] = { item,
+    target }`). B (`Rd.back`): target -> items -> commands, moves -> commands, else the member before,
+    its pick undone. Up / down move `cursor`, A picks; a press on a
     pill moves the selection there and letting go picks it. All in: `Rd.fight()` runs the turn
     (`sim:turn`) and phase "battle" plays its events. No one able to choose (all sitting out): the
     boss's turn at once. `Rd.state()` gives `turn`, `actor`, `cursor`, `chosen` (a count), `menu`,
     `summary`.
   - **The turn's events** (`Rd.playEvents`, `Rd.EVENT`): one at a time - words typed in the band and
-    held `HOLD_S` (A hurries them once typed); a "use" cuts the camera to the member (`member` shot) or
-    the boss (`boss` shot); an event with `hp` sets that battler's `dispTarget`, and the bars ease there
+    held `HOLD_S` (A hurries them once typed); a member's "use" eases the camera behind it
+    (`member` shot); the boss's (Wooble 2026-10-26: on the boss and whom it attacks) looks ahead to the
+    members its move falls on (`Rd.targetsAhead`: hit, missed or touched, up to the next move) - one:
+    the `target` shot on it, several: `spread`, none: `boss`; an event with `hp` sets that battler's `dispTarget`, and the bars ease there
     (`dispHp`, `HP_S`), with a shake. A hit lands with no words: the band steps aside while the bar
     drains. What shows, from Wooble's capture "battle reference UI-flow.mp4" (2026-10-26; Sword /
     Shield): none of the command UI (order list, panel, pad) in the turn; `showFor(e)` - the boss's
@@ -181,8 +186,13 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
   - **Lighting** per vertex: `lit()`, an ambient, a key light from the upper left, the pad's warm glow,
     fog.
   - **Camera shots:** `Sc.shot(name | "member" i | pose, dur)` eases eye, look-at and FOV
-    (smootherstep). Shots are `field`, `close`, `reveal`, `boss` and `wide`; `memberShot(i)` is over
-    a shoulder. `Sc.shake(amp, dur)`, `Sc.burst()` (the roar), `Sc.setTime(t)`.
+    (smootherstep). Shots are `field`, `close`, `reveal`, `boss`, `wide` and `spread` (all four and
+    the boss, nearer than wide); `targetShot(i, T)` (Wooble 2026-10-26: almost directly behind the
+    member, a low angle up at the boss - the member large, the boss towering, the others mostly out
+    past the sides): `Sc.TARGET` while the boss attacks it (aimed a little lower, LOOK_Y 3.5, so the
+    member stands clear of the message band over the screen's foot), `Sc.CHOOSE` for its own turn -
+    choosing, its moves - via `memberShot(i)` (no band: aimed higher, the boss whole); BACK 3.6 / 3.4
+    (Wooble: pulled back so more of the member is in shot). `Sc.shake(amp, dur)`, `Sc.burst()` (the roar), `Sc.setTime(t)`.
   - **Drawing over the 3D, in 2D at projected points:** the light shaft; the motes (one mesh moved by
     a vertex shader, no `VertexPosition` in its format, see Conventions); the boss (`drawBoss`: shadow,
     pad glow, a red silhouette-shader halo and outline, wisps, swirling streaks, sparks); the members
@@ -220,7 +230,18 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
   field, else one at random; sleep 2-5 turns, freeze thaws 1 in 5, paralysis 1 in 4; poison / burn
   1/8, toxic n/16 at the turn's end; stat stages held to +-6; Gen 3's status immunities by type; a
   knocked-out member sits the next turn out and comes back at full HP (`down` 2), every knock-out
-  counted; `over` "win" | "faints" (`RAID.FAINTS`) | "storm" (`RAID.TURNS`). Its events carry their
+  counted; `over` "win" | "faints" (`RAID.FAINTS`) | "storm" (`RAID.TURNS`).
+  The raid's own rules (Phase 3, 2026-10-26; data/raid_rules.lua): the barrier (`boss.shields` the
+  tier's HP shares, `boss.segments`; `checkShield` after each hit on the boss, one at a time; a hit
+  through it does `SHIELD_DMG` and breaks a segment, `throughBoss`; the last one broken: Def / Sp. Def
+  `BREAK_DROP`; events "shield" up / hit / break with `left` / `max`); the boss's script (`due`: the
+  G-Max move instead of a plain one on its turns, on all four; at the turn's end the wipe of the
+  team's stat changes and, once below its HP share, the aura's +1 all round); the G-Max effects
+  (`gmaxEffect`: data/raid_gmax.lua's field over the team for its turns, traps, statuses, drowsiness,
+  stat drops, PP, the boss's veil halving damage, heal, cure, crit); a member sitting out cheers
+  in its speed slot (`cheer`: `RAID.CHEER` by weight, the barrier-breaker only while one stands);
+  the pouch (`RAID.POUCH`, `ITEM_PRIORITY` first: Potion half the HP, Full Heal, Revive back at once
+  at half HP, the knock-out still counted; used up only when it works). Its events carry their
   words (English).
 - `src/battler_hud.lua` (Bh), the command phase's HUD, same capture: `Bh.drawOrder` - the four down the
   top left in choosing order (`Bh.ORDER`), white boxes with a dark edge, the party icon, a thought
@@ -239,6 +260,12 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
 - `data/raid_sprites.lua` (generated by `tools/raid_pack.py`): per pack key, frames, cell, grid,
   AnimationSpeed, the FrontSprite / ShadowSprite metrics, the Giga BaseStats (Essentials order HP, Atk,
   Def, Spe, SpA, SpD), types, height and form name.
+- `data/raid_gmax.lua`: the bosses' 34 G-Max moves (type, a fixed 160 power where the game has one,
+  else `POWER_BANDS` from the boss's strongest move of that type - `Bt.maxPower`; the effect as the
+  sim runs it; the effects meaningless without switching - Stealth Rock, Gravity, Torment ... - plain)
+  and `WORDS` for their messages. `Bt.gmaxMove` builds the move (on all four, never missing; a move
+  table `ref` for `Damage.calc`); `Bt.boss` also sets `shields`, `segments`
+  (`RAID.SEGMENTS` from base Def + Sp. Def) and `script`.
 - `data/raid_bosses.lua`: `ORDER`; per key `national`, `name`, modern `types`, `stars` (tiers by Giga
   stat total), `moves` (names), `gmax`, `script`. Move names need checking against national_dex_gen3's
   ids (`Moves.numForName`).
@@ -357,11 +384,14 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - Phase 2, the battle slice (2026-10-26): src/battle.lua, src/raid_sim.lua, the move menu, the turn's
     events, win / loss; a won den is done for the day (`Dn.finish`). A fled or lost raid leaves the den
     active, as in the games.
-- **Needs national_dex_gen3's `exports.moveExtra`** (added there 2026-10-26, its CHANGELOG
+- **Needs national_dex_gen3's `exports.moveExtra`** (committed there 2026-10-26, ac6a7e6, its CHANGELOG
   [Unreleased]; not yet released): without it its newer status moves (Work Up ...) do "nothing".
-- **Next.** Phase 3: the shields, the boss's extras (G-Max move, wipe, stat-up scripts), the pouch
-  (Bag), cheers, weather; the catch and rewards; G-Max effects and shaders; sound; the second-screen
-  pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4: polish and the Thor.
+  - Phase 3a, the raid's rules (2026-10-26): barriers (drawn as Wooble's capture shows: red slanted
+    pills under the boss's bar, grey once broken, gone with the last), G-Max moves and their effects,
+    the boss's scripts, cheers, the pouch (Bag -> item -> target).
+- **Next.** The catch and rewards on a win; the boss's attack cinematics and G-Max effects drawn
+  (shaders), sound; the second-screen pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4:
+  polish and the Thor. Weather moves (the video's sandstorm) are not in the sim.
 - **Not in the sim yet:** confusion, flinch, multi-hit (Surging Strikes' three), Spectral Thief's
   theft, the battle.damage hook's abilities (Adaptability, Filter ...: the engine runs them in its own
   hit script), held items' end-of-turn effects, critical-hit stages beyond the engine's own roll.

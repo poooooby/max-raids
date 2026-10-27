@@ -317,7 +317,8 @@ return function(mod, deps)
     if not r.boss then return end
     r.boss.dispHp, r.boss.dispTarget = r.boss.mon.hp, r.boss.mon.hp
     r.adapter = Battle.adapter(rng)
-    r.sim = Sim.new{ boss = r.boss, members = list, adapter = r.adapter, rng = rng, rules = R }
+    r.sim = Sim.new{ boss = r.boss, members = list, adapter = r.adapter, rng = rng, rules = R,
+      words = deps.Gmax and deps.Gmax.WORDS or nil }
   end
 
   -- the raid itself begins: the intro from the close-up on the party
@@ -472,7 +473,9 @@ return function(mod, deps)
     local want = (r.phase ~= "battle" or r.bossShow) and 1 or 0
     local cur = r.bossA or 1
     r.bossA = cur + max(-1, min(1, (want - cur) * 1)) * min(1, dt * Rd.EVENT.FADE)
-    if r.phase == "command" and r.cmd and r.cmd.menu == "moves" then Rd.moveList() end
+    if r.phase == "command" and r.cmd then
+      if r.cmd.menu ~= "main" then Rd.moveList() elseif Rd.bagEmpty then r.cmd.bagEmpty = Rd.bagEmpty() end
+    end
     -- the members' pictures and the den's render: here, outside any draw
     memberPics(r)
     if Scene and Scene.prepare then Scene.prepare(r.t) end
@@ -503,6 +506,10 @@ return function(mod, deps)
     r.turn = (r.turn or 0) + 1
     r.phase = "command"
     r.cmd = { chosen = {}, cursor = 1, menu = "main" }
+    if r.boss then
+      local sh = r.boss.shield
+      r.boss.shieldShown = sh and sh.left > 0 and { left = sh.left, max = sh.max } or nil
+    end
     r.cmd.actor = nextActor(1)
     r.say = nil
     -- (no one able to choose - all sitting out: the boss's turn alone)
@@ -541,7 +548,46 @@ return function(mod, deps)
   end
   function Rd.summaryUp() return r ~= nil and r.summary == true end
 
-  -- the member choosing now picks a command: Run leaves; Pokemon shows its summary
+  -- the pouch's items in the Bag's order, and how many of each are left once this turn's picks
+  -- are taken out
+  Rd.POUCH_ORDER = { "potion", "full_heal", "revive" }
+  local function pouchFree(id)
+    local n = r.sim and r.sim:pouchLeft(id) or 0
+    for _, c in pairs(r.cmd and r.cmd.chosen or {}) do if c.item == id then n = n - 1 end end
+    return n
+  end
+  local function bagEmpty()
+    for _, id in ipairs(Rd.POUCH_ORDER) do if pouchFree(id) > 0 then return false end end
+    return true
+  end
+
+  Rd.bagEmpty = bagEmpty
+
+  -- whether a pouch item can go on member j now: a Revive on one sitting out, the others on one on
+  -- the field
+  local function canTake(id, j)
+    local m = r.members[j]
+    if not (m and m.b and r.sim) then return false end
+    if id == "revive" then return (m.b.down or 0) > 0 end
+    return r.sim:present(j)
+  end
+
+  -- the next member's turn, or the fight
+  local function nextOrFight()
+    local c = r.cmd
+    local nxt = nextActor(c.actor + 1)
+    c.cursor, c.menu, c.item = 1, "main", nil
+    if nxt then
+      c.actor = nxt
+      toMember(nxt)
+    else
+      c.actor = nil
+      Rd.fight()
+    end
+  end
+
+  -- the member choosing now picks: Run leaves; Pokemon shows its summary; Fight its moves; Bag the
+  -- pouch, then whom to use it on. In a list menu "moveN" is its N-th row.
   function Rd.choose(id)
     if not (r and r.phase == "command" and r.cmd.actor) or r.summary then return false end
     if id == "run" then return Rd.flee() end
@@ -552,46 +598,83 @@ return function(mod, deps)
       Rd.moveList()
       return true
     end
+    if id == "bag" then
+      if bagEmpty() then return false end
+      c.menu, c.cursor = "items", 1
+      Rd.moveList()
+      return true
+    end
     if id == "back" then return Rd.back() end
     local slot = type(id) == "string" and tonumber(id:match("^move(%d)$"))
     if not slot then return false end
+    local row = c.moveList and c.moveList[slot]
+    if not row or row.live == false then return false end
+    if c.menu == "items" then
+      c.item, c.menu, c.cursor = row.id, "target", 1
+      Rd.moveList()
+      return true
+    elseif c.menu == "target" then
+      c.chosen[c.actor] = { item = c.item, target = row.member }
+      nextOrFight()
+      return true
+    end
     local b = r.members[c.actor] and r.members[c.actor].b
     local mv = b and b.moves[slot]
     if not mv or (mv.pp or 0) <= 0 then return false end
     c.chosen[c.actor] = { move = slot }
-    local nxt = nextActor(c.actor + 1)
-    c.cursor, c.menu = 1, "main"
-    if nxt then
-      c.actor = nxt
-      toMember(nxt)
-    else
-      c.actor = nil
-      Rd.fight()
-    end
+    nextOrFight()
     return true
   end
 
-  -- the move menu's rows for the member choosing (the update step: effectiveness asks the engine)
+  -- the list menu's rows for the member choosing (the update step: effectiveness asks the engine):
+  -- its moves, the pouch's items, or the four to use one on
   local function effOf(m)
     if m == 0 then return "none" elseif m > 1 then return "super" elseif m < 1 then return "weak" end
     return nil
+  end
+  local function hpRgb(share)
+    if share > 0.5 then return { 0.2, 0.75, 0.3 } elseif share > 0.2 then return { 0.9, 0.7, 0.1 } end
+    return { 0.9, 0.25, 0.2 }
   end
   function Rd.moveList()
     local c = r and r.cmd
     local b = c and c.actor and r.members[c.actor] and r.members[c.actor].b
     if not b then return end
+    c.bagEmpty = bagEmpty()
     c.moveList = c.moveList or {}
+    local list = c.moveList
     for i = 1, 4 do
-      local mv = b.moves[i]
-      if mv then
-        local row = c.moveList[i] or {}
-        c.moveList[i] = row
-        row.name, row.typeName, row.pp, row.maxPp = mv.name, mv.typeName, mv.pp, mv.maxPp
-        row.rgb = Battle and Battle.TYPE_RGB[mv.typeName] or nil
-        row.eff = nil
-        if not mv.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(mv.type, r.boss)) end
+      local row = list[i] or {}
+      for k in pairs(row) do row[k] = nil end
+      list[i] = row
+      if c.menu == "items" then
+        local id = Rd.POUCH_ORDER[i]
+        if id then
+          local n = pouchFree(id)
+          row.id, row.name, row.chip, row.right = id, Sim and Sim.ITEM_NAME[id] or id, "Item", "x" .. n
+          row.rgb, row.live = { 0.35, 0.6, 0.85 }, n > 0
+        else
+          list[i] = nil
+        end
+      elseif c.menu == "target" then
+        local m = r.members[i]
+        if m and m.b then
+          local hp, mhp = tonumber(m.b.mon.hp) or 0, max(1, tonumber(m.b.mon.maxHp) or 1)
+          row.member, row.name = i, m.b.name
+          row.chip, row.right = (m.b.down or 0) > 0 and "Out" or "HP", ("%d/%d"):format(hp, mhp)
+          row.rgb, row.live = hpRgb(hp / mhp), canTake(c.item, i)
+        else
+          list[i] = nil
+        end
       else
-        c.moveList[i] = nil
+        local mv = b.moves[i]
+        if mv then
+          row.name, row.typeName, row.pp, row.maxPp = mv.name, mv.typeName, mv.pp, mv.maxPp
+          row.rgb = Battle and Battle.TYPE_RGB[mv.typeName] or nil
+          if not mv.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(mv.type, r.boss)) end
+        else
+          list[i] = nil
+        end
       end
     end
   end
@@ -646,15 +729,43 @@ return function(mod, deps)
     end
   end
 
+  -- the members a boss's move at events[k] falls on: those hit, missed or touched by it, up to the
+  -- next move
+  function Rd.targetsAhead(k)
+    local out, seen = {}, {}
+    local list = r.events or {}
+    for j = k + 1, #list do
+      local e = list[j]
+      if e.kind == "use" or e.kind == "over" or e.kind == "cheer" or e.kind == "item" then break end
+      local who = e.target or ((e.kind == "status" or e.kind == "stage") and e.who) or nil
+      local i = who and not who.boss and memberIndex(who)
+      if i and not seen[i] then seen[i] = true; out[#out + 1] = i end
+    end
+    table.sort(out)
+    return out
+  end
+
   local function startEvent(e)
     local E = Rd.EVENT
     r.evT = r.t
     showFor(e)
+    -- the barrier's pills follow the events (gone once broken)
+    if e.kind == "shield" and r.boss then
+      r.boss.shieldShown = e.step ~= "break" and { left = e.left, max = e.max } or nil
+      if e.step == "hit" and Scene then Scene.shake(0.06, 0.25) end
+    end
     if e.kind == "faint" and not e.who.boss then r.shownFaints = (r.shownFaints or 0) + 1 end
     if e.kind == "use" then
       local i = memberIndex(e.who)
       if Scene then
-        if i then Scene.shot("member", E.CAM_S, i) else Scene.shot("boss", E.CAM_S) end
+        if i then Scene.shot("member", E.CAM_S, i)
+        else
+          -- the boss's move: the camera on it and whom it falls on - one member, or all of them
+          local hit = Rd.targetsAhead(r.evI)
+          if #hit > 1 then Scene.shot("spread", E.CAM_S)
+          elseif #hit == 1 then Scene.shot("target", E.CAM_S, hit[1])
+          else Scene.shot("boss", E.CAM_S) end
+        end
       end
       if i then r.focus = i end
     end
@@ -700,7 +811,12 @@ return function(mod, deps)
   -- back: from the moves to the commands, else to the member before, its pick undone
   function Rd.back()
     if not (r and r.phase == "command" and r.cmd.actor) then return false end
-    if r.cmd.menu == "moves" then
+    if r.cmd.menu == "target" then
+      r.cmd.menu, r.cmd.cursor, r.cmd.item = "items", 1, nil
+      Rd.moveList()
+      return true
+    end
+    if r.cmd.menu == "moves" or r.cmd.menu == "items" then
       r.cmd.menu, r.cmd.cursor = "main", 1
       return true
     end
@@ -732,7 +848,7 @@ return function(mod, deps)
       return
     end
     if r.phase == "command" and Pad then
-      local moves = r.cmd.menu == "moves"
+      local moves = r.cmd.menu ~= "main"
       local n = moves and max(1, #(r.cmd.moveList or {})) or #Pad.ITEMS
       if input:wasPressed("up") then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
       elseif input:wasPressed("down") then r.cmd.cursor = r.cmd.cursor % n + 1
@@ -769,7 +885,7 @@ return function(mod, deps)
       -- a press moves the selection onto the pill; letting go picks it
       local slot = hit:match("^move(%d)$")
       if slot then r.cmd.cursor = tonumber(slot) end
-      if r.cmd.menu ~= "moves" then
+      if r.cmd.menu == "main" then
         for i, item in ipairs(Pad.ITEMS) do
           if item.id == hit then r.cmd.cursor = i end
         end
@@ -894,6 +1010,20 @@ return function(mod, deps)
       elseif share > 0.2 then G.setColor(0.98, 0.78, 0.15, a)
       else G.setColor(0.95, 0.25, 0.2, a) end
       G.rectangle("fill", bx, by, bw * share, bh)
+      -- the barrier: slanted pills under the bar, red while they stand, grey once broken (from the
+      -- right); none at all once every one is broken
+      local sh = r.boss and r.boss.shieldShown
+      if sh and sh.left > 0 and sh.max > 0 then
+        local pw, gap, ph = bw * 0.078, bw * 0.009, bh * 1.6
+        local total = sh.max * pw + (sh.max - 1) * gap
+        local px, py = (w - total) / 2, by + bh + h * 0.007
+        local slant = ph * 0.35
+        for k = 1, sh.max do
+          local x0 = px + (k - 1) * (pw + gap)
+          if k <= sh.left then G.setColor(0.95, 0.2, 0.45, a) else G.setColor(0.45, 0.45, 0.48, a) end
+          G.polygon("fill", x0 + slant, py, x0 + pw, py, x0 + pw - slant, py + ph, x0, py + ph)
+        end
+      end
     end
     if r.say then
       local M = Rd.MSG
@@ -907,6 +1037,12 @@ return function(mod, deps)
       G.polygon("fill", 0, by, h * 0.055, by, h * 0.022, by + bh, 0, by + bh)
       G.polygon("fill", w - h * 0.05, by, w, by, w, by + bh, w - h * 0.085, by + bh)
       local n = floor((r.t - (r.sayT or 0)) * M.CPS)
+      -- (never cut inside a character: past any UTF-8 continuation bytes)
+      while n < #r.say and n > 0 do
+        local byte = r.say:byte(n + 1)
+        if byte < 128 or byte >= 192 then break end
+        n = n + 1
+      end
       local str = n >= #r.say and r.say or r.say:sub(1, n)
       local lx = w * M.LEFT
       G.setFont(font(h * M.TEXT))

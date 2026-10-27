@@ -201,6 +201,115 @@ do
   check(m3[1].mon.hp == 79, ("recoil a third of the damage (100 - 20 - 1: %d)"):format(m3[1].mon.hp))
 end
 
+-- ------- the raid's own rules (data/raid_rules.lua)
+local RULES = assert(loadstring(read("data/raid_rules.lua"), "@data/raid_rules.lua"))().RAID
+
+-- the barrier: up at its threshold, a quarter damage, a segment a hit, broken with Def / Sp. Def -2
+do
+  local boss = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  boss.shields, boss.segments = { 0.7 }, 2
+  local m = team(1, 1000, { 50 })
+  m[1].moves[1] = mv("Slam", { power = 400 })
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(21), rules = RULES }
+  local ev = s:turn(all(1))
+  check(boss.shield and boss.shield.left == 2, "a barrier of two at 70%")
+  check(kinds(ev):find("shield") ~= nil, "the barrier's words")
+  s:turn(all(1))
+  check(boss.mon.hp == 500 and boss.shield.left == 1, ("a quarter through it, a segment off (hp %d)"):format(boss.mon.hp))
+  local ev3 = s:turn(all(1))
+  check(boss.shield == nil and boss.stages.defense == -2 and boss.stages.spDef == -2, "broken: Def and Sp. Def -2")
+  local broke = false
+  for _, e in ipairs(ev3) do if e.kind == "shield" and e.step == "break" then broke = true end end
+  check(broke, "the barrier's break is an event")
+end
+
+-- the G-Max move on its script's turns, on all four, its effect after
+do
+  local boss = battler("Boss", 100000, 1, { mv("Tap", { power = 1 }) }, true)
+  boss.gmax = mv("G-Max Volt Crash", { power = 5, spread = true })
+  boss.gmax.isGmax = true
+  boss.gmax.gmaxEffect = { kind = "status", list = { "PAR" } }
+  boss.script = RULES.SCRIPTS.basic
+  local m = team(4, 1000)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(22), rules = RULES }
+  local ev1 = s:turn(all(4))
+  local early = false
+  for _, e in ipairs(ev1) do if e.kind == "use" and e.gmax then early = true end end
+  check(not early, "turn 1: no G-Max (the basic script's from turn 2)")
+  local ev2 = s:turn(all(4))
+  local gm, para = false, 0
+  for _, e in ipairs(ev2) do
+    if e.kind == "use" and e.gmax then gm = true end
+    if e.kind == "status" and e.status == "PAR" then para = para + 1 end
+  end
+  check(gm and para == 4, ("turn 2: G-Max on all four, all paralysed (%d)"):format(para))
+end
+
+-- a G-Max field hurts every member not of its type at the turn's end, for its turns
+do
+  local boss = battler("Boss", 100000, 1, { mv("Tap", { power = 1 }) }, true)
+  boss.gmax = mv("G-Max Wildfire", { power = 1, spread = true })
+  boss.gmax.gmaxEffect = { kind = "field", turns = 4, frac = 6, spare = "FIRE", spareNum = 10 }
+  boss.script = { { kind = "gmax", every = 99, from = 1 } }
+  local m = team(2, 600)
+  m[2].type1 = 10
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(23), rules = RULES,
+    words = { fieldHurt = { FIRE = "{MON} burns" } } }
+  s:turn(all(2))
+  check(m[1].mon.hp == 600 - 1 - 100 and m[2].mon.hp == 600 - 1, ("1/6 to the non-Fire one only (%d, %d)"):format(m[1].mon.hp, m[2].mon.hp))
+  for _ = 1, 4 do s:turn(all(2)) end
+  check(s.field == nil, "the field runs out")
+end
+
+-- a member sitting out cheers; the pouch: a Potion, a Revive back at once (the knock-out counted)
+do
+  local boss = battler("Boss", 100000, 1, { mv("Crush", { power = 200 }) }, true)
+  local m = team(2, 100, { 50, 40 })
+  local rules = {}
+  for k, v in pairs(RULES) do rules[k] = v end
+  rules.CHEER = { { id = "attack", w = 1 } }
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(24), rules = rules }
+  -- (the boss hits one at random: play until someone is down)
+  local n = 0
+  while s.faints == 0 and n < 10 do s:turn(all(2)); n = n + 1 end
+  local downI = (m[1].down or 0) > 0 and 1 or 2
+  local upI = 3 - downI
+  local ev = s:turn({ [upI] = { move = 1 } })
+  local cheered = false
+  for _, e in ipairs(ev) do if e.kind == "cheer" and e.cheer == "attack" then cheered = true end end
+  check(cheered, "the one sitting out cheers (Attack up)")
+  check(s:pouchLeft("revive") == 1, "a Revive in the pouch")
+  boss.moves[1].power = 0
+  boss.moves[1].status, boss.moves[1].side = true, nil
+  local before = s.faints
+  -- a fresh knock-out to revive
+  m[upI].mon.hp = 0
+  s:fainted({}, m[upI])
+  m[downI].down, m[downI].mon.hp = 0, 100
+  s:turn({ [downI] = { item = "revive", target = upI } })
+  check(m[upI].down == 0 and m[upI].mon.hp == 50 and s.faints == before + 1, "a Revive: back at half HP, the faint counted")
+  check(s:pouchLeft("revive") == 0, "the Revive is used up")
+  m[downI].mon.hp = 20
+  s:turn({ [downI] = { item = "potion", target = downI } })
+  check(m[downI].mon.hp == 70 and s:pouchLeft("potion") == 1, ("a Potion: half the HP (%d)"):format(m[downI].mon.hp))
+end
+
+-- the wipe and the aura
+do
+  local boss = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  boss.script = { { kind = "wipe", every = 1, from = 1 }, { kind = "statup", hpBelow = 0.5, once = true } }
+  local m = team(1, 1000, { 50 })
+  m[1].moves[1] = mv("Swords Dance", { status = true, power = 0, side = { stages = { attack = 2 }, self = true } })
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(25), rules = RULES }
+  s:turn(all(1))
+  check(m[1].stages.attack == 0, "the wipe clears the team's raised stats")
+  boss.mon.hp = 400
+  s:turn(all(1))
+  check(boss.stages.attack == 1 and boss.stages.defense == 1, "the aura at half HP: +1 all round")
+  s:turn(all(1))
+  check(boss.stages.attack == 1, "only once")
+end
+
 -- the same seed, the same turn
 do
   local function run()

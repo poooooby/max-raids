@@ -18,8 +18,7 @@ return function(mod, deps)
     { id = "bag", word = "Bag", rgb = { 0.96, 0.66, 0.33 } },
     { id = "run", word = "Run", rgb = { 0.74, 0.48, 0.96 } },
   }
-  -- (Bag: greyed until the raid's pouch exists)
-  local LIVE = { fight = true, pokemon = true, bag = false, run = true }
+    local LIVE = { fight = true, pokemon = true, bag = true, run = true }
   function Pad.live(id) return LIVE[id] == true end
 
   -- sizes in the window's height, measured off a 1784 x 998 capture: pills 325 x 92 on a 108 pitch,
@@ -149,7 +148,9 @@ return function(mod, deps)
     local u = ph / 92
     for i, item in ipairs(Pad.ITEMS) do
       local t = rset(where[item.id], right - pw, top + (i - 1) * pitch, pw, ph)
-      pill(G, t, item, i == cur, LIVE[item.id], u)
+      -- (Bag greyed once the pouch is empty)
+      local live = LIVE[item.id] and not (item.id == "bag" and r and r.cmd and r.cmd.bagEmpty)
+      pill(G, t, item, i == cur, live, u)
     end
     chevron(G, where[Pad.ITEMS[cur].id], u)
   end
@@ -175,7 +176,10 @@ return function(mod, deps)
       G.rectangle("line", t.x, t.y, t.w, t.h, rad, rad)
       G.setLineWidth(1)
     end
-    local live = (mv.pp or 0) > 0
+    -- (a list row: a move - chip its type, `right` its PP - or the pouch's item / a target: `chip`
+    -- its own words, `live` whether it can be picked)
+    local live
+    if mv.live ~= nil then live = mv.live else live = (mv.pp or 0) > 0 end
     -- the type chip
     local cw, ch = t.h * 1.05, t.h * 0.42
     local cx, cy = t.x + t.h * 0.3, t.y + (t.h - ch) / 2
@@ -184,10 +188,11 @@ return function(mod, deps)
     local fc = font(ch * 0.62)
     G.setFont(fc)
     G.setColor(1, 1, 1, 1)
-    G.printf((mv.typeName or ""):sub(1, 1) .. (mv.typeName or ""):sub(2):lower(), cx, cy + (ch - fc:getHeight()) / 2, cw, "center")
+    local chip = mv.chip or ((mv.typeName or ""):sub(1, 1) .. (mv.typeName or ""):sub(2):lower())
+    G.printf(chip, cx, cy + (ch - fc:getHeight()) / 2, cw, "center")
     -- the PP's width first: the name shrinks to fit before it
     local fp = font(t.h * 0.28)
-    local ppText = ("%d/%d"):format(mv.pp or 0, mv.maxPp or 0)
+    local ppText = mv.right or ("%d/%d"):format(mv.pp or 0, mv.maxPp or 0)
     local ppLeft = t.x + t.w - t.h * 0.42 - fp:getWidth(ppText)
     -- the name, and under it how it does on the boss
     local nx = cx + cw + t.h * 0.18
@@ -247,7 +252,7 @@ return function(mod, deps)
   function Pad.draw(G, w, h, r)
     local L = Pad.LOOK
     G.push("all")
-    if r and r.cmd and r.cmd.menu == "moves" then
+    if r and r.cmd and r.cmd.menu and r.cmd.menu ~= "main" then
       moveStack(G, w - h * L.EDGE, h - h * L.EDGE, h * Pad.MOVE_W, h * L.H, h * L.PITCH, r)
     else
       stack(G, w - h * L.EDGE, h - h * L.EDGE, h * L.W, h * L.H, h * L.PITCH, r)
@@ -265,7 +270,7 @@ return function(mod, deps)
     local k = min(h * 0.9 / (L.H + 3 * L.PITCH), w * 0.8 / (L.W + L.H * 0.45))
     local pw, ph, pitch = L.W * k, L.H * k, L.PITCH * k
     local total = ph + 3 * pitch
-    if r and r.cmd and r.cmd.menu == "moves" then
+    if r and r.cmd and r.cmd.menu and r.cmd.menu ~= "main" then
       moveStack(G, (w + pw * Pad.MOVE_W / L.W + ph * 0.45) / 2, (h + total) / 2, pw * Pad.MOVE_W / L.W, ph, pitch, r)
     else
       stack(G, (w + pw + ph * 0.45) / 2, (h + total) / 2, pw, ph, pitch, r)
@@ -273,10 +278,10 @@ return function(mod, deps)
     G.pop()
   end
 
-  -- (menu "moves": "move1".."move4" or "back")
+  -- (a list menu - "moves", "items", "target": "move1".."move4" for its rows, or "back")
   function Pad.hit(x, y, menu)
     if not inRect(x, y, where.panel) then return nil end
-    if menu == "moves" then
+    if menu and menu ~= "main" then
       if inRect(x, y, where.back) then return "back" end
       for i = 1, 4 do if inRect(x, y, where["move" .. i]) then return "move" .. i end end
       return "panel"

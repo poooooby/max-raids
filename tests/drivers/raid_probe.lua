@@ -112,6 +112,18 @@ local function body(game, log)
   waitFor(function() local c = R.current(); return not c or (c.events and c.evI >= 1) end, 6000)
   after(0.4)
   shot("r10a_turn_use")
+  -- the boss's move: the camera on it and whom it falls on (one member, or all four)
+  local function bossUses()
+    local c = R.current()
+    local e = c and c.events and c.events[c.evI]
+    return not c or not c.events or (e and e.kind == "use" and e.who.boss)
+  end
+  if waitFor(bossUses, 6000) and R.current() and R.current().events then
+    local c = R.current()
+    log("  the boss's move falls on members:", table.concat(R.targetsAhead(c.evI), " "))
+    after(0.6)
+    shot("r10e_boss_move")
+  end
   waitFor(function() local c = R.current(); local e = c and c.events and c.events[c.evI]; return not c or (e and e.kind == "damage") end, 6000)
   after(0.3)
   shot("r10b_turn_hit")
@@ -155,6 +167,29 @@ local function body(game, log)
     check(not st.summary and st.actor == second and st.chosen == 1,
       ("B closes it; the same member's turn (actor %s chosen %s, first %s)"):format(tostring(st.actor), tostring(st.chosen), tostring(first)))
     shot("r12_after_summary")
+    -- Bag: the pouch, then whom to use it on; B back out of both
+    R.choose("bag")
+    U.wait(4)
+    check(X.state().menu == "items", "Bag opens the pouch")
+    after(0.2)
+    shot("r13_bag")
+    R.choose("move1")
+    U.wait(4)
+    check(X.state().menu == "target", "a Potion asks whom it is for")
+    after(0.2)
+    shot("r14_target")
+    U.tap(game, "b")
+    U.wait(3)
+    U.tap(game, "b")
+    U.wait(3)
+    check(X.state().menu == "main", "B back out of both")
+    -- the barrier's pills (three of five standing, for the shot)
+    local cb = R.current() and R.current().boss
+    if cb then
+      cb.shieldShown = { left = 3, max = 5 }
+      U.wait(3)
+      shot("r15_shield")
+    end
     -- PROBE_FULL=1: play the raid to its end (every member's first move with PP), the words hurried
     if os.getenv("PROBE_FULL") == "1" then
       local turns = 0

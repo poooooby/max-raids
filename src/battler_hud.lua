@@ -81,7 +81,15 @@ return function(mod, deps)
   local function actionIcon(G, kind, cx, cy, s)
     G.setLineWidth(max(1, s * 0.11))
     G.setColor(0.45, 0.45, 0.48, 1)
-    if kind == "status" then
+    if kind == "item" then
+      -- a bag: its body, its flap, a handle
+      G.setColor(1, 1, 1, 1)
+      G.rectangle("fill", cx - s * 0.8, cy - s * 0.45, s * 1.6, s * 1.25, s * 0.25, s * 0.25)
+      G.setColor(0.45, 0.45, 0.48, 1)
+      G.rectangle("line", cx - s * 0.8, cy - s * 0.45, s * 1.6, s * 1.25, s * 0.25, s * 0.25)
+      G.arc("line", "open", cx, cy - s * 0.45, s * 0.4, math.pi, 2 * math.pi, 16)
+      G.line(cx - s * 0.8, cy + s * 0.15, cx + s * 0.8, cy + s * 0.15)
+    elseif kind == "status" then
       G.setColor(1, 1, 1, 1)
       G.circle("fill", cx, cy, s, 32)
       G.setColor(0.45, 0.45, 0.48, 1)
@@ -112,6 +120,7 @@ return function(mod, deps)
 
   -- the mark of a member's pick: "status" for a move that does no damage, else "fight"
   function Bh.actionOf(m, choice)
+    if choice and choice.item then return "item" end
     local mv = choice and choice.move and m.b and m.b.moves[choice.move]
     return (mv and mv.status) and "status" or "fight"
   end
@@ -134,7 +143,7 @@ return function(mod, deps)
     icon(G, info.icon, h * 0.02, by + (bh - h * 0.07) / 2, h * 0.07, mark == "now" and t or 0)
     local cx, cy = bw - h * 0.065, by + bh * 0.38
     if mark == "done" then tick(G, cx, cy, h * 0.022)
-    elseif mark == "fight" or mark == "status" then actionIcon(G, mark, cx, cy, h * 0.026)
+    elseif mark == "fight" or mark == "status" or mark == "item" then actionIcon(G, mark, cx, cy, h * 0.026)
     else bubble(G, cx, cy, h * 0.03, mark == "now", t or 0) end
     hpBar(G, bw - h * 0.108, by + bh * 0.8, h * 0.1, h * 0.009,
       info.maxHp and info.maxHp > 0 and info.hp / info.maxHp or 1)

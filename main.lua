@@ -45,6 +45,7 @@ return function(mod)
   local N = loadSibling(mod, "data/raid_rules.lua")
   local Bosses = loadSibling(mod, "data/raid_bosses.lua")
   local Sprites = loadSibling(mod, "data/raid_sprites.lua")
+  local Gmax = loadSibling(mod, "data/raid_gmax.lua")
   local HD = loadSibling(mod, "src/hd.lua")
   local makeRender3d = loadSibling(mod, "src/render3d.lua")
   local makeScene = loadSibling(mod, "src/raid_scene.lua")
@@ -74,7 +75,7 @@ return function(mod)
       local ok, d = pcall(mod.find, mod, "national_dex_gen3")
       return ok and type(d) == "table" and d.exports or nil
     end
-    local ok, bt = pcall(makeBattle, mod, { N = N, Bosses = Bosses, Sprites = Sprites, dex = dex })
+    local ok, bt = pcall(makeBattle, mod, { N = N, Bosses = Bosses, Sprites = Sprites, Gmax = Gmax, dex = dex })
     if ok and type(bt) == "table" then Battle = bt else mod.log:warn("the raid's battle failed to build: %s", tostring(bt)) end
   end
   local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil }) or nil
@@ -106,7 +107,7 @@ return function(mod)
   end
 
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
-    BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil,
+    BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome)
       if outcome == "win" and den and Dens and Dens.finish then pcall(Dens.finish, den) end

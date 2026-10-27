@@ -93,26 +93,39 @@ return function(mod, deps)
   --   reveal  pulled back and down to the ground, looking up the whole height of the boss
   --   boss    in under the boss (an announcement, its Max / G-Max move)
   --   wide    back and up (a shield going up or breaking)
-  --   member  over a member's shoulder toward the boss (Sc.memberShot(i))
+  --   member  a member's own turn (choosing, moving): the target shot on it (Sc.memberShot(i))
+  --   target  the boss attacking one member: almost directly behind it, low, looking up at the boss
+  --           (Sc.targetShot(i))
+  --   spread  the boss attacking all four: every member and the boss at once, nearer than wide
   Sc.SHOTS = {
     field = { eye = { 0, 1.15, 6.6 }, look = { 0, 4.2, -9 }, fov = 54 },
     close = { eye = { 0, 1.7, 3.2 }, look = { 0, 0.45, -1.4 }, fov = 46 },
     reveal = { eye = { 0, 1.0, 9.0 }, look = { 0, 4.6, -10 }, fov = 58 },
     boss = { eye = { 0, 1.5, 2.0 }, look = { 0, 6.4, -10 }, fov = 52 },
     wide = { eye = { 0, 2.4, 10.5 }, look = { 0, 3.8, -9 }, fov = 58 },
+    spread = { eye = { 0, 2.3, 8.2 }, look = { 0, 2.9, -8 }, fov = 62 },
   }
-  local memberPose = { eye = { 0, 0, 0 }, look = { 0, 0, 0 }, fov = 50 }
-  function Sc.memberShot(i)
+  -- almost directly behind the member, low, looking up past it at the boss: the member large in the
+  -- foreground, the boss towering over it, the others mostly out past the sides
+  -- TARGET while the boss attacks (the message band covers the screen's foot: aimed a little lower,
+  -- so the member stands clear of it); CHOOSE for the member's own turn (no band: the boss whole)
+  Sc.TARGET = { SIDE = 0.3, UP = 0.65, BACK = 3.6, LOOK_X = 0.7, LOOK_Y = 3.5, FOV = 56 }
+  Sc.CHOOSE = { SIDE = 0.3, UP = 0.65, BACK = 3.4, LOOK_X = 0.7, LOOK_Y = 4.4, FOV = 54 }
+  local targetPose = { eye = { 0, 0, 0 }, look = { 0, 0, 0 }, fov = 60 }
+  function Sc.targetShot(i, T)
     local m = Sc.MEMBERS[i] or Sc.MEMBERS[1]
     local P = Sc.PAD
-    -- behind it and a little to the side away from the middle, low; it fills the near corner and
-    -- the boss towers past it
-    local side = m.x <= 0 and 1 or -1
-    memberPose.eye[1], memberPose.eye[2], memberPose.eye[3] = m.x + side * 1.5, 1.25, m.z + 3.9
-    memberPose.look[1], memberPose.look[2], memberPose.look[3] = P.x - side * 0.7, 3.3, P.z
-    memberPose.fov = 58
-    return memberPose
+    T = T or Sc.TARGET
+    -- (a touch off its middle, toward the outside)
+    local side = m.x <= 0 and -1 or 1
+    targetPose.eye[1], targetPose.eye[2], targetPose.eye[3] = m.x + side * T.SIDE, T.UP, m.z + T.BACK
+    targetPose.look[1], targetPose.look[2], targetPose.look[3] = m.x * T.LOOK_X, T.LOOK_Y, P.z
+    targetPose.fov = T.FOV
+    return targetPose
   end
+
+  -- a member's own turn - choosing, moving - is framed the same way, so it is plain which one it is
+  function Sc.memberShot(i) return Sc.targetShot(i, Sc.CHOOSE) end
 
   local clock = 0
   function Sc.setTime(t) clock = t or 0 end
@@ -132,7 +145,8 @@ return function(mod, deps)
 
   -- the camera to a shot (a name, "member" with i, or a pose) over dur seconds (0: a cut)
   function Sc.shot(name, dur, i)
-    local pose = name == "member" and Sc.memberShot(i) or (type(name) == "table" and name) or Sc.SHOTS[name]
+    local pose = (name == "member" and Sc.memberShot(i)) or (name == "target" and Sc.targetShot(i))
+      or (type(name) == "table" and name) or Sc.SHOTS[name]
     if not pose then return false end
     copyPose(from, cur)
     copyPose(to, pose)

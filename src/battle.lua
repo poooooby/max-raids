@@ -4,12 +4,13 @@
 -- (Damage.calc with an adapter, so the National Dex's abilities and move rules apply), Gen 3
 -- accuracy and speed, effectiveness, and what a move does besides its damage (by its Gen 3 effect).
 -- src/raid_sim.lua runs the turns over this; nothing here touches the save.
---   Bt = battle(mod, { N, Bosses, Sprites, dex })   dex() -> national_dex_gen3's exports (moveExtra)
+--   Bt = battle(mod, { N, Bosses, Sprites, Gmax, dex })   dex() -> national_dex_gen3's exports (moveExtra);
+--   Gmax = data/raid_gmax.lua
 --   Bt.member(mon) -> battler ; Bt.boss(key, rng) -> battler ; Bt.adapter(rng) -> the sim's adapter
 --   Bt.TYPE_RGB[name] ; Bt.typeName(num)
 
 return function(mod, deps)
-  local N, Bosses, Sprites = deps.N, deps.Bosses, deps.Sprites
+  local N, Bosses, Sprites, Gmax = deps.N, deps.Bosses, deps.Sprites, deps.Gmax or { MOVES = {}, POWER_BANDS = {} }
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
   local Bt = {}
@@ -246,7 +247,50 @@ return function(mod, deps)
       if mv then boss.moves[#boss.moves + 1] = mv
       else mod.log:warn("raid boss %s: the game has no move %s", key, tostring(name)) end
     end
+    -- the raid's own: its barriers (its tier's HP shares; the segments from its base Def + Sp. Def),
+    -- its script, its G-Max move
+    boss.shields = T.shields or {}
+    local S = R.SEGMENTS or { BASE = 2, PER = 60, MIN = 2, MAX = 8 }
+    boss.segments = max(S.MIN, min(S.MAX, S.BASE + floor(((base.def or 80) + (base.spd or 80)) / S.PER)))
+    boss.script = R.SCRIPTS and R.SCRIPTS[b.script or "basic"] or {}
+    boss.gmax = Bt.gmaxMove(b.gmax, boss)
     return boss
+  end
+
+  -- a Max Move's power from its base move's (Gmax.POWER_BANDS; Fighting and Poison the lower column)
+  function Bt.maxPower(power, typeName)
+    for _, row in ipairs(Gmax.POWER_BANDS or {}) do
+      if power <= row[1] then return (typeName == "FIGHTING" or typeName == "POISON") and row[3] or row[2] end
+    end
+    return 130
+  end
+
+  -- the boss's G-Max move (data/raid_gmax.lua) as the sim runs it: on all four, never missing; its
+  -- power fixed, else the band of the boss's strongest move of its type
+  function Bt.gmaxMove(id, boss)
+    local g = id and Gmax.MOVES and Gmax.MOVES[id]
+    if not g then return nil end
+    local power = g.power
+    if not power then
+      local best = 0
+      for _, mv in ipairs(boss.moves or {}) do
+        if mv.typeName == g.type and not mv.status and mv.power > best then best = mv.power end
+      end
+      power = best > 0 and Bt.maxPower(best, g.type) or 130
+    end
+    local t = Bt.typeNum(g.type)
+    local effect = nil
+    if g.effect then
+      effect = {}
+      for k, v in pairs(g.effect) do effect[k] = v end
+      if effect.spare then effect.spareNum = Bt.typeNum(effect.spare) end
+    end
+    return {
+      name = g.name or ("G-Max " .. titled(id)), type = t, typeName = g.type, power = power, accuracy = 0,
+      priority = 0, status = false, spread = true, isGmax = true, gmaxEffect = effect, pp = 99, maxPp = 99,
+      ref = { id = "MAX_RAIDS_GMAX_" .. id, numId = 0, power = power, type = t, accuracy = 0, pp = 1, effect = 0,
+        priority = 0, target = 8, flags = 0, secondaryChance = 0 },
+    }
   end
 
   -- ------- the simulation's adapter
@@ -288,7 +332,7 @@ return function(mod, deps)
       if not Damage then return 1, { effectiveness = 1 } end
       st.player, st.enemy = att.side == "player" and att or def, att.side == "player" and def or att
       local ok, dmg, info = pcall(Damage.calc, att, def, mv.ref, { adapter = engineAdapter, st = st, rng = rng,
-        weather = st.weather, spread = spread or nil })
+        weather = st.weather, spread = spread or nil, highCrit = (att.critUp or 0) > 0 or nil })
       if not ok then
         mod.log:warn("raid damage failed (%s): %s", tostring(mv.name), tostring(dmg))
         return 1, { effectiveness = 1 }
