@@ -24,7 +24,7 @@ local function body(game, log)
   U.wait(60)
   local Runtime = require("src.core.game3.runtime")
   local Party = require("src.core.game3.party")
-  local C = require("src.core.game3.constants").of("emerald")
+  local C = require("src.core.game3.constants").of(os.getenv("POKEPORT_VERSION") or "emerald")
   local s0 = Runtime.getSession()
   if s0 and #(s0.party or {}) == 0 then
     for _, sp in ipairs({ "SPECIES_TORCHIC", "SPECIES_ZIGZAGOON", "SPECIES_MUDKIP", "SPECIES_RALTS" }) do

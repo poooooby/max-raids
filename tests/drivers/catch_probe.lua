@@ -23,7 +23,7 @@ local function body(game, log)
   U.wait(60)
   local Runtime = require("src.core.game3.runtime")
   local Party = require("src.core.game3.party")
-  local C = require("src.core.game3.constants").of("emerald")
+  local C = require("src.core.game3.constants").of(os.getenv("POKEPORT_VERSION") or "emerald")
   local s0 = Runtime.getSession()
   if s0 and #(s0.party or {}) == 0 then
     for _, sp in ipairs({ "SPECIES_TORCHIC", "SPECIES_ZIGZAGOON", "SPECIES_MUDKIP", "SPECIES_RALTS" }) do
@@ -41,6 +41,24 @@ local function body(game, log)
   log("open:", tostring(ok), tostring(why))
   if not waitFor(function() return X.state().phase == "command" end, 20000) then log("FAIL no commands"); return end
   local R = X.raid
+  -- the music asked of the engine, by name, logged at the end
+  local music = {}
+  do
+    local A = require("src.core.game3.audio")
+    local names = {}
+    local okS, songs = pcall(A.songs)
+    if okS and type(songs) == "table" then for k, v in pairs(songs) do names[v] = k end end
+    local function nm(id) return names[tonumber(id) or -1] or tostring(id) end
+    for _, f in ipairs({ "playSong", "fadeOutBgm", "playFanfare", "fadeOutAndPlay", "pauseBgm", "resumeBgm" }) do
+      local orig = A[f]
+      if type(orig) == "function" then
+        A[f] = function(a1, ...)
+          music[#music + 1] = ("%.1f:%s(%s)"):format(X.state().t or 0, f, f == "fadeOutBgm" and tostring(a1) or nm(a1))
+          return orig(a1, ...)
+        end
+      end
+    end
+  end
   -- every sound effect asked of the game, logged at the end
   local played = {}
   do
@@ -108,6 +126,17 @@ local function body(game, log)
     if X.state().phase ~= "throw" then break end
     shot(m[2])
   end
+  do
+    local A = require("src.core.game3.audio")
+    local seen = {}
+    waitFor(function()
+      local id = A._currentSong and A._currentSong.id or "none"
+      local key = tostring(id) .. (A._fanfareActive and "+fanfare" or "")
+      if seen[#seen] ~= key then seen[#seen + 1] = key end
+      return X.state().phase == "rewards"
+    end, 30000)
+    log("music through the catch:", table.concat(seen, " -> "))
+  end
   waitFor(function() return X.state().phase == "rewards" end, 30000)
   check(X.state().phase == "rewards", "the rewards card")
   after(1.2)
@@ -128,6 +157,9 @@ local function body(game, log)
   shot("c41_iris")
   waitFor(function() return X.state().phase ~= "outro" end, 8000)
   log("after the end card:", tostring(X.state().phase), tostring(X.state().active))
+  local A = require("src.core.game3.audio")
+  log("music:", table.concat(music, " "))
+  log("song now:", tostring(A._currentSong and A._currentSong.id), "fanfare", tostring(A._fanfareActive))
   log("sounds played (" .. #played .. "):", table.concat(played, " "))
   log(("%d failures"):format(fails))
   if X.state().active then X.close() end

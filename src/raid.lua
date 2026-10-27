@@ -415,8 +415,11 @@ return function(mod, deps)
     r = nil
     if Fx then Fx.clear() end
     Rd.release()
+    -- the field's song back, the raid's faded out under it (not cut, not over it)
     if Audio then
-      if Audio.restoreMapSong then pcall(Audio.restoreMapSong)
+      local okM, mapSong = pcall(function() return Audio.specialMapSong and Audio.specialMapSong() or Audio._mapSong end)
+      if okM and mapSong and Audio.fadeOutAndPlay then pcall(Audio.fadeOutAndPlay, mapSong)
+      elseif Audio.restoreMapSong then pcall(Audio.restoreMapSong)
       elseif Audio.changeMusicToDefault then pcall(Audio.changeMusicToDefault) end
     end
     if deps.onClose then deps.onClose() end
@@ -1258,6 +1261,8 @@ return function(mod, deps)
     if not (snd and Audio and Audio.resolveSong) then return end
     local intro, song = Audio.resolveSong(snd.caughtIntro), Audio.resolveSong(snd.caught)
     if intro then pcall(Audio.playSe, intro) end
+    -- the caught song once the fanfare has played (as the engine's catch: battle/catch_seq.lua); the
+    -- battle's music has already faded out (at the click), so nothing comes back under either
     local raid = r
     if song and Audio.waitSe and Audio.playSong then
       pcall(Audio.waitSe, intro, function() if r == raid then pcall(Audio.playSong, song) end end)
@@ -1413,7 +1418,12 @@ return function(mod, deps)
       for k = 1, T.CHECKS do
         if once("seWob" .. k, M.check + (k - 1) * T.CHECK) then Rd.se(C.wobble) end
       end
-      if th.caught and once("seClick", M.done) then Rd.se(C.click) end
+      if th.caught and once("seClick", M.done) then
+        Rd.se(C.click)
+        -- the battle's music fades out under the shrink, before the fanfare (else the fanfare holds
+        -- it and it comes back after)
+        if Audio and Audio.fadeOutBgm then pcall(Audio.fadeOutBgm, 4) end
+      end
       if not th.caught and once("seBurst", M.done) then Rd.se(C.burst) end
       if th.caught and once("seFanfare", M.gotcha) then Rd.caughtFanfare() end
     end

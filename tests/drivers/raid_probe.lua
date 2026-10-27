@@ -34,7 +34,7 @@ local function body(game, log)
   local Runtime = require("src.core.game3.runtime")
   local Party = require("src.core.game3.party")
   local Pokemon = require("src.core.game3.pokemon")
-  local C = require("src.core.game3.constants").of("emerald")
+  local C = require("src.core.game3.constants").of(os.getenv("POKEPORT_VERSION") or "emerald")
   local s0 = Runtime.getSession()
   if s0 and #(s0.party or {}) == 0 then
     Party.giveMon(s0, C:require("species", "SPECIES_TORCHIC"), 30)

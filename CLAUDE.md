@@ -507,6 +507,18 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - The end card: Next -> phase "outro" (`Rd.OUTRO`): the den once more (wide, the boss gone), a circle
     closing to black (`Rd.drawIris`), then the evolutions / moves over black.
   - Driver `tests/drivers/catch_probe.lua` (the roll made sure; `PROBE_FAIL=1` a miss).
+- **The other versions** (2026-10-26): FireRed and Ruby checked (LeafGreen / Sapphire share their code):
+  the raid (songs by version: Mewtwo's theme / Regi's), the catch (each version's ball words, its caught
+  fanfare), the dens (FireRed's routes are `FR_ROUTE_1` ..., Hoenn's `RU_ROUTE101` ...; towns and the
+  Safari Zone get none). Drivers take POKEPORT_VERSION for their constants; dens_probe reads the
+  game's own route / town names, loads maps through `Field._mod / Field._game` (as the engine's warps),
+  presses through FireRed's intro first, never walks into the Safari Zone (its mode would carry
+  through the run; `Dn.isRoute` is asked instead) and shoots every place it sends the player
+  (`at_<map>.png`).
+- **The music's hand-offs** (Wooble: no overlap): caught - the battle's song fades out at the ball's
+  click (`fadeOutBgm(4)`), the caught fanfare plays alone, the caught song starts once it has played
+  (`waitSe`, as the engine's catch_seq); the raid's close fades into the field's song
+  (`fadeOutAndPlay(specialMapSong())`) rather than cutting. catch_probe logs every music call by name.
 - **The battle pad on the second screen** (BATTLE PAD: SECOND SCREEN; 2026-10-26, Wooble: a quad like
   Kanto Gear's, our buttons, a modern background, pressed in when selected): `src/screen2.lua` (S2) on
   the engine's SecondScreen bridge (the Android display or the desktop companion): from the raid

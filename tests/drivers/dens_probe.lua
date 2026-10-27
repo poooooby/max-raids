@@ -30,9 +30,38 @@ local function body(game, log)
   end
   game:_handleBootAction({ action = "new_game", name = "DS", gender = 0 })
   U.wait(60)
+  -- (FireRed / LeafGreen open on Oak's speech: on into the field before teleporting)
+  for _ = 1, 600 do
+    local M0 = require("src.core.game3.map")
+    if M0.current and M0.currentDef and M0.currentDef() and next(M0.currentDef()) ~= nil then break end
+    U.tap(game, "a")
+    U.wait(4)
+  end
+  do
+    local M0 = require("src.core.game3.map")
+    log("after boot: phase", tostring(game.phase), "map", tostring(M0.current))
+  end
+  U.shot(game, dir .. "/d00_boot.png")
+  do
+    local Field = require("src.core.game3.field")
+    local g3 = Field._game or game
+    local maps = g3.data and g3.data.maps
+    for _, id in ipairs({ "FR_PLAYERS_HOUSE_2F", "FR_ROUTE1", "FR_PALLET_TOWN" }) do
+      local d = maps and maps[id]
+      local n = 0
+      if type(d) == "table" then for _ in pairs(d) do n = n + 1 end end
+      log("data.maps", id, type(d), "keys", n, "mt", tostring(d and getmetatable(d) ~= nil), "w", tostring(d and d.width),
+        "type", tostring(d and d.mapType))
+    end
+    local okD, Dataset = pcall(require, "src.core.game3.dataset")
+    local dm = okD and Dataset.map and Dataset.map("FR_ROUTE1")
+    log("Dataset.map FR_ROUTE1:", type(dm), "w", tostring(dm and dm.width), "type", tostring(dm and dm.mapType))
+    local cur = require("src.core.game3.map").currentDef()
+    log("current def w", tostring(cur and cur.width), "type", tostring(cur and cur.mapType))
+  end
   local Runtime = require("src.core.game3.runtime")
   local Party = require("src.core.game3.party")
-  local C = require("src.core.game3.constants").of("emerald")
+  local C = require("src.core.game3.constants").of(os.getenv("POKEPORT_VERSION") or "emerald")
   local Map = require("src.core.game3.map")
   local Player = require("src.core.game3.player")
   local s0 = Runtime.getSession()
@@ -51,31 +80,78 @@ local function body(game, log)
   local Dn = X.dens
   local function shot(name) log("shot", name, U.shot(game, dir .. "/" .. name .. ".png") and "ok" or "MISSING") end
   local function goTo(mapId, x, y, facing)
-    local ok, err = pcall(Map.load, nil, game, mapId, { x = x, y = y, facing = facing or "down" })
-    if not ok then log("Map.load", mapId, "failed:", tostring(err)); return false end
+    -- (through the field's own game and mod, as the engine's warps load maps)
+    local Field = require("src.core.game3.field")
+    local ok, res, why = pcall(Map.load, Field._mod, Field._game or game, mapId, { x = x, y = y, facing = facing or "down" })
+    if not ok or (res == nil and why) then log("Map.load", mapId, "failed:", tostring(ok and why or res)); return false end
     local s = Runtime.getSession()
     if s then s.x, s.y, s.facing = x, y, facing or "down" end
     Player.cellX, Player.cellY, Player.px, Player.py = x, y, x * 16, y * 16
     Player.targetX, Player.targetY = x, y
     Player.facing = facing or "down"
     U.wait(20)
+    U.shot(game, dir .. "/at_" .. mapId .. ".png")
+    log("  sent to", mapId, x, y)
     return true
   end
 
   -- dens on a few routes
   local first
   -- no dens in a town, a city or the Safari Zone
-  for _, nm in ipairs({ { "EM_PETALBURG_CITY", 10, 10 }, { "EM_LITTLEROOT_TOWN", 10, 10 }, { "EM_SAFARI_ZONE_SOUTH", 30, 30 } }) do
+  -- (this game's own maps: its routes, two towns, its Safari Zone)
+  local maps = game.data and game.data.maps or {}
+  local routes, towns, safari = {}, {}, nil
+  for id in pairs(maps) do
+    if type(id) == "string" then
+      if id:find("SAFARI", 1, true) then safari = safari or id
+      elseif id:match("ROUTE_?%d+$") then routes[#routes + 1] = id
+      elseif id:match("_TOWN$") or id:match("_CITY$") then towns[#towns + 1] = id end
+    end
+  end
+  local function routeNo(id) return tonumber(id:match("ROUTE_?(%d+)$")) or 0 end
+  table.sort(routes, function(a, b) return routeNo(a) < routeNo(b) end)
+  table.sort(towns)
+  local pickR = {}
+  for _, id in ipairs(routes) do
+    local n = routeNo(id)
+    if (#routes > 0) and (n == 1 or n == 2 or n == 3 or n == 4 or n == 101 or n == 102 or n == 103 or n == 104
+      or n == 110 or n == 119 or n == 124 or n == 22 or n == 24) then pickR[#pickR + 1] = id end
+  end
+  -- (FireRed's table does not list every map up front: the routes by the game's own prefix)
+  if #pickR == 0 and towns[1] then
+    local prefix = towns[1]:match("^(%u+_)")
+    for _, n in ipairs({ 1, 2, 3, 4, 22, 24 }) do
+      for _, form in ipairs({ prefix .. "ROUTE_" .. n, prefix .. "ROUTE" .. n }) do
+        if maps[form] then pickR[#pickR + 1] = form; break end
+      end
+    end
+  end
+  log("this game's routes:", #routes, "picked:", table.concat(pickR, " "))
+  local noDen = {}
+  if towns[1] then noDen[#noDen + 1] = { towns[1], 10, 10 } end
+  if towns[2] then noDen[#noDen + 1] = { towns[2], 10, 10 } end
+  -- (the Safari Zone is never visited: walking in starts the game's Safari mode, which the rest of the
+  -- run would carry; the den rules are asked about it instead)
+  if safari then check(Dn.isRoute(safari, nil) == false, safari .. " is never a den's route") end
+  for _, nm in ipairs(noDen) do
     if goTo(nm[1], nm[2], nm[3]) then
       Dn.ensure()
       U.wait(5)
       check(Dn.forMap(nm[1]) == nil, nm[1] .. " gets no dens")
     end
   end
-  for _, mapId in ipairs({ "EM_ROUTE101", "EM_ROUTE102", "EM_ROUTE103", "EM_ROUTE104", "EM_ROUTE110", "EM_ROUTE119",
-    "EM_ROUTE124" }) do
+  for _, mapId in ipairs(pickR) do
     if goTo(mapId, 8, 8) then
       waitFor(function() return Dn.forMap(mapId) ~= nil end, 120)
+      do
+        local d0 = Map.currentDef and Map.currentDef()
+        local ks = {}
+        for k, v in pairs(d0 or {}) do ks[#ks + 1] = tostring(k) .. "=" .. (type(v) == "table" and "{}" or tostring(v)) end
+        table.sort(ks)
+        log("  def keys:", table.concat(ks, " "))
+        log("  on", tostring(Map.current), "type", tostring(d0 and d0.mapType), "size", tostring(d0 and d0.width),
+          tostring(d0 and d0.height), "route?", tostring(Dn.isRoute(Map.current, d0)))
+      end
       local list = Dn.forMap(mapId)
       local parts = {}
       for i, d in ipairs(list or {}) do
@@ -87,6 +163,7 @@ local function body(game, log)
       check(list ~= nil, mapId .. " got its dens")
       -- each den against the engine's own view of the map
       local view = Dn.viewOf(mapId, Map.currentDef())
+      if not view then log("FAIL no view of", mapId); break end
       local nres = 0
       for _ in pairs(view.reservedSet) do nres = nres + 1 end
       for i, d in ipairs(list or {}) do
