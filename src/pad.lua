@@ -71,13 +71,15 @@ return function(mod, deps)
     { 0.18, -0.3, 0.48, -0.08, 0.72, -0.34 },                    -- front arm
     { 0.16, -0.32, -0.18, -0.2, -0.46, 0.02 },                   -- back arm
   }
+  local runPts = {}
   local function runFigure(G, cx, cy, s, widthK, extra)
     for _, j in ipairs(RUN_JOINTS) do
       local w = s * (j == RUN_JOINTS[1] and 0.34 or 0.24) * widthK + extra * 2
       G.setLineWidth(max(1, w))
-      local p = {}
-      for q = 1, #j, 2 do p[#p + 1] = cx + j[q] * s; p[#p + 1] = cy + j[q + 1] * s end
-      G.line(p)
+      -- (one table for every limb, every frame: no garbage)
+      for q = 1, #j do runPts[q] = (q % 2 == 1) and (cx + j[q] * s) or (cy + j[q] * s) end
+      for q = #j + 1, #runPts do runPts[q] = nil end
+      G.line(runPts)
       for q = 1, #j, 2 do G.circle("fill", cx + j[q] * s, cy + j[q + 1] * s, w / 2, 16) end
     end
     G.circle("fill", cx + 0.36 * s, cy - 0.72 * s, s * 0.21 + extra, 20)
@@ -179,15 +181,27 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   local LIGHT_TOP, LIGHT_BOTTOM = { 1, 1, 1 }, { 0.82, 0.84, 0.89 }
   local DARK_TOP, DARK_BOTTOM = { 0.22, 0.22, 0.27 }, { 0.03, 0.03, 0.05 }
   local GREY = { 0.6, 0.6, 0.62 }
+  local faceSize = { 0, 0 }   -- (reused: a table a call would be garbage every frame)
+  -- the options as one reused table (a table literal at each call was garbage every frame):
+  --   Pad.face(G, x, y, w, h, rad, Pad.faceOpts(dark, pressed, accent, corner, tint))
+  local faceOpts = {}
+  function Pad.faceOpts(dark, pressed, accent, corner, tint)
+    faceOpts.dark, faceOpts.pressed, faceOpts.accent = dark or false, pressed or false, accent
+    faceOpts.corner, faceOpts.tint, faceOpts.alpha = corner or false, tint or 0, nil
+    return faceOpts
+  end
+  local NO_OPTS = {}
+  local BALL_RED = { 0.9, 0.2, 0.3 }
   function Pad.face(G, x, y, w, h, rad, o)
-    o = o or {}
+    o = o or NO_OPTS
     if not faceReady() then
       if o.dark then G.setColor(0.05, 0.05, 0.06, 1) else G.setColor(1, 1, 1, 1) end
       G.rectangle("fill", x, y, w, h, rad, rad)
       return
     end
     local sh = faceShader
-    sh:send("size", { w, h })
+    faceSize[1], faceSize[2] = w, h
+    sh:send("size", faceSize)
     sh:send("radius", min(rad, w / 2, h / 2))
     sh:send("top", o.dark and DARK_TOP or LIGHT_TOP)
     sh:send("bottom", o.dark and DARK_BOTTOM or LIGHT_BOTTOM)
@@ -207,7 +221,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     -- a soft shadow under it
     G.setColor(0, 0, 0, 0.25)
     G.rectangle("fill", t.x + 2 * u, t.y + 3 * u, t.w, t.h, rad, rad)
-    Pad.face(G, t.x, t.y, t.w, t.h, rad, { dark = selected, accent = item.rgb, tint = selected and 0.25 or 0.12 })
+    Pad.face(G, t.x, t.y, t.w, t.h, rad, Pad.faceOpts(selected, false, item.rgb, false, selected and 0.25 or 0.12))
     local c = item.rgb
     -- the selected one keeps a thin rim in its colour, so it reads against the dark den
     if selected then
@@ -280,7 +294,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.setColor(0, 0, 0, 0.25)
     G.rectangle("fill", t.x + 2 * u, t.y + 3 * u, t.w, t.h, rad, rad)
     local c = mv.rgb or { 0.6, 0.6, 0.6 }
-    Pad.face(G, t.x, t.y, t.w, t.h, rad, { dark = selected, accent = c, tint = selected and 0.25 or 0.1 })
+    Pad.face(G, t.x, t.y, t.w, t.h, rad, Pad.faceOpts(selected, false, c, false, selected and 0.25 or 0.1))
     if selected then
       G.setColor(c[1], c[2], c[3], 0.9)
       G.setLineWidth(max(1.5, t.h * 0.035))
@@ -477,8 +491,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
     -- the face (textured; pressed, its bevel turned over and a shadow inside its top)
     local c = rgb or { 0.6, 0.6, 0.6 }
-    Pad.face(G, x, y, w, h, rad, { dark = sel, pressed = pressed or sel, accent = c, corner = true,
-      tint = sel and 0.2 or 0.06 })
+    Pad.face(G, x, y, w, h, rad, Pad.faceOpts(sel, pressed or sel, c, true, sel and 0.2 or 0.06))
     G.setColor(c[1], c[2], c[3], sel and 1 or 0.9)
     G.setLineWidth(max(2, h * 0.025))
     G.rectangle("line", x + h * 0.012, y + h * 0.012, w - h * 0.024, h - h * 0.024, rad, rad)
@@ -577,7 +590,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local bl = balls[c.ball or 1]
       local bw2, bh2 = hh * 2.2, hh * 0.66
       local b = rset(sWhere.back, w - bw2 - h * 0.03, (hh - bh2) / 2, bw2, bh2)
-      Pad.face(G, b.x, b.y + (held == "back" and bh2 * 0.06 or 0), b.w, b.h, bh2 / 2, { pressed = held == "back" })
+      Pad.face(G, b.x, b.y + (held == "back" and bh2 * 0.06 or 0), b.w, b.h, bh2 / 2, Pad.faceOpts(false, held == "back"))
       local fb = font(bh2 * 0.5)
       G.setFont(fb)
       G.setColor(0.08, 0.08, 0.1, 1)
@@ -594,14 +607,14 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           G.setColor(0, 0, 0, 0.35)
           G.rectangle("fill", t.x + 3, t.y + 5, t.w, t.h, aw * 0.2, aw * 0.2)
         end
-        Pad.face(G, t.x, t.y + down, t.w, t.h, aw * 0.2, { pressed = held == a.id })
+        Pad.face(G, t.x, t.y + down, t.w, t.h, aw * 0.2, Pad.faceOpts(false, held == a.id))
         local cx, cy, sz = t.x + t.w / 2, t.y + down + t.h / 2, aw * 0.22
         G.setColor(0.1, 0.1, 0.12, 1)
         if i == 1 then G.polygon("fill", cx - sz, cy, cx + sz * 0.7, cy - sz * 1.1, cx + sz * 0.7, cy + sz * 1.1)
         else G.polygon("fill", cx + sz, cy, cx - sz * 0.7, cy - sz * 1.1, cx - sz * 0.7, cy + sz * 1.1) end
       end
       local px, pw2 = gx + aw + pad, gw - (aw + pad) * 2
-      Pad.face(G, px, gy, pw2, rowH, rowH * 0.12, { dark = true, accent = bl and bl.rgb or { 0.9, 0.2, 0.3 }, tint = 0.15 })
+      Pad.face(G, px, gy, pw2, rowH, rowH * 0.12, Pad.faceOpts(true, false, bl and bl.rgb or BALL_RED, false, 0.15))
       if bl then
         local is = rowH * 0.42
         if Pad.itemIcon then Pad.itemIcon(G, bl.item, px + pw2 / 2 - is / 2, gy + rowH * 0.08, is, bl.rgb) end

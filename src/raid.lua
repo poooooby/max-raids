@@ -33,6 +33,8 @@ return function(mod, deps)
   local Pokemon = engine("src.core.game3.pokemon")
   local Runtime = engine("src.core.game3.runtime")
   local Audio = engine("src.core.game3.audio")
+  local SeIds = engine("src.core.game3.se_ids")
+  local Warm = engine("src.core.game3.warm")
   local Summary = engine("src.core.game3.summary_data")
 
   local function drawPixel(...)
@@ -260,18 +262,40 @@ return function(mod, deps)
   end
   Rd.memberInfo = memberInfo
 
+  -- gen3-hd-sprites hands out a 64 x 64 stand-in cropped for the battle's own framing, and tags it
+  -- with the whole frame at its full resolution: { texture, quad, scale (the frame's px to the
+  -- stand-in's) } (its exports.tagOf), drawn here instead - the stand-in cut big Pokemon off
+  local function hdTagOf(image)
+    local ok, spec = pcall(function()
+      local lib = mod.find and mod:find("gen3-hd-sprites")
+      local ex = lib and lib.exports
+      if not (type(ex) == "table" and type(ex.tagOf) == "function") then return nil end
+      return ex.tagOf(image)
+    end)
+    if ok and type(spec) == "table" and spec.texture then return spec end
+    return nil
+  end
+  Rd.hdTagOf = hdTagOf
+
   local function memberPics(r)
     for _, m in ipairs(r.members) do
       memberInfo(m)
       local pic = backPicOf(m.mon)
       if pic then
         local img = pic.image
-        -- its whole picture: the provider's own crop when it gives one, else the whole image - a
-        -- sprite mod may paint a big Pokemon on a canvas larger than the 64 x 64 it reports
-        -- (g9-battle-sprites-gen3: Rapidash 76 x 78), and a 64 x 64 corner of it cut the head off
+        -- its whole picture: gen3-hd-sprites' full frame when the pic is its cropped stand-in; else
+        -- the provider's own crop when it gives one, else the whole image - a sprite mod may paint a
+        -- big Pokemon on a canvas larger than the 64 x 64 it reports (g9-battle-sprites-gen3:
+        -- Rapidash 76 x 78), and a 64 x 64 corner of it cut the head off
+        local tag = hdTagOf(img)
+        local tagScale = 1
+        local srcQuad = pic.quad
+        if tag then
+          img, srcQuad, tagScale = tag.texture, tag.quad, tonumber(tag.scale) or 1
+        end
         local iw, ih = img:getDimensions()
         local qx, qy, w, h = 0, 0, iw, ih
-        if pic.quad and pic.quad.getViewport then qx, qy, w, h = pic.quad:getViewport() end
+        if srcQuad and srcQuad.getViewport then qx, qy, w, h = srcQuad:getViewport() end
         m.draw = m.draw or {}
         local d = m.draw
         d.image = img
@@ -282,7 +306,8 @@ return function(mod, deps)
           d.qx, d.qy, d.qw, d.qh, d.src = qx, qy, w, h, img
         end
         -- (one scale for every member: the size the provider reports, so a big one is drawn bigger)
-        d.cell = pic.h or 64
+        d.cell = (pic.h or 64) / tagScale
+        d.hd = tag ~= nil
         if not d.box or fresh then d.box = opaqueBox(img, d.quad) end
       end
     end
@@ -340,6 +365,8 @@ return function(mod, deps)
     r.phase, r.t, r.members, r.cues, r.hud = "intro", 0, members, {}, 0
     r.say = nil
     setupBattle(members)
+    -- (the sounds to bake again from the four who went in; those already baked are passed over)
+    r.warm = nil
     if Scene then
       Scene.setTime(0)
       Scene.shot("close", 0)
@@ -461,6 +488,7 @@ return function(mod, deps)
       dt = dt * 0.06
     end
     r.t = r.t + dt
+    Rd.stepWarm()
     -- the den screen: no den in 3D yet
     if r.phase == "den" then return end
     if Scene then Scene.setTime(r.t) end
@@ -793,11 +821,178 @@ return function(mod, deps)
   end
   Rd.placeOf = placeOf
 
-  -- a sound by its SE name (data/raid_sounds.lua), through the game's own player
+  -- a sound's SE name as this game has it: a list (data/raid_sounds.lua) gives the first the game
+  -- has (FireRed's SE_BALL_CLICK is SE_RG_BALL_CLICK in Emerald)
+  local function seName(id)
+    if type(id) ~= "table" then return id end
+    for _, name in ipairs(id) do
+      if not (SeIds and SeIds.resolve) or SeIds.resolve(name) then return name end
+    end
+    return nil
+  end
+
+  -- ------- the sounds, baked ahead and kept
+  -- A sound's first play has the engine bake it (its synth: 2-20 ms here) and the bake's samples
+  -- (~1 MB of Lua heap a second of sound) often set off the engine's full collection - 50-110 ms lost
+  -- at the blow it lands with. The engine keeps those samples (to rebuild a sound at another pan or
+  -- volume) in a cache of 34 s, least recently used out, which one raid's sounds overrun. So the
+  -- raid's sounds are baked ahead, one a frame through the engine's warm-up (Audio.prewarmSe), the
+  -- likeliest first, while little moves - the den screen and the command menus (the intro only when
+  -- there was no den screen) - and each is kept here as a sound of its own (16-bit, outside the Lua
+  -- heap), played through the engine's book-keeping as its fanfares are (its player slot, stopSe,
+  -- isSePlaying, waitSe, suspension).
+  Rd.WARM = { PHASES = { den = true, command = true } }
+  local kept = {}   -- the SE's number -> { src, mono }
+  local ModAudio = engine("src.core.game3.mod_audio")
+
+  -- the sound kept for an SE's number, made from the engine's bake while it still holds it
+  local function keptSource(num)
+    local mono = Audio._mono and true or false
+    local e = kept[num]
+    if e and e.mono == mono then return e.src end
+    local hit = Audio._seRaw and Audio._seRaw[num]
+    if not (hit and not hit.loop and Audio._buildSeSoundData and love and love.audio) then return nil end
+    local ok, sd = pcall(Audio._buildSeSoundData, hit.rawL, hit.rawR, 1, 0, mono)
+    if not (ok and sd) then return nil end
+    local okS, src = pcall(love.audio.newSource, sd, "static")
+    if not (okS and src) then return nil end
+    kept[num] = { src = src, mono = mono }
+    return src
+  end
+
+  -- a kept sound played as the engine plays an SE: the one on its player stopped, tracked, at the
+  -- game's effects volume
+  local function playKept(num)
+    -- (a sound pack's own effect for it: the engine's player plays that)
+    if ModAudio and ModAudio.sfxKey and ModAudio.sfxKey(num) then return false end
+    local src = keptSource(num)
+    if not src then return false end
+    local info = Audio.songInfo and Audio.songInfo(num) or {}
+    local mplay = tonumber(info.player) or 1
+    if Audio._stopSePlayer then Audio._stopSePlayer(mplay) end
+    local playing = false
+    pcall(function() playing = src:isPlaying() end)
+    if playing then
+      local okC, copy = pcall(src.clone, src)
+      if not (okC and copy) then return false end
+      src = copy
+    end
+    pcall(src.stop, src)
+    pcall(src.setVolume, src, min(1, Audio._sfxVolume or 1))
+    pcall(src.play, src)
+    local list = Audio._seSources
+    if list and Audio._seMeta and Audio._seByPlayer then
+      list[#list + 1] = src
+      Audio._seByPlayer[mplay] = src
+      Audio._seMeta[src] = { id = num, player = mplay }
+      while #list > 8 do
+        local idx = (list[1] == Audio._fanfareSource) and 2 or 1
+        local old = table.remove(list, idx)
+        if not old then break end
+        if Audio._forgetSeSource then Audio._forgetSeSource(old) end
+        pcall(old.stop, old)
+      end
+    end
+    return true
+  end
+
+  -- a sound by its SE name (data/raid_sounds.lua): kept, else through the game's own player (and
+  -- kept from its bake for the next time)
   function Rd.se(id)
+    id = seName(id)
     if not (id and Audio and Audio.playSe) then return false end
+    local num = SeIds and SeIds.resolve and SeIds.resolve(id)
+    if num and playKept(num) then return true end
     local ok, played = pcall(Audio.playSe, id)
+    if num then keptSource(num) end
     return ok and played
+  end
+
+  -- the raid's sounds, the likeliest first: the boss's moves (and how they land), how a blow lands,
+  -- the battle's events, the four's moves, the catch
+  local function warmList()
+    if not Sounds then return {} end
+    local out, seen = {}, {}
+    local function add(id)
+      id = seName(id)
+      if id and not seen[id] then seen[id] = true; out[#out + 1] = id end
+    end
+    local function moveSounds(mv)
+      if not mv then return end
+      local spec = Rd.specOf(mv)
+      add(Sounds.moveSe(spec, mv.typeName))
+      add(Sounds.LAND[spec.shape or ""] or Sounds.LAND[spec[1] or ""])
+    end
+    local boss = r.boss or (Battle and Battle.boss and r.key and select(2, pcall(Battle.boss, r.key)))
+    if type(boss) == "table" then
+      if boss.gmax then add(Sounds.GMAX_CHARGE); moveSounds(boss.gmax) end
+      for _, mv in ipairs(boss.moves or {}) do moveSounds(mv) end
+    end
+    add(Sounds.HIT.plain); add(Sounds.HIT.super); add(Sounds.HIT.weak)
+    local E = Sounds.EVENT
+    for _, k in ipairs({ "shieldUp", "shieldHit", "shieldBreak", "faint", "back", "up", "down", "cheer" }) do add(E[k]) end
+    -- the four: the battlers' moves once they fight; on the den screen the whole party's (the four
+    -- can still change)
+    local mons = {}
+    if r.members then
+      for _, m in ipairs(r.members) do mons[#mons + 1] = m end
+    elseif r.party then
+      for _, p in ipairs(r.party) do mons[#mons + 1] = p end
+    end
+    for _, m in ipairs(mons) do
+      if m.b and m.b.moves then
+        for _, mv in ipairs(m.b.moves) do moveSounds(mv) end
+      elseif m.mon and Battle and Battle.move then
+        for i = 1, 4 do
+          local ref = m.mon.moves and m.mon.moves[i]
+          if ref and ref ~= 0 then
+            local ok, mv = pcall(Battle.move, ref)
+            if ok then moveSounds(mv) end
+          end
+        end
+      end
+    end
+    local C = Sounds.CATCH
+    for _, k in ipairs({ "throw", "open", "suck", "close", "land", "wobble", "click", "burst" }) do add(C[k]) end
+    return out
+  end
+
+  -- each frame: the next sound baked (the engine's warm-up runs it in its next step) or the last one
+  -- kept - one a frame, the bake being a frame's worth of time
+  function Rd.stepWarm()
+    if not (r and Audio and Audio.prewarmSe and Warm and SeIds and SeIds.resolve) then return end
+    if not (Rd.WARM.PHASES[r.phase or ""] or (r.phase == "intro" and not r.den)) then return end
+    local w = r.warm
+    if not w then
+      w = { list = warmList(), i = 0, kept = 0 }
+      r.warm = w
+    end
+    if w.busy then
+      if Warm.pending(w.busy.key) then return end
+      if keptSource(w.busy.num) then w.kept = w.kept + 1 end
+      w.busy = nil
+      return
+    end
+    while w.i < #w.list do
+      w.i = w.i + 1
+      local num = SeIds.resolve(w.list[w.i])
+      if num and not kept[num] then
+        -- (still in the engine's cache: kept from it at once)
+        if keptSource(num) then w.kept = w.kept + 1; return end
+        local ok, queued = pcall(Audio.prewarmSe, num, 1)
+        if ok and queued then
+          w.busy = { key = "se:" .. tostring(num), num = num }
+          return
+        end
+      end
+    end
+    w.done = true
+  end
+  -- (drivers) the sounds baked ahead: { list, i, kept, done }; Rd.keptSound(name) whether one is kept
+  function Rd.warmState() return r and r.warm end
+  function Rd.keptSound(name)
+    local num = SeIds and SeIds.resolve and SeIds.resolve(seName(name))
+    return num ~= nil and kept[num] ~= nil
   end
 
   -- a blow felt (Fx.onImpact): the raid's clock held a moment, the camera jabbed and shaken, the one
@@ -1175,7 +1370,7 @@ return function(mod, deps)
     G.setColor(0, 0, 0, 0.25)
     G.rectangle("fill", t.x + 2, t.y + 3, t.w, t.h, rad, rad)
     if Pad and Pad.face then
-      Pad.face(G, t.x, t.y, t.w, t.h, rad, { dark = sel })
+      Pad.face(G, t.x, t.y, t.w, t.h, rad, Pad.faceOpts(sel))
     else
       if sel then G.setColor(0.04, 0.04, 0.05, 1) else G.setColor(1, 1, 1, 1) end
       G.rectangle("fill", t.x, t.y, t.w, t.h, rad, rad)

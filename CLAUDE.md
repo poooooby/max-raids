@@ -507,6 +507,19 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - The end card: Next -> phase "outro" (`Rd.OUTRO`): the den once more (wide, the boss gone), a circle
     closing to black (`Rd.drawIris`), then the evolutions / moves over black.
   - Driver `tests/drivers/catch_probe.lua` (the roll made sure; `PROBE_FAIL=1` a miss).
+- **Performance and garbage** (2026-10-27, as PlayNav's perf drivers): `tests/drivers/perf_parts.lua` - in
+  each busy state (the commands, a G-Max move at its height, the slab breaking up, the catch
+  mid-wobble, the rewards card) the time and the Lua garbage a call (collector stopped) of
+  Rd.draw, Scene.draw / prepare, Fx.drawLayer / draw / update, Pad.draw / drawSecond, the HUD,
+  Rd.drawThrow / drawRewards, Screen2.update (a display stood in for), Rd.update and whole frames;
+  each against `BUDGET` (FAIL over it; PERF_STRICT=0 logs only); and FPS live per state (vsync holds
+  the desktop to 60: at least `PERF_FPS_MIN` 57, no frame over `PERF_HITCH_MS` 34). Baseline
+  2026-10-27 (desktop): frames 0.5-0.9 ms and ~20-26 KB garbage; the pad 9 KB, the quad 11 KB (a
+  reused `Pad.faceOpts` / size table and the Run figure's points cut ~2.5 KB each), the push 12 KB;
+  60 fps, slowest frame ~26 ms (in a G-Max move / the throw).
+- **gen3-hd-sprites' party pictures** (2026-10-27, Wooble: still cut off): it hands out a 64 x 64 stand-in
+  cropped for the battle and tags it with the whole frame (`exports.tagOf`: texture, quad, scale);
+  `memberPics` draws the tag's frame (`Rd.hdTagOf`, `cell` = 64 / scale), as PlayNav does.
 - **Rewards as Sword / Shield's** (2026-10-26; Serebii's den tables, EVIDENCE "RAID.REWARD"):
   `RAID.REWARD` - Exp. Candies always (1★ XS x5 + S, 2★ S x5 + M, 3★ M x5 + L, 4★ M x2 + L x3,
   5★ L x2 + XL; National Dex Gen 3 registers them, `exports.expCandies`; Rare Candies stand in
@@ -586,6 +599,26 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   version's caught fanfare then caught song (`Rd.caughtFanfare`, the battle profile's sounds);
   broken free BALL_OPEN, gone SE_FLEE. The menus tick SE_SELECT when a press or tap moves a cursor or
   picks (`uiKey` before / after `Rd.input` / `Rd.pointer`). raid_probe and catch_probe log every SE.
+  A `Sounds` entry may be a list: the first name the version has (`seName`; FireRed's SE_BALL_CLICK is
+  Emerald's SE_RG_BALL_CLICK - the click was silent on Emerald, as it is in the engine's own catch).
+- **Sounds baked ahead and kept** (2026-10-27, Wooble: a hitch after the big moves): the engine bakes an
+  SE on its first play (its synth, 2-20 ms) and the samples (~1 MB of Lua heap a second of sound) set off
+  its full collection - 53 ms at Wildfire's Heat Wave, 109 ms at the slab's Earthquake + hit. Its own
+  cache of samples is 34 s (`Audio.SE_RAW_MAX_FRAMES`, least recently used out; all 70 raid sounds are
+  130 s), so one raid's overran it. `Rd.stepWarm` (each Rd.update, phases `Rd.WARM.PHASES` den /
+  command, the intro only with no den screen) queues `warmList()` one at a time through
+  `Audio.prewarmSe` (the engine's Warm, which spreads a bake over frames) - the boss's G-Max and moves
+  with their LAND, the hits, the events, the party's moves (the whole party on the den screen), the
+  catch - and keeps each (`keptSource`: `Audio._buildSeSoundData` at master 1 -> a static Source,
+  16-bit, outside the Lua heap; rebuilt if the game's MONO changes). `Rd.se` plays a kept sound as the
+  engine does (`playKept`: the SE's player slot stopped, cloned while playing, `_sfxVolume`, entered in
+  `_seSources` / `_seByPlayer` / `_seMeta` as its fanfares are, so stopSe / isSePlaying / waitSe /
+  suspension apply); a sound pack's own effect (`ModAudio.sfxKey`) and anything not kept go through
+  `Audio.playSe`, kept from its bake after. Kept sounds last for the session (at most the 70). Den
+  screen: 28 sounds in ~5 s, slowest frame 28 ms. Drivers: `hitch_probe.lua` (frame by frame through
+  the boss's G-Max and first move; HITCH lines with the time in each wrapped part; `PROBE_COLD=1` none
+  baked ahead), `se_bake_probe.lua` (each sound's bake time, length and heap). What remains in a battle:
+  a ~25-40 ms frame every few seconds, the engine's full collection of the frames' garbage.
 - **HP drains as the blow lands:** `scheduleMove` keeps each target's HP after the move (`hp`); at its
   impact `Rd.impact` sets the bar's target and shows its card (all the members a move hits, together;
   a damage event for a member already shown keeps the cards).

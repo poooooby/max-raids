@@ -74,6 +74,14 @@ local function body(game, log)
         local Sc = X._test.scene
         if Sc then Sc.shot("field", 0) end
         U.wait(20)
+        for i, m in ipairs(R.current().members) do
+          local d = m.draw or {}
+          local qx, qy, qw, qh = 0, 0, 0, 0
+          if d.quad then qx, qy, qw, qh = d.quad:getViewport() end
+          log(("member %d: hd tag %s, picture %dx%d, cell %s, opaque box %s"):format(i, tostring(d.hd), qw, qh,
+            tostring(d.cell), d.box and table.concat({ math.floor(d.box[1]), math.floor(d.box[2]), math.floor(d.box[3]),
+            math.floor(d.box[4]) }, ",") or "?"))
+        end
         U.shot(game, (os.getenv("SHOT_DIR") or "/tmp/max_raids") .. "/team_" .. key .. ".png")
         for i = 1, 4 do
           if Sc then Sc.shot("member", 0, i) end

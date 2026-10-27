@@ -50,8 +50,11 @@ S.STATUS = { BRN = "SE_M_EMBER", PSN = "SE_M_TOXIC", TOX = "SE_M_TOXIC", PAR = "
 S.FIELD = { FIRE = "SE_M_FLAME_WHEEL", WATER = "SE_M_WHIRLPOOL", GRASS = "SE_M_BIND", ROCK = "SE_M_ROCK_THROW" }
 
 S.CATCH = {
-  throw = "SE_BALL_THROW", open = "SE_BALL_OPEN", suck = "SE_BALL_TRADE", close = "SE_BALL_CLICK",
-  land = "SE_M_EARTHQUAKE", bounce = "SE_BALL_BOUNCE_1", wobble = "SE_BALL", click = "SE_BALL_CLICK",
+  -- (a list: the first this game has - FireRed's SE_BALL_CLICK is SE_RG_BALL_CLICK in Emerald)
+  throw = "SE_BALL_THROW", open = "SE_BALL_OPEN", suck = "SE_BALL_TRADE",
+  close = { "SE_BALL_CLICK", "SE_RG_BALL_CLICK", "SE_BALL" },
+  land = "SE_M_EARTHQUAKE", bounce = "SE_BALL_BOUNCE_1", wobble = "SE_BALL",
+  click = { "SE_BALL_CLICK", "SE_RG_BALL_CLICK", "SE_BALL" },
   burst = "SE_BALL_OPEN", gone = "SE_FLEE",
 }
 S.UI = { move = "SE_SELECT", pick = "SE_SELECT" }

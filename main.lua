@@ -239,7 +239,7 @@ return function(mod)
   mod.exports.bosses = function() return Bosses.ORDER end
   mod.exports.dens = Dens
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
-    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2,
+    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds,
     padSecond = function(on) padForced = on end }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end
