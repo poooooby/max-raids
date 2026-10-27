@@ -373,6 +373,8 @@ return function(mod, deps)
   -- done, false when there is nothing to do here, nil to try again (the field not running yet)
   function Dn.ensure()
     if mod.options:get("dens") == false then return false end
+    -- (none until the region has awoken: the first badge, then Dn.awaken's shake and words)
+    if not Dn.awake() then return false end
     local M = engine("src.core.game3.map")
     local mapId = M and M.current
     local def = M and M.currentDef and M.currentDef()
@@ -416,6 +418,106 @@ return function(mod, deps)
       end
     end
     if retry then return nil end
+    return true
+  end
+
+  -- ------- the dens awaken: none before the first gym badge. Back outside with it (the gym left,
+  -- or the next time the player is outdoors with the field free), once: the screen shakes as the
+  -- game's own quakes do (the field camera swung from a task, as the ShakeScreen / ShakeCamera
+  -- specials), then the words; the player held meanwhile (Field.lock). Saved as "densAwake".
+  Dn.AWAKEN = {
+    -- the shake: px across / up, swings, frames a swing (60 a second)
+    SHAKE = { X = 3, Y = 4, SWINGS = 40, FRAMES = 3 }, SE = "SE_M_EARTHQUAKE",
+    WAIT_S = 0.6,   -- outdoors this long first (the warp's fade over)
+    WORDS = {
+      "A powerful force shakes the region...",
+      "Pillars of light are rising from\nPOKéMON DENS along the routes!",
+    },
+  }
+  Dn.OUTDOOR_TYPES = { [1] = true, [2] = true, [3] = true, [6] = true }
+
+  function Dn.awake() return mod.save:get("densAwake") == true end
+  -- (drivers) awake or not, without the shake
+  function Dn.setAwake(on) mod.save:set("densAwake", on and true or nil) end
+
+  local function outdoors(mapId, def)
+    if type(mapId) ~= "string" then return false end
+    local mt = def and tonumber(def.mapType)
+    if mt then return Dn.OUTDOOR_TYPES[mt] == true end
+    return mapId:find("ROUTE", 1, true) ~= nil or mapId:find("TOWN", 1, true) ~= nil or mapId:find("CITY", 1, true) ~= nil
+  end
+
+  -- whether the field is free: nothing locking the player, no menu or message up
+  local function fieldFree()
+    local Field = engine("src.core.game3.field")
+    local Stack = engine("src.ui.game3.stack")
+    local Message = engine("src.ui.game3.message")
+    if Field and Field.isLocked and Field.isLocked() then return false end
+    if Stack and Stack.busy and Stack.busy() then return false end
+    if Message and Message.isOpen and Message.isOpen() then return false end
+    return true
+  end
+
+  -- each field step: the awakening, when it is due (the first badge, outdoors, the field free)
+  local outsideFor = 0
+  function Dn.stepAwaken(dt)
+    if Dn.awake() or Dn.awakening or mod.options:get("dens") == false then return end
+    local M = engine("src.core.game3.map")
+    local mapId = M and M.current
+    local def = M and M.currentDef and M.currentDef()
+    if not (outdoors(mapId, def) and fieldFree()) then outsideFor = 0; return end
+    outsideFor = outsideFor + (dt or 1 / 60)
+    if outsideFor < Dn.AWAKEN.WAIT_S then return end
+    if Dn.badges() < 1 then return end
+    Dn.awaken()
+  end
+
+  -- the awakening itself (drivers call it straight)
+  function Dn.awaken(onDone)
+    if Dn.awakening then return false end
+    local Field = engine("src.core.game3.field")
+    local FieldView = engine("src.core.game3.field_view")
+    local Task = engine("src.core.game3.task")
+    local Audio = engine("src.core.game3.audio")
+    local A = Dn.AWAKEN
+    Dn.awakening = true
+    if Field and Field.lock then Field.lock("max_raids_awaken") end
+    local function finish()
+      mod.save:set("densAwake", true)
+      Dn.awakening = false
+      if Field and Field.unlock then pcall(Field.unlock, "max_raids_awaken") end
+      Dn.pending = true
+      if onDone then onDone() end
+    end
+    local function words()
+      local rows = {}
+      for _, t in ipairs(A.WORDS) do rows[#rows + 1] = { "text", t } end
+      local ok, err = mod.world:queueScript(rows, { onDone = function() finish() end })
+      if not ok then
+        mod.log:warn("dens: the awakening's words could not show: %s", tostring(err))
+        finish()
+      end
+    end
+    if Audio and Audio.playSe then pcall(Audio.playSe, A.SE) end
+    if not (FieldView and Task and Task.spawn) then words(); return true end
+    local S = A.SHAKE
+    local frame, left, cx, cy = 0, S.SWINGS, S.X, S.Y
+    Task.spawn(function()
+      frame = frame + 1
+      if frame % S.FRAMES == 0 then
+        left = left - 1
+        cx, cy = -cx, -cy
+        -- (it eases off over its last third)
+        local k = math.min(1, left / (S.SWINGS / 3))
+        FieldView.cameraPanX, FieldView.cameraPanY = floor(cx * k + 0.5), floor(cy * k + 0.5)
+        if left <= 0 then
+          FieldView.cameraPanX, FieldView.cameraPanY = 0, 0
+          words()
+          return true
+        end
+      end
+      return false
+    end)
     return true
   end
 
@@ -537,6 +639,10 @@ return function(mod, deps)
     Dn.pending = true
     mod.hooks:wrap("input.step", function(next, game, dt, ...)
       local res = next(game, dt, ...)
+      do
+        local ok, err = pcall(Dn.stepAwaken, tonumber(dt))
+        if not ok then mod.log:warn("dens: the awakening: %s", tostring(err)) end
+      end
       if Dn.pending then
         local ok, done = pcall(Dn.ensure)
         if not ok then mod.log:warn("dens: %s", tostring(done)) Dn.pending = false

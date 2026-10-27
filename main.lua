@@ -61,6 +61,8 @@ return function(mod)
   local makePadHide = loadSibling(mod, "src/pad_hide.lua")
   local makeDens = loadSibling(mod, "src/dens.lua")
   local makeScreen2 = loadSibling(mod, "src/screen2.lua")
+  local makeDen = loadSibling(mod, "src/den_screen.lua")
+  local makePick = loadSibling(mod, "src/pc_pick.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
     mod.log:error("Max Raids is missing files; it stays off -- reinstall the mod")
     return
@@ -92,6 +94,12 @@ return function(mod)
   end
   local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil }) or nil
   local PadHide = makePadHide and makePadHide(mod) or nil
+  -- the den screen's PC: the game's boxes, to choose a Pokemon from
+  local Pick = nil
+  if makePick then
+    local ok, pk = pcall(makePick, mod)
+    if ok and type(pk) == "table" then Pick = pk else mod.log:warn("the den's PC failed to build: %s", tostring(pk)) end
+  end
 
   -- the pad on the second screen: chosen, and the display there (else it stays on the main one)
   local Screen2 = nil
@@ -135,6 +143,7 @@ return function(mod)
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax,
     Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene }) or nil, MoveFx = MoveFx, Sounds = Sounds,
+    makeDen = makeDen, Pick = Pick,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome)
       if outcome == "win" and den and Dens and Dens.finish then pcall(Dens.finish, den) end
@@ -239,7 +248,7 @@ return function(mod)
   mod.exports.bosses = function() return Bosses.ORDER end
   mod.exports.dens = Dens
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
-    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds,
+    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick,
     padSecond = function(on) padForced = on end }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end

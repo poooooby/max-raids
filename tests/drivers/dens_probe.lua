@@ -78,6 +78,10 @@ local function body(game, log)
   local X = game.mods and game.mods.exports and game.mods.exports.max_raids
   if not check(X ~= nil and X.dens ~= nil, "max_raids and its dens are loaded") then return end
   local Dn = X.dens
+  -- (the region awake for the run: dens appear only after the first badge and the awakening;
+  -- awaken_probe plays that)
+  local wasAwake = Dn.awake()
+  Dn.setAwake(true)
   local function shot(name) log("shot", name, U.shot(game, dir .. "/" .. name .. ".png") and "ok" or "MISSING") end
   local function goTo(mapId, x, y, facing)
     -- (through the field's own game and mod, as the engine's warps load maps)
@@ -260,9 +264,11 @@ local function body(game, log)
   U.wait(10)
   shot("d02_den_screen")
   local R = X.raid
-  R.denToggle(2)
+  -- (slot 2 from the party: the slot menu, PARTY, the fifth Pokemon or the last)
+  local rr = R.current()
+  R.Den.openMenu(rr, 2); R.Den.menuChoose(rr, "party"); R.Den.pickParty(rr, math.min(5, #rr.party))
   U.wait(4)
-  shot("d03_den_toggled")
+  shot("d03_den_slot_changed")
   check(R.denStart(), "START goes in")
   waitFor(function() return (X.state().t or 0) >= 5.2 end, 3000)
   shot("d04_raid")
@@ -277,6 +283,7 @@ local function body(game, log)
   local again = Dn.forMap(mapId)
   check(again and again[1] == den, "the same den, saved")
   shot("d05_field_after")
+  Dn.setAwake(wasAwake)
   log(("%d failures"):format(fails))
 end
 

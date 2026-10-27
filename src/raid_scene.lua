@@ -26,6 +26,8 @@ return function(mod, deps)
   Sc.PLAT = { cx = 0, cz = -5.4, rx = 9.6, rz = 7.0, foot = -4.5 }
   Sc.PAD = { x = 0, z = -9.2, r = 3.4, h = 0.22 }
   Sc.MEMBERS = { { x = -3.1, z = -0.75 }, { x = -1.05, z = -1.25 }, { x = 1.05, z = -1.25 }, { x = 3.1, z = -0.75 } }
+  -- the members drawn mirrored: right of the boss (a back pic faces up and to the right)
+  Sc.MEMBER_FLIP = { [3] = true, [4] = true }
   Sc.MEMBER_H = 1.1          -- a member's height (the boss's size is against it)
   -- a member's sprite: one scale for all (a 64-px pic's height in metres), so each keeps its own
   -- size against the others
@@ -920,6 +922,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local bw = box[3] - box[1]
     -- one scale for every member (a 64-px pic is MEMBER_PIC_H tall), not each fitted to a height
     local k = hpx * (Sc.MEMBER_PIC_H / Sc.MEMBER_H) / (pic.cell or 64)
+    -- (a back pic faces up and to the right: those right of the boss are mirrored to face it)
+    local fx = Sc.MEMBER_FLIP[i] and -1 or 1
     -- fainted: taken off the field - it turns red and shrinks away about its middle, lifting a little
     -- (pic.shrink 1 -> 0; back in the fight, 0 -> 1 the same way)
     local shrink = pic.shrink or 1
@@ -935,15 +939,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         G2.setBlendMode("add")
         G2.setColor(1, 0.2, 0.25, 0.7 * shrink)
         for _, dd in ipairs(OUT) do
-          if pic.quad then G2.draw(pic.image, pic.quad, x + dd[1] * 2, cy + dd[2] * 2, 0, ks, ks, ox, midY)
-          else G2.draw(pic.image, x + dd[1] * 2, cy + dd[2] * 2, 0, ks, ks, ox, midY) end
+          if pic.quad then G2.draw(pic.image, pic.quad, x + dd[1] * 2, cy + dd[2] * 2, 0, ks * fx, ks, ox, midY)
+          else G2.draw(pic.image, x + dd[1] * 2, cy + dd[2] * 2, 0, ks * fx, ks, ox, midY) end
         end
         G2.setBlendMode("alpha")
         G2.setShader()
       end
       G2.setColor(1, 0.55 + 0.45 * shrink, 0.55 + 0.45 * shrink, shrink)
-      if pic.quad then drawPixel(pic.image, pic.quad, x, cy, 0, ks, ks, ox, midY)
-      else drawPixel(pic.image, x, cy, 0, ks, ks, ox, midY) end
+      if pic.quad then drawPixel(pic.image, pic.quad, x, cy, 0, ks * fx, ks, ox, midY)
+      else drawPixel(pic.image, x, cy, 0, ks * fx, ks, ox, midY) end
       G2.setColor(1, 1, 1, 1)
       return
     end
@@ -968,15 +972,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
     G2.setColor(1, 1, 1, 1)
     local ox, oy = (box[1] + box[3]) / 2, box[4]
-    if pic.quad then drawPixel(pic.image, pic.quad, sx, sy, 0, kx, kb, ox, oy)
-    else drawPixel(pic.image, sx, sy, 0, kx, kb, ox, oy) end
+    if pic.quad then drawPixel(pic.image, pic.quad, sx, sy, 0, kx * fx, kb, ox, oy)
+    else drawPixel(pic.image, sx, sy, 0, kx * fx, kb, ox, oy) end
     local s = white > 0 and sil()
     if s then
       G2.setShader(s)
       G2.setBlendMode("add")
       G2.setColor(1, 1, 1, 0.9 * white)
-      if pic.quad then G2.draw(pic.image, pic.quad, sx, sy, 0, kx, kb, ox, oy)
-      else G2.draw(pic.image, sx, sy, 0, kx, kb, ox, oy) end
+      if pic.quad then G2.draw(pic.image, pic.quad, sx, sy, 0, kx * fx, kb, ox, oy)
+      else G2.draw(pic.image, sx, sy, 0, kx * fx, kb, ox, oy) end
       G2.setBlendMode("alpha")
       G2.setShader()
     end

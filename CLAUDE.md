@@ -198,14 +198,64 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
   - **Done.** `Dn.finish(den)` marks a den done (the spent look).
   - **Badges.** `Flags.forVersion(Profile.forSession(nil).id).BADGES` flags, read with
     `Flags.getFlag(store)`.
-- The den screen (`raid.lua`, phase "den").
-  - `Rd.openDen(den)` puts the layer up. A quiet den just says so.
-  - It shows the boss as a black silhouette with a red rim (a silhouette shader), its stars and types,
-    and the party to pick up to four from; the first four start ticked.
-  - START (`Rd.denStart`) begins the intro with them; BACK leaves.
-  - Up / down, A toggles, START, B; taps on the rows and buttons (`Rd.denWhere`).
-  - Presses are ignored for `DEN_ARM_S` (0.25 s) after it opens: the A that opened it was toggling the
-    first row.
+  - **The awakening** (2026-10-27, Wooble: dens gated behind the first gym): `Dn.ensure` places and
+    spawns nothing until `Dn.awake()` (save "densAwake"). `Dn.stepAwaken` (each input.step) waits for
+    the first badge, an outdoor map (`OUTDOOR_TYPES` 1 town / 2 city / 3 route / 6 ocean route: the
+    gym left) and the field free (`Field.isLocked`, `Stack.busy`, `Message.isOpen`) for `WAIT_S` 0.6,
+    then `Dn.awaken`: the player held (`Field.lock("max_raids_awaken")`), SE_M_EARTHQUAKE, the field
+    camera swung from a `Task` as the engine's ShakeScreen / ShakeCamera specials do
+    (`FieldView.cameraPanX / Y`, `AWAKEN.SHAKE` 3 x 4 px, 40 swings of 3 frames, easing off over the
+    last third), then `AWAKEN.WORDS` through `mod.world:queueScript` text rows ("A powerful force
+    shakes the region..." / "Pillars of light are rising from POKéMON DENS along the routes!"), then
+    saved awake, the player free, the map's dens ensured. A save with a badge already awakens on its
+    next free outdoor moment. `Dn.setAwake(on)` for drivers (dens_probe sets it for its run and puts
+    it back). Driver `tests/drivers/awaken_probe.lua` (no badge: nothing on a route; the badge set in
+    the first gym on its exit: nothing indoors; out of the door: the shake, the words, awake, the
+    route's dens; Emerald, FireRed, Ruby - Ruby types slower).
+- The den screen (`src/den_screen.lua`, Den = `Rd.Den`, raid phase "den"; 2026-10-27, Wooble, after
+  Sword / Shield's den screen).
+  - `Rd.openDen(den)` puts the layer up; `Den.open(r)` fills `r.slots[1..4]` ({ mon, name, level })
+    with the party's first four that can fight (no eggs, HP > 0). A quiet den says so, with EXIT.
+  - Look (`Den.LOOK`, sizes in u = h / 360): a red panel cut on a slant (SLANT_TOP 0.67 / SLANT_FOOT
+    0.42 of the width) with faint dark stripes; the stars white top left; a badge per type (its colour
+    square, the name on a dark slanted plate, `Battle.TYPE_RGB`); the boss's black silhouette
+    (nearest, a silhouette shader, `Rd.bossBox` its opaque box); the rule at the foot ("The battle
+    ends when" on a dark red band). On the pale panel: the four slots two by two (the game's party
+    icon, two frames bobbing while selected; the name in title case, one size for all four that fits),
+    START and EXIT as pills near the foot, the selected one black with a chevron.
+  - The cursor: `r.cursor` 1..4 the slots (1 2 / 3 4), 5 START, 6 EXIT. A on a slot opens its menu
+    (`r.denMenu`; PARTY / PC / BACK, `Den.MENU`, left of the slots at the slot's row): PARTY lists the
+    party (`r.denParty`: icon, name, level, the slot it is in, fainted dimmed and refused); a Pokemon
+    put in a slot another slot holds swaps the two (`Den.put`). START (`Rd.denStart`) begins with the
+    slots in order (`Den.members`); EXIT or B leaves. Taps: `Den.where` (slots, menu, party rows,
+    START, EXIT; a tap off an open menu closes it).
+  - PC (`src/pc_pick.lua`, Pick, main's `_test.pick`): the game's own Storage System
+    (`box_storage_ui`, opened in its withdraw mode) with its `handleInput` / `draw` swapped while
+    up: A on a boxed Pokemon opens our SELECT / SUMMARY / BACK, drawn with the game's window frame,
+    font and arrow (`Window.stdFrame / printPx / cursorPx`, where its own action menu sits); SELECT
+    puts it in the slot and closes the PC (`Box.close`, SE_PC_OFF); SUMMARY the game's summary of the
+    box (context "factory", read only), back to the menu; BACK closes the menu. A on the box's name,
+    PARTY POKEMON or an empty slot, and SELECT / START, are taken away (no box menu, no drawer, no
+    move: the save is never changed); CLOSE BOX and B close as the game does. The den screen stands
+    aside (`r.aside`) meanwhile. A boxed Pokemon fights as a copy like any other (the after-raid
+    steps sort it last: `partyIndex` 99).
+  - After a raid: the rewards give no Exp. (as Sword / Shield), so `Rd.startAfter`'s evolution and
+    move steps (`levelFrom / levelTo`) are not reached today; they work on a boxed Pokemon all the
+    same. Driver `tests/drivers/after_probe.lua` (`PROBE_BOSS`, SNORLAX_2 to have the boss strike):
+    a raid won with a boxed Pokemon in slot 1 - the party and the box identical field by field
+    after, though every copy took damage; then the steps forced on the boxed Torchic: it evolves in
+    its box slot, the "delete a move?" question and the game's move picker (summary `select_move`)
+    replace a move on it, the party untouched.
+  - Its buttons are the battle pad's (2026-10-27, Wooble: "modernize like the battle pad"): `face`
+    draws `Pad.face` (brushed, gloss, bevel; dark and pressed in while selected, a rim in its colour,
+    a soft shadow while it stands up), `Den.ACCENT` per button (START green, EXIT red, PARTY blue, PC
+    purple, BACK grey, the slots and party rows the den's red with its colour corner), words bold
+    (drawn twice), the pad's chevron; the pale panel carries the pad backdrop's faint hexagon grid
+    and drifting light streaks (`panels(G, w, h, t)`).
+  - Presses are ignored for `DEN_ARM_S` (0.25 s) after it opens (the A that opened it).
+  - Driver `tests/drivers/den_screen_probe.lua` (a party of six, two boxed: the slots, the menu, the
+    party list, a swap, the PC, its menu, the summary, BACK, SELECT, START with the boxed one in
+    slot 3, a quiet den; shots p01..p12).
 - `src/raid_scene.lua` (Sc), the den in 3D, built in code in metres.
   - **Geometry:** a plateau (superellipse rim, cliff), the cave floor, walls with a tunnel mouth and a
     ceiling, stalagmites and stalactites, boulders, the boss's pad (metal, a glowing ring, rim lights).
@@ -423,7 +473,10 @@ luajit tests/raid_sim_test.lua   # the turns: order, faints, the storm, statuses
   stands the player under it, facing up.
 - **A den in a reserved cell** logs the cells, `Dn.placedWith[mapId]` (the reserved count when it was
   placed) and the objects near it. Seen once on Route 110 (2026-10-26), not again in four runs: open.
-- **Presses** A for the den screen, toggles a member, then START for the intro, and closes.
+- **Presses** A for the den screen, puts the fifth party Pokemon in slot 2 (PARTY), then START for the
+  intro, and closes.
+- **Underwater Route 124** fails "got its dens" (seen 2026-10-27, on the commit before the den screen
+  too): open.
 - **A new day** then re-rolls that den in place.
 
 **Engine gotcha:** inside a mod, `package.loaded` is not the engine's table. Look engine modules up

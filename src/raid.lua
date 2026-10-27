@@ -388,21 +388,9 @@ return function(mod, deps)
 
   -- ------- the den screen: what a den holds today, and the four who go in
 
-  -- the party as the den screen lists it (eggs left out): { mon, name, level }
-  local function roster()
-    local out = {}
-    for _, mon in ipairs(party()) do
-      if not isEgg(mon) then
-        local name = "?"
-        if Pokemon and Pokemon.displayName then
-          local ok, n = pcall(Pokemon.displayName, mon)
-          if ok and type(n) == "string" then name = n end
-        end
-        out[#out + 1] = { mon = mon, name = name, level = tonumber(mon.level) or 1 }
-      end
-    end
-    return out
-  end
+  -- the den screen (src/den_screen.lua): the four slots, PARTY / PC, START / EXIT
+  local Den = deps.makeDen and deps.makeDen(mod, { Rd = Rd, Bosses = Bosses, Battle = Battle, Pick = deps.Pick, Pad = Pad }) or nil
+  Rd.Den = Den
 
   -- the den screen takes no presses for this long after it opens
   Rd.DEN_ARM_S = 0.25
@@ -410,37 +398,18 @@ return function(mod, deps)
   function Rd.openDen(den)
     if r then return false, "busy" end
     if type(den) ~= "table" then return false, "no den" end
-    local list = roster()
-    r = { phase = "den", den = den, key = den.active and not den.done and den.boss or nil, t = 0,
-      party = list, picked = {}, cursor = 1, cues = {}, hud = 0 }
-    for i = 1, min(4, #list) do r.picked[i] = true end
+    if not Den then return false, "no den screen" end
+    r = { phase = "den", den = den, key = den.active and not den.done and den.boss or nil, t = 0, cues = {}, hud = 0 }
+    Den.open(r)
     if r.key and not Rd.load(r.key) then r.key = nil end
     if deps.onOpen then deps.onOpen(r) end
     return true
   end
 
-  local function pickedCount()
-    local n = 0
-    for _, on in pairs(r.picked) do if on then n = n + 1 end end
-    return n
-  end
-
-  -- a party row toggled in or out (at most four)
-  function Rd.denToggle(i)
-    if not (r and r.phase == "den" and r.party[i]) then return false end
-    if r.picked[i] then r.picked[i] = nil
-    elseif pickedCount() < 4 then r.picked[i] = true
-    else return false end
-    return true
-  end
-
-  -- from the den screen into the raid with the four picked (party order)
+  -- from the den screen into the raid with the slots' Pokemon (slot order)
   function Rd.denStart()
-    if not (r and r.phase == "den" and r.key) then return false end
-    local members = {}
-    for i, row in ipairs(r.party) do
-      if r.picked[i] and #members < 4 then members[#members + 1] = { mon = row.mon } end
-    end
+    if not (r and r.phase == "den" and r.key and Den) then return false end
+    local members = Den.members(r)
     if #members == 0 then return false end
     begin(members)
     return true
@@ -938,6 +907,8 @@ return function(mod, deps)
       for _, m in ipairs(r.members) do mons[#mons + 1] = m end
     elseif r.party then
       for _, p in ipairs(r.party) do mons[#mons + 1] = p end
+      -- (and any taken from the PC)
+      for i = 1, 4 do if r.slots and r.slots[i] then mons[#mons + 1] = r.slots[i] end end
     end
     for _, m in ipairs(mons) do
       if m.b and m.b.moves then
@@ -1959,14 +1930,9 @@ return function(mod, deps)
     if not r or r.summary or r.aside then return end
     if r.skipInput then r.skipInput = nil; return end
     if r.phase == "den" then
-      -- (the press that opened the den is still down on its first frames: not a toggle)
-      if r.t < Rd.DEN_ARM_S then return end
-      local n = #r.party
-      if input:wasPressed("up") and n > 0 then r.cursor = (r.cursor - 2) % n + 1
-      elseif input:wasPressed("down") and n > 0 then r.cursor = r.cursor % n + 1
-      elseif input:wasPressed("a") then Rd.denToggle(r.cursor)
-      elseif input:wasPressed("start") then Rd.denStart()
-      elseif input:wasPressed("b") then Rd.close() end
+      -- (the press that opened the den is still down on its first frames: not a choice)
+      if r.t < Rd.DEN_ARM_S or not Den then return end
+      Den.input(r, input)
       return
     end
     if r.phase == "command" and Pad then
@@ -2008,9 +1974,6 @@ return function(mod, deps)
     end
   end
 
-  -- the den screen's places (window pixels), from its last draw
-  local denWhere = { rows = {}, start = {}, back = {} }
-  Rd.denWhere = denWhere
   local function inRect(x, y, t) return t and t.w and x >= t.x and x <= t.x + t.w and y >= t.y and y <= t.y + t.h end
 
   -- a pointer on the window (input.pointer): true when the den screen or the pad took it
@@ -2023,15 +1986,7 @@ return function(mod, deps)
   end
   function pointerInner(ev)
     if r and r.phase == "den" then
-      if ev.phase == "released" and r.t >= Rd.DEN_ARM_S then
-        if inRect(ev.x, ev.y, denWhere.start) then Rd.denStart()
-        elseif inRect(ev.x, ev.y, denWhere.back) then Rd.close()
-        else
-          for i, row in ipairs(denWhere.rows) do
-            if inRect(ev.x, ev.y, row) then r.cursor = i; Rd.denToggle(i) end
-          end
-        end
-      end
+      if r.t >= Rd.DEN_ARM_S and Den then Den.pointer(r, ev) end
       return true
     end
     if r and r.phase == "rewards" then
@@ -2272,109 +2227,8 @@ return function(mod, deps)
     end
   end
 
-  -- the den screen: a dark red backdrop; the boss as a black silhouette with a red rim, its stars
-  -- and types; the party to pick from (up to four, ticked), START and BACK. A quiet den says so.
-  local function rset(t, x, y, ww, hh) t.x, t.y, t.w, t.h = x, y, ww, hh; return t end
-  local function button(G, t, rgb, word, u, live)
-    local k = live and 1 or 0.45
-    G.setColor(rgb[1] * 0.45 * k, rgb[2] * 0.45 * k, rgb[3] * 0.45 * k, 1)
-    G.rectangle("fill", t.x, t.y + 3 * u, t.w, t.h, 8 * u, 8 * u)
-    G.setColor(rgb[1] * k, rgb[2] * k, rgb[3] * k, 1)
-    G.rectangle("fill", t.x, t.y, t.w, t.h, 8 * u, 8 * u)
-    G.setFont(font(t.h * 0.45))
-    G.setColor(1, 1, 1, live and 1 or 0.6)
-    G.printf(word, t.x, t.y + (t.h - t.h * 0.45 * 1.2) / 2, t.w, "center")
-  end
-  local silShader, silFailed = nil, false
-  local function silhouette()
-    if silShader or silFailed then return silShader end
-    local ok, s = pcall(love.graphics.newShader, [[
-vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-  return vec4(color.rgb, color.a * step(0.5, Texel(tex, tc).a));
-}
-]])
-    if ok then silShader = s else silFailed = true end
-    return silShader
-  end
-
-  local function drawDen(G, w, h)
-    local u = h / 360
-    -- backdrop
-    G.setColor(0.07, 0.03, 0.05, 1)
-    G.rectangle("fill", 0, 0, w, h)
-    G.setColor(0.35, 0.03, 0.08, 0.6)
-    G.circle("fill", w * 0.3, h * 0.55, h * 0.45, 48)
-    local key = r.key
-    G.setFont(font(20 * u))
-    G.setColor(1, 1, 1, 1)
-    if not key then
-      G.printf("The den is quiet.", 0, h * 0.4, w, "center")
-      G.setFont(font(14 * u))
-      G.setColor(0.8, 0.8, 0.85, 1)
-      G.printf("Nothing stirs here today. Come back tomorrow.", 0, h * 0.4 + 30 * u, w, "center")
-      rset(denWhere.back, w / 2 - 70 * u, h * 0.7, 140 * u, 34 * u)
-      rset(denWhere.start, 0, 0, 0, 0)
-      for i = #denWhere.rows, 1, -1 do denWhere.rows[i] = nil end
-      button(G, denWhere.back, { 0.2, 0.45, 0.9 }, "BACK", u, true)
-      return
-    end
-    -- the boss: a red rim, then its silhouette
-    local img, q, cell = Rd.frameAt(key, r.t)
-    if img and loaded then
-      local box = loaded.box
-      local bh = box[4] - box[2]
-      local k = (h * 0.7) / bh
-      local cx, fy = w * 0.3, h * 0.88
-      local ox, oy = (box[1] + box[3]) / 2, box[4]
-      -- the rim and the body in flat colours (a silhouette shader: the sprite's alpha, one colour)
-      local s = silhouette()
-      if s then G.setShader(s) end
-      G.setColor(0.9, 0.1, 0.18, 1)
-      for _, d in ipairs({ { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 }, { 1.5, 1.5 }, { -1.5, 1.5 }, { 1.5, -1.5 }, { -1.5, -1.5 } }) do
-        G.draw(img, q, cx + d[1] * u, fy + d[2] * u, 0, k, k, ox, oy)
-      end
-      G.setColor(0, 0, 0, 1)
-      G.draw(img, q, cx, fy, 0, k, k, ox, oy)
-      G.setShader()
-    end
-    local b = Bosses[key]
-    local px = w * 0.58
-    G.setFont(font(22 * u))
-    G.setColor(1, 1, 1, 1)
-    G.print("Max Raid Battle", px, 24 * u)
-    G.setColor(1, 0.85, 0.3, 1)
-    drawStars(G, b.stars, px + b.stars * 18 * u, 66 * u, 16 * u)
-    G.setFont(font(13 * u))
-    G.setColor(0.85, 0.85, 0.9, 1)
-    G.print(table.concat(b.types, " / "), px, 82 * u)
-    G.setFont(font(14 * u))
-    G.setColor(1, 1, 1, 1)
-    G.print(("Choose up to four  (%d)"):format(pickedCount()), px, 108 * u)
-    -- the party
-    local rowH = 28 * u
-    for i = #denWhere.rows, #r.party + 1, -1 do denWhere.rows[i] = nil end
-    for i, row in ipairs(r.party) do
-      local t = denWhere.rows[i] or {}
-      denWhere.rows[i] = rset(t, px, 130 * u + (i - 1) * (rowH + 4 * u), w * 0.36, rowH)
-      local on = r.picked[i]
-      G.setColor(on and 0.75 or 0.22, on and 0.18 or 0.22, on and 0.25 or 0.28, 1)
-      G.rectangle("fill", t.x, t.y, t.w, t.h, 6 * u, 6 * u)
-      if i == r.cursor then
-        G.setColor(1, 1, 1, 0.9)
-        G.setLineWidth(2 * u)
-        G.rectangle("line", t.x, t.y, t.w, t.h, 6 * u, 6 * u)
-      end
-      G.setFont(font(13 * u))
-      G.setColor(1, 1, 1, 1)
-      G.print(row.name, t.x + 10 * u, t.y + 6 * u)
-      G.printf("Lv" .. row.level, t.x, t.y + 6 * u, t.w - 10 * u, "right")
-    end
-    local by = h - 50 * u
-    rset(denWhere.start, px, by, w * 0.17, 34 * u)
-    rset(denWhere.back, px + w * 0.19, by, w * 0.17, 34 * u)
-    button(G, denWhere.start, { 0.2, 0.7, 0.3 }, "START", u, pickedCount() > 0)
-    button(G, denWhere.back, { 0.2, 0.45, 0.9 }, "BACK", u, true)
-  end
+  -- the boss picture's opaque box (the den screen's silhouette)
+  function Rd.bossBox() return loaded and loaded.box or nil end
 
   -- a member's size on the field (1 standing, 0 gone): fainted, it shrinks away over FAINT_S; back,
   -- it grows in over BACK_S
@@ -2387,7 +2241,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 
   function Rd.draw(G, w, h)
     if not r or r.summary or r.aside then return end
-    if r.phase == "den" then return drawDen(G, w, h) end
+    if r.phase == "den" then
+      if Den then Den.draw(G, w, h, r) end
+      return
+    end
     local img, q = Rd.frameAt(r.key, r.t)
     if img and loaded then
       bossPic.image, bossPic.quad, bossPic.box, bossPic.size = img, q, loaded.box, Rd.sizeOf(r.key)
