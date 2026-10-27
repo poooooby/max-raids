@@ -139,6 +139,7 @@ return function(mod, deps)
     if Sc._kick then Sc._kick.deg = 0 end
     if Sc._struck then for k in pairs(Sc._struck) do Sc._struck[k] = nil end end
     if Sc._burst then Sc._burst.t0 = nil end
+    if Sc._quake then Sc._quake.amp = 0 end
   end
 
   local function copyPose(dst, src)
@@ -180,6 +181,16 @@ return function(mod, deps)
   local kick = { deg = 0, t0 = 0, dur = 0 }
   Sc._kick = kick
   function Sc.kick(deg, dur) kick.deg, kick.t0, kick.dur = deg or 3, clock, dur or 0.35 end
+  -- the ground shaking (an earthquake): every member jolted about on it for dur, easing off
+  local quake = { amp = 0, t0 = 0, dur = 0 }
+  Sc._quake = quake
+  function Sc.quake(amp, dur) quake.amp, quake.t0, quake.dur = amp or 1, clock, dur or 1 end
+  local function quakeNow()
+    local st = clock - quake.t0
+    if quake.amp <= 0 or st < 0 or st > quake.dur then return 0, st end
+    local u = st / quake.dur
+    return quake.amp * (u < 0.1 and u / 0.1 or (1 - (u - 0.1) / 0.9)), st
+  end
   -- a battler struck ("boss" or a member's place): it flashes white and is knocked back, by power
   local struck = {}
   Sc._struck = struck
@@ -796,6 +807,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       x = x + sin(kst * 80) * hpx * 0.025 * knock
       y = y - hpx * 0.02 * knock
     end
+    -- a leap (pic.jump: up, or below 0 a crouch / the landing's squash): risen off its pad, stretched
+    -- in the air, squashed on the ground
+    local jump = pic.jump or 0
+    local jx = 1
+    local groundY = y
+    if jump > 0 then
+      y = y - hpx * 0.28 * jump
+      jx = 1 - 0.04 * jump
+    elseif jump < 0 then
+      jx = 1 - 0.3 * jump
+    end
     -- where it stands on screen, for the raid's throw (its middle and height)
     Sc.lastBoss = Sc.lastBoss or {}
     Sc.lastBoss.x, Sc.lastBoss.y, Sc.lastBoss.h = x, y - bh * k * 0.5, bh * k
@@ -818,9 +840,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       return
     end
     -- its shadow and the pad's glow under it
-    G2.setColor(0, 0, 0, 0.45)
-    G2.ellipse("fill", x, y, bw * k * 0.42, bw * k * 0.09, 32)
-    glow(G2, x, y, bw * k * 0.6, bw * k * 0.14, 1, 0.6, 0.35, 0.35)
+    -- (on the ground, smaller while it is in the air)
+    local sk = jump > 0 and (1 - 0.35 * jump) or 1
+    G2.setColor(0, 0, 0, 0.45 * sk)
+    G2.ellipse("fill", x, groundY, bw * k * 0.42 * sk, bw * k * 0.09 * sk, 32)
+    glow(G2, x, groundY, bw * k * 0.6, bw * k * 0.14, 1, 0.6, 0.35, 0.35)
     -- the red aura: a wide dark-red glow pass, then the bright outline, then the sprite
     local s = sil()
     if s then
@@ -834,7 +858,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G2.setShader()
     end
     G2.setColor(1, 1, 1, 1)
-    drawPixel(pic.image, pic.quad, x, y, 0, k, k, ox, oy)
+    drawPixel(pic.image, pic.quad, x, y, 0, k * jx, k / jx, ox, oy)
     if white > 0 and s then
       G2.setShader(s)
       G2.setBlendMode("add")
@@ -935,6 +959,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       kx, kb = kx * (1 + 0.06 * knock), kb * (1 - 0.06 * knock)
       sx = sx + sin(kst * 90) * hpx * 0.05 * knock
       sy = sy + hpx * 0.05 * knock
+    end
+    -- the ground shaking: jolted side to side, bounced up off it
+    local qa, qst = quakeNow()
+    if qa > 0 then
+      sx = sx + sin(qst * 47 + i * 1.9) * hpx * 0.05 * qa
+      sy = sy - math.abs(sin(qst * 31 + i * 2.7)) * hpx * 0.04 * qa
     end
     G2.setColor(1, 1, 1, 1)
     local ox, oy = (box[1] + box[3]) / 2, box[4]

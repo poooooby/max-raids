@@ -99,6 +99,13 @@ local function body(game, log)
       local st = X._test.fx and X._test.fx.stats and X._test.fx.stats()
       if st then log(("  parts %d spots %d decals %d"):format(st.parts, st.spots, st.decals)) end
       after(math.max(0.3, a.len - imp - 0.25) + 0.6)
+      -- (outside a turn nothing says the hits are done: settled here, what lies on the ground fading)
+      shot("fx_" .. name .. "_4held")
+      local FxT = X._test.fx
+      if FxT and FxT.settle then FxT.settle(X.state().t) end
+      after(0.4)
+      shot("fx_" .. name .. "_5settling")
+      after(0.6)
     end
   end
   -- what lasts: each G-Max field round the party, the veil, the barrier (up, hit, broken)

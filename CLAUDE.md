@@ -567,7 +567,22 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
 - **HP drains as the blow lands:** `scheduleMove` keeps each target's HP after the move (`hp`); at its
   impact `Rd.impact` sets the bar's target and shows its card (all the members a move hits, together;
   a damage event for a member already shown keeps the cards).
-  - Open: bite's fangs
+  - The bite (2026-10-26, Wooble: a jump from the Giga Pokemon, a silhouette of jagged teeth snapping over
+    the target): `drawBite` / `jaw` - two dark jaws (a dome above, a lower one, their mouth line curving
+    to meet at the corners), jagged teeth with two long fangs, lit along their edges in the move's
+    colour, a dark-red aura; they loom in open, snap shut at the impact (accelerating), shudder and
+    pull away. The boss crouches, leaps (`r.jump` -> `pic.jump`: risen 0.28 of its height, stretched;
+    squashed on landing; its shadow stays on the ground and shrinks) and lands as they close.
+  - Earthquake (a "wave" of shape "ground"; 2026-10-26, Wooble: the ground shakes and cracks, the party
+    shaking with it): no wall. `stepQuake` / `drawQuake` (back layer): jagged cracks (`quakePath`: a
+    main line from in front of the boss to each target, three branches) racing across the ground (lit
+    broken edges, a dark gap, a deep glow), dust and chips at their heads; each target hit as its crack
+    reaches it. `Fx.onQuake(seconds, big)` -> the raid: `Scene.shake` for the whole move and
+    `Scene.quake` (drawMember jolts every member side to side and bounces it, easing off; reset with the
+    scene). The cracks are `hold`: they stay past the move's length until `Fx.settle(now)` - the raid
+    calls it at the next "use" / "over" event and at the commands - then fade over `Fx.SETTLE_S` 0.8.
+    fx_probe settles after each case (shots `_4held`, `_5settling`).
+  - Open: the ground wave is gone (Earthquake above); the sand cloud (G-Max Sandblast) is a powder
     and the ground wave are plain; Thor performance unmeasured (particles capped at
     `Fx.MAX_PARTS` 900).
 - **Next after that.** Sound;

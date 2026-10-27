@@ -974,6 +974,108 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     ground = { deep = { 0.3, 0.22, 0.14 }, shallow = { 0.72, 0.6, 0.42 }, foam = { 0.86, 0.8, 0.68 } },
   }
 
+
+  -- ------- an earthquake (a "wave" of shape "ground"): the ground shakes and cracks open. Jagged cracks
+  -- run from in front of the boss to each one it falls on, branching, throwing up dust and chips at
+  -- their heads; each is hit as its crack reaches it; the cracks stay on the ground after. The shaking
+  -- itself is the raid's (Fx.onQuake(seconds): the camera and the party).
+  local function quakePath(m, ti, T)
+    m.cracks = m.cracks or {}
+    local c = m.cracks[ti]
+    if c then return c end
+    local pz = Sc and Sc.PAD.z or -9.2
+    local x0, z0 = (Sc and Sc.PAD.x or 0) + T.X * 0.12, pz + 2.4
+    local x1, z1 = T.X, T.Z + 0.35
+    local N = 16
+    c = { main = {}, branches = {} }
+    for i = 0, N do
+      local f = i / N
+      local side = (rnd(m.seed + ti, i) - 0.5) * 0.9 * sin(f * pi) + (rnd(m.seed + ti, i + 40) - 0.5) * 0.25
+      c.main[#c.main + 1] = { x0 + (x1 - x0) * f + side, z0 + (z1 - z0) * f, f }
+    end
+    for b = 1, 3 do
+      local at = 2 + floor(rnd(m.seed + ti, b + 80) * (N - 5))
+      local p = c.main[at + 1]
+      local dir = rnd(m.seed + ti, b + 90) > 0.5 and 1 or -1
+      local br = {}
+      for i = 0, 5 do
+        local f = i / 5
+        br[#br + 1] = { p[1] + dir * f * (0.9 + rnd(m.seed + ti, b + i) * 0.6), p[2] + f * (0.5 + rnd(m.seed, b + i + 9) * 0.6),
+          p[3] + f * 0.12 }
+      end
+      c.branches[#c.branches + 1] = br
+    end
+    m.cracks[ti] = c
+    return c
+  end
+  local qPts = {}
+  local function crackLine(G2, path, upto, wpx, light)
+    local n = 0
+    for _, p in ipairs(path) do
+      if p[3] > upto then break end
+      local x, y = P(p[1], 0.015, p[2])
+      if not x then break end
+      qPts[n + 1], qPts[n + 2] = x, y
+      n = n + 2
+    end
+    for q = n + 1, #qPts do qPts[q] = nil end
+    if n < 4 then return end
+    G2.setLineJoin("bevel")
+    -- the broken ground either side, lit; the gap dark; a deep glow down in it
+    G2.setLineWidth(max(2, wpx * 2.6))
+    G2.setColor(0.62, 0.5, 0.36, 0.7 * light)
+    G2.line(qPts)
+    G2.setLineWidth(max(1.5, wpx * 1.4))
+    G2.setColor(0.02, 0.015, 0.01, 0.97 * light)
+    G2.line(qPts)
+    G2.setBlendMode("add")
+    G2.setLineWidth(max(1, wpx * 0.35))
+    G2.setColor(0.9, 0.35, 0.08, 0.45 * light)
+    G2.line(qPts)
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+  local function drawQuake(G2, m, t, now, layer)
+    if layer ~= "back" then return end
+    local imp = m.impact or m.len
+    local f = min(1, t / imp)
+    local light = m.fadeAt and max(0, 1 - (now - m.fadeAt) / Fx.SETTLE_S) or 1
+    for ti, T in ipairs(m.targets) do
+      local c = quakePath(m, ti, T)
+      local _, _, k = P(T.X, 0, T.Z)
+      local w = max(2, (k or 40) * 0.09)
+      crackLine(G2, c.main, f, w, light)
+      for _, br in ipairs(c.branches) do crackLine(G2, br, f, w * 0.6, light) end
+    end
+  end
+  local function stepQuake(m, t, now, tick)
+    local imp = m.impact or m.len
+    if not m.quaked then
+      m.quaked = true
+      m.hold = true
+      if Fx.onQuake then pcall(Fx.onQuake, m.len, m.big) end
+    end
+    local f = min(1, t / imp)
+    for ti, T in ipairs(m.targets) do
+      local c = quakePath(m, ti, T)
+      if tick and f < 1 then
+        -- the crack's head: dust and chips thrown up
+        local head = c.main[1]
+        for _, p in ipairs(c.main) do if p[3] <= f then head = p end end
+        emit("dust", head[1], 0.1, head[2], (rnd(now, ti) - 0.5) * 1.5, 0.6 + rnd(now, ti + 1), 0.4, 0.9, 0.3,
+          0.55, 0.47, 0.37, 0.55)
+        local p = emit("debris", head[1], 0.1, head[2], (rnd(now, ti + 2) - 0.5) * 2, 2.5 + rnd(now, ti + 3) * 2, 0.5, 1.0,
+          0.06, 0.5, 0.42, 0.32, 1)
+        if p then p.floor = 0 end
+      end
+      if f >= 1 and not m.landed[ti] then
+        burstOf("dust", 10, T.X, 0.15, T.Z + 0.2, 2.2, 0.3, 1.2, 0.3 * min(2, T.h), 0.6, 0.5, 0.4, 0.6, 0)
+        burstOf("debris", 8, T.X, 0.1, T.Z + 0.2, 3.5, 0.7, 1.2, 0.07 * min(2, T.h), 0.5, 0.42, 0.32, 1, 0)
+      end
+      if f >= 1 then landOnce(m, ti, T, 1, now) end
+    end
+  end
+
   local dropPos   -- (below: what falls, its place now)
 
   -- each frame: what a move sets off (particles, its hits)
@@ -1159,7 +1261,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       end
     elseif kind == "wave" then
       local sh = spec.shape
-      if sh == "water" or sh == "ground" or sh == "fire" or not sh then
+      if sh == "ground" then
+        stepQuake(m, t, now, tick)
+      elseif sh == "water" or sh == "fire" or not sh then
         local z = wallZ(m, t)
         -- spray along the crest
         if tick and t < m.len * 0.85 then
@@ -1558,39 +1662,91 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
-  -- fangs closing on it
+  -- the bite: a great dark silhouette of jaws over the target - a domed upper jaw and a lower one, each
+  -- edged with jagged teeth (two long fangs among them), lit along their edges in the move's colour.
+  -- Both jaws share one mouth line (curving down at its corners); open, each stands off it - most in
+  -- the middle, least at the corners - so shut, their edges meet exactly and the teeth interlock (the
+  -- lower ones half a tooth along). They loom in open, snap shut at the impact (faster and faster),
+  -- hold clamped with a shudder, and pull away as they fade.
+  local jawPts, toothPts = {}, {}
+  -- its edge at u (-1..1 across): the mouth line, stood off by the opening on its side
+  local function jawEdge(cy, curve, g, dir, u) return cy + curve * u * u - dir * g * (1 - 0.85 * u * u) end
+  local function jaw(G2, cx, cy, g, curve, W, thick, dir, S, a, tc, seed, rim, shift)
+    local N = 18
+    G2.setColor(0.05, 0.02, 0.07, 0.94 * a)
+    for i = 0, N - 1 do
+      local u0, u1 = i / N * 2 - 1, (i + 1) / N * 2 - 1
+      local e0, e1 = jawEdge(cy, curve, g, dir, u0), jawEdge(cy, curve, g, dir, u1)
+      local b0 = e0 - dir * thick * (1 - u0 * u0) ^ 0.6
+      local b1 = e1 - dir * thick * (1 - u1 * u1) ^ 0.6
+      G2.polygon("fill", cx + u0 * W / 2, b0, cx + u1 * W / 2, b1, cx + u1 * W / 2, e1, cx + u0 * W / 2, e0)
+    end
+    -- the teeth along the edge, pointing across the mouth; two long fangs
+    local T = 9
+    local step = 2 / T * 0.82
+    local tw = W / 2 * step * 0.86
+    local tips = {}
+    for j = 0, T - 1 do
+      local u = ((j + 0.5) / T * 2 - 1) * 0.82 + (shift or 0) * step
+      if u > -0.95 and u < 0.95 then
+        local ex = cx + u * W / 2
+        local ey = jawEdge(cy, curve, g, dir, u)
+        local fang = (j == 1 or j == T - 2)
+        local len = S * (fang and 0.48 or (0.2 + 0.12 * rnd(seed, j))) * (1 - 0.35 * u * u)
+        local tx, ty = ex - u * tw * 0.25, ey + dir * len
+        toothPts[1], toothPts[2] = ex - tw * 0.5, ey - dir * S * 0.02
+        toothPts[3], toothPts[4] = ex + tw * 0.5, ey - dir * S * 0.02
+        toothPts[5], toothPts[6] = tx, ty
+        G2.polygon("fill", toothPts[1], toothPts[2], toothPts[3], toothPts[4], toothPts[5], toothPts[6])
+        tips[#tips + 1] = { ex - tw * 0.5, ey, tx, ty, ex + tw * 0.5, ey }
+      end
+    end
+    -- lit along its edges: the dome's line and each tooth's sides
+    G2.setBlendMode("add")
+    G2.setLineWidth(max(1, S * 0.014))
+    G2.setColor(tc[1], tc[2], tc[3], 0.75 * a * rim)
+    local n = 0
+    for i = 0, N do
+      local u = i / N * 2 - 1
+      jawPts[n + 1], jawPts[n + 2] = cx + u * W / 2, jawEdge(cy, curve, g, dir, u) - dir * thick * (1 - u * u) ^ 0.6
+      n = n + 2
+    end
+    for q = n + 1, #jawPts do jawPts[q] = nil end
+    G2.line(jawPts)
+    for _, tp in ipairs(tips) do G2.line(tp[1], tp[2], tp[3], tp[4], tp[5], tp[6]) end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+
   local function drawBite(G2, m, t, now, layer)
     local imp = m.impact or m.len
-    for _, T in ipairs(m.targets) do
+    for ti, T in ipairs(m.targets) do
       local X, Y, Z = aimAt(T)
       if layerOf(Z) == layer then
         local x, y, k = P(X, Y, Z)
         if x then
-          local S = min(3, T.h) * k * (m.big and 1.3 or 1)
-          local c = min(1, t / imp)
-          c = c * c
-          local gap = S * 0.5 * (1 - c)
-          local a = t < m.len * 0.75 and 1 or max(0, 1 - (t - m.len * 0.75) / (m.len * 0.25))
-          local shake = t > imp and sin(t * 70) * S * 0.02 * max(0, 1 - (t - imp) / 0.2) or 0
-          G2.setBlendMode("add")
-          glowAt(G2, x, y - gap - S * 0.15, S * 0.9, m.tc[1], m.tc[2], m.tc[3], 0.35 * a)
-          glowAt(G2, x, y + gap + S * 0.15, S * 0.9, m.tc[1], m.tc[2], m.tc[3], 0.35 * a)
-          G2.setBlendMode("alpha")
-          local W = S * 0.95
-          for row = -1, 1, 2 do
-            local base = y + row * (gap + S * 0.3) + shake
-            for j = 0, 4 do
-              local fx0 = x - W / 2 + j * W / 5
-              local fw = W / 5
-              local len = S * (0.26 + ((j == 0 or j == 4) and 0.06 or 0)) * (1 - abs(j - 2) * 0.12)
-              local tipX, tipY = fx0 + fw * 0.5 + row * fw * 0.08, base - row * len
-              G2.setColor(0.72, 0.7, 0.68, a)
-              G2.polygon("fill", fx0, base, fx0 + fw, base, tipX, tipY)
-              G2.setColor(0.98, 0.97, 0.95, a)
-              G2.polygon("fill", fx0 + fw * 0.15, base, fx0 + fw * 0.62, base, tipX, tipY)
-            end
-            G2.setColor(0.35, 0.08, 0.1, a * 0.85)
-            G2.rectangle("fill", x - W / 2, base + (row < 0 and -S * 0.06 or 0), W, S * 0.06)
+          local S = min(3, T.h) * k * 1.25 * (m.big and 1.3 or 1)
+          local W = S * 1.7
+          -- open, looming in; then the snap (accelerating); clamped; pulling away
+          local appear = min(1, t / (imp * 0.35))
+          local snap = t < imp * 0.55 and 0 or min(1, (t - imp * 0.55) / (imp * 0.45))
+          snap = snap * snap * snap
+          local after = t > imp and (t - imp) / max(0.01, m.len - imp) or 0
+          local a = appear * (after > 0.45 and max(0, 1 - (after - 0.45) / 0.55) or 1)
+          if a > 0 then
+            local g = S * 0.36 * (1 - snap)
+            local scale = 1.25 - 0.25 * appear
+            local shake = t > imp and sin(t * 75) * S * 0.025 * max(0, 1 - (t - imp) / 0.25) or 0
+            local lift = after > 0.45 and S * 0.3 * (after - 0.45) or 0
+            local cx, cy = x + shake, y - lift
+            -- a dark aura behind them, red at its heart as they close
+            G2.setBlendMode("add")
+            glowAt(G2, cx, cy, W * 0.75, m.tc[1] * 0.7 + 0.3, m.tc[2] * 0.3, m.tc[3] * 0.5 + 0.1, 0.22 * a * (0.5 + snap))
+            G2.setBlendMode("alpha")
+            local rim = 0.6 + 0.4 * snap
+            local curve = S * 0.18
+            jaw(G2, cx, cy, g, curve, W * scale, S * 0.42, 1, S, a, m.tc, m.seed + ti, rim, 0)
+            jaw(G2, cx, cy, g, curve, W * scale, S * 0.34, -1, S, a, m.tc, m.seed + ti + 7, rim, 0.5)
           end
         end
       end
@@ -1798,7 +1954,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 
   local function drawMove(G2, m, now, layer)
     local t = now - m.t0
-    if t < 0 or t > m.len then return end
+    if t < 0 or (t > m.len and not m.hold) then return end
     local kind = m.kind
     if kind == "beam" then drawBeam(G2, m, t, now, layer)
     elseif kind == "shot" then drawShots(G2, m, t, now, layer)
@@ -1812,7 +1968,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     elseif kind == "self" then drawSelf(G2, m, t, now, layer)
     elseif kind == "wave" then
       local sh = m.spec.shape
-      if sh == "water" or sh == "ground" or sh == "fire" or not sh then drawWall(G2, m, t, now, layer) end
+      if sh == "ground" then drawQuake(G2, m, t, now, layer)
+      elseif sh == "water" or sh == "fire" or not sh then drawWall(G2, m, t, now, layer) end
     end
   end
 
@@ -1834,7 +1991,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       stepParts(dt)
     end
     for i = #moves, 1, -1 do
-      if now - moves[i].t0 > moves[i].len + 0.05 then table.remove(moves, i) end
+      local mv = moves[i]
+      local gone = now - mv.t0 > mv.len + 0.05
+      -- (what stays on the ground - an earthquake's cracks - stays until settled, then fades)
+      if mv.hold then gone = mv.fadeAt ~= nil and now - mv.fadeAt > Fx.SETTLE_S end
+      if gone then table.remove(moves, i) end
     end
     for i = #spots, 1, -1 do if now - spots[i].t0 > spots[i].dur then table.remove(spots, i) end end
     for i = #decals, 1, -1 do if now - decals[i].t0 > decals[i].life then table.remove(decals, i) end end
@@ -1849,6 +2010,14 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     for i = #flashes, 1, -1 do flashes[i] = nil end
     charge, last = nil, nil
     if Fx.setLasting then Fx.setLasting(nil, nil, false, nil, 0) end
+  end
+
+  -- the raid's word that a move's hits have all played out: what it left on the ground fades now
+  Fx.SETTLE_S = 0.8
+  function Fx.settle(now)
+    for _, m in ipairs(moves) do
+      if m.hold and not m.fadeAt then m.fadeAt = now end
+    end
   end
 
   function Fx.busy(now)

@@ -529,6 +529,7 @@ return function(mod, deps)
 
   -- a new turn's commands (fresh: the intro has the camera there already)
   function Rd.startCommand(fresh)
+    if Fx and Fx.settle and r then Fx.settle(r.t) end
     if not r then return false end
     r.turn = (r.turn or 0) + 1
     r.phase = "command"
@@ -766,7 +767,7 @@ return function(mod, deps)
   -- for its strikes.
 
   Rd.GMAX_CHARGE_S = 1.5
-  local LUNGE = { slam = true, multi = true, bite = true, slash = true }
+  local LUNGE = { slam = true, multi = true, slash = true }
 
   -- a battler's place in the den (src/fx.lua's anchor): its middle, height and ground, in metres
   local function placeOf(b)
@@ -842,6 +843,14 @@ return function(mod, deps)
     end
   end
   if Fx then Fx.onImpact = function(T, power, _, _, key) Rd.impact(T, power, key) end end
+  -- an earthquake: the camera shaking hard the whole while, and the party shaking with the ground
+  if Fx then
+    Fx.onQuake = function(seconds, big)
+      if not Scene then return end
+      Scene.shake(big and 0.32 or 0.24, seconds)
+      if Scene.quake then Scene.quake(big and 1.3 or 1, seconds) end
+    end
+  end
   if Fx and Scene then
     Scene.onBack = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "back", r.t) end end
     Scene.onMid = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "mid", r.t) end end
@@ -892,7 +901,7 @@ return function(mod, deps)
   -- each frame: the G-Max charge, the look's start, the boss's lunge
   function Rd.stepMove()
     local a = r.anim
-    if not a then r.lunge = 0; return end
+    if not a then r.lunge, r.jump = 0, 0; return end
     if a.chargeAt and not a.charged and r.t >= a.chargeAt then
       a.charged = true
       r.say = nil
@@ -921,7 +930,14 @@ return function(mod, deps)
       if Sounds then Rd.se(Sounds.moveSe(a.spec, a.type)) end
     end
     -- the boss rears and lunges into its strikes
-    r.lunge = 0
+    r.lunge, r.jump = 0, 0
+    -- its bite: it crouches, leaps and comes down as the jaws snap shut
+    if a.started and a.user.boss and a.spec[1] == "bite" then
+      local u = (r.t - a.at) / math.max(0.1, a.impact)
+      if u >= 0 and u < 0.2 then r.jump = -0.35 * math.sin(u / 0.2 * math.pi)
+      elseif u >= 0.2 and u <= 1 then r.jump = math.sin((u - 0.2) / 0.8 * math.pi)
+      elseif u > 1 and u < 1.25 then r.jump = -0.25 * math.sin((u - 1) / 0.25 * math.pi) end
+    end
     if a.started and a.user.boss and LUNGE[a.spec[1]] then
       local u = (r.t - a.at) / math.max(0.1, a.impact)
       if u >= 0 and u <= 1.4 then r.lunge = math.sin(math.min(1, u) * math.pi) end
@@ -1017,6 +1033,7 @@ return function(mod, deps)
         end
       end
     end
+    if (e.kind == "use" or e.kind == "over") and Fx and Fx.settle then Fx.settle(r.t) end
     if e.kind == "use" then Rd.scheduleMove(e) end
     if e.kind == "use" then
       local i = memberIndex(e.who)
@@ -2173,6 +2190,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       -- (drawn into the ball once thrown at: caught, or broken free and gone)
       bossPic.shrink = r.throw and (r.shrink or 1) or 1
       bossPic.lunge = r.lunge or 0
+      bossPic.jump = r.jump or 0
     end
     for i = 1, 4 do
       local m = r.members[i]
