@@ -292,7 +292,7 @@ function Sim:gmaxEffect(ev, att, mv, hit)
     if not self.field then
       self.field = { turns = e.turns or 4, frac = e.frac or 6, spare = e.spareNum, spareName = e.spare }
       local t = W.field and W.field[e.spare]
-      ev[#ev + 1] = { kind = "field", who = att, text = t or "The team was surrounded!" }
+      ev[#ev + 1] = { kind = "field", who = att, fieldType = e.spare, text = t or "The team was surrounded!" }
     end
   elseif e.kind == "trap" then
     for _, m in ipairs(hit) do

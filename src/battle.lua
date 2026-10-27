@@ -128,6 +128,8 @@ return function(mod, deps)
     return ok and e or nil
   end
 
+  Bt.ALIAS = { HIGH_JUMP_KICK = "HI_JUMP_KICK" }
+
   -- a move as the simulation and the menu use it (nil when the game has no such move)
   local SPREAD = 8 + 32       -- MOVE_TARGET_BOTH | MOVE_TARGET_FOES_AND_ALLY
   local bitlib = rawget(_G, "bit")
@@ -137,7 +139,13 @@ return function(mod, deps)
   end
   function Bt.move(ref, pp, maxPp)
     if not Moves then return nil end
+    -- (later names for Gen 3 moves)
+    if type(ref) == "string" and Bt.ALIAS[ref] then ref = Bt.ALIAS[ref] end
     local ok, m = pcall(Moves.get, ref)
+    -- (the game's own names run some words together: ANCIENTPOWER)
+    if not (ok and type(m) == "table") and type(ref) == "string" and ref:find("_") then
+      ok, m = pcall(Moves.get, (ref:gsub("_", "")))
+    end
     if not (ok and type(m) == "table") then return nil end
     local name = m.id
     if Moves.displayName then
@@ -147,6 +155,7 @@ return function(mod, deps)
     local power = tonumber(m.power) or 0
     return {
       ref = m, num = m.numId, name = titled(name), type = tonumber(m.type) or 0,
+      key = type(ref) == "string" and ref:upper() or (type(m.id) == "string" and m.id:upper():gsub(" ", "_") or nil),
       typeName = Bt.typeName(m.type), power = power, accuracy = tonumber(m.accuracy) or 0,
       priority = tonumber(m.priority) or 0, status = power == 0,
       spread = bitlib and (bitlib.band(tonumber(m.target) or 0, SPREAD) ~= 0) or false,
@@ -286,7 +295,7 @@ return function(mod, deps)
       if effect.spare then effect.spareNum = Bt.typeNum(effect.spare) end
     end
     return {
-      name = g.name or ("G-Max " .. titled(id)), type = t, typeName = g.type, power = power, accuracy = 0,
+      name = g.name or ("G-Max " .. titled(id)), type = t, typeName = g.type, power = power, accuracy = 0, key = id,
       priority = 0, status = false, spread = true, isGmax = true, gmaxEffect = effect, pp = 99, maxPp = 99,
       ref = { id = "MAX_RAIDS_GMAX_" .. id, numId = 0, power = power, type = t, accuracy = 0, pp = 1, effect = 0,
         priority = 0, target = 8, flags = 0, secondaryChance = 0 },

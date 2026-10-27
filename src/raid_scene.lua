@@ -741,6 +741,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if not x then return end
     local k = hpx / bh
     local ox, oy = (box[1] + box[3]) / 2, box[4]
+    -- an attack's lunge (pic.lunge 0..1): it rears up and toward the party
+    local lunge = pic.lunge or 0
+    if lunge > 0 then
+      k = k * (1 + 0.1 * lunge)
+      y = y + hpx * 0.04 * lunge
+    end
     -- where it stands on screen, for the raid's throw (its middle and height)
     Sc.lastBoss = Sc.lastBoss or {}
     Sc.lastBoss.x, Sc.lastBoss.y, Sc.lastBoss.h = x, y - bh * k * 0.5, bh * k

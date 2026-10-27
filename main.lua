@@ -54,6 +54,8 @@ return function(mod)
   local makeBattle = loadSibling(mod, "src/battle.lua")
   local Sim = loadSibling(mod, "src/raid_sim.lua")
   local makeRewards = loadSibling(mod, "src/rewards.lua")
+  local makeFx = loadSibling(mod, "src/fx.lua")
+  local MoveFx = loadSibling(mod, "data/raid_move_fx.lua")
   local makeRaid = loadSibling(mod, "src/raid.lua")
   local makePadHide = loadSibling(mod, "src/pad_hide.lua")
   local makeDens = loadSibling(mod, "src/dens.lua")
@@ -114,7 +116,7 @@ return function(mod)
 
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax,
-    Rewards = Rewards,
+    Rewards = Rewards, Fx = makeFx and makeFx() or nil, MoveFx = MoveFx,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome)
       if outcome == "win" and den and Dens and Dens.finish then pcall(Dens.finish, den) end

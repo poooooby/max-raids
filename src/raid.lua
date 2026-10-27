@@ -15,6 +15,7 @@ return function(mod, deps)
   local N, Bosses, Sprites, Scene, Pad = deps.N, deps.Bosses, deps.Sprites, deps.Scene, deps.Pad
   local BattlerHud = deps.BattlerHud
   local Rewards = deps.Rewards
+  local Fx, MoveFx = deps.Fx, deps.MoveFx
   local Battle, Sim = deps.Battle, deps.Sim
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
@@ -461,6 +462,8 @@ return function(mod, deps)
     end
     if r.phase == "battle" then Rd.playEvents() end
     if r and r.phase == "throw" and Rd.stepThrow then Rd.stepThrow() end
+    if r and Rd.stepMove then Rd.stepMove() end
+    if r and Fx then Fx.update(r.t) end
     if not r then return end
     -- the HP bars drain (or fill) toward what the events have shown so far
     local function ease(b)
@@ -509,6 +512,7 @@ return function(mod, deps)
     r.turn = (r.turn or 0) + 1
     r.phase = "command"
     r.cmd = { chosen = {}, cursor = 1, menu = "main" }
+    if r.sim and not r.sim.field then r.fieldShown = nil end
     if r.boss then
       local sh = r.boss.shield
       r.boss.shieldShown = sh and sh.left > 0 and { left = sh.left, max = sh.max } or nil
@@ -732,6 +736,98 @@ return function(mod, deps)
     end
   end
 
+  -- ------- a move acted out (src/fx.lua, data/raid_move_fx.lua): after its words, the band steps aside
+  -- and its look plays from the user to whoever it falls on; its hit lands at the impact. A G-Max
+  -- move charges first (the boss's cry, the roar's burst, red energy streaking in). The boss lunges
+  -- for its strikes.
+
+  Rd.GMAX_CHARGE_S = 1.5
+  local LUNGE = { slam = true, multi = true, bite = true, slash = true }
+
+  -- a battler's place on screen now: { x, y (its middle), s (its height) }
+  local function placeOf(b)
+    if b.boss then
+      local LB = Scene and Scene.lastBoss
+      if not LB then return nil end
+      return { x = LB.x, y = LB.y, s = LB.h * 0.4 }
+    end
+    local i = memberIndex(b)
+    if not (i and Scene and Scene.memberAt) then return nil end
+    local x, y, hpx = Scene.memberAt(i)
+    if not x then return nil end
+    return { x = x, y = y - hpx * 0.5, s = hpx }
+  end
+
+  function Rd.specOf(mv)
+    if not (MoveFx and mv) then return { "slam" } end
+    if mv.isGmax then return MoveFx.GMAX[mv.key or ""] or { "wave", shape = "light" } end
+    return MoveFx.MOVES[mv.key or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "slam" }
+  end
+
+  -- at a use: whom it falls on (the events up to the next move), when its look starts
+  function Rd.scheduleMove(e)
+    if not Fx then return end
+    local mv = e.move
+    local spec = Rd.specOf(mv)
+    local targets = {}
+    if spec[1] ~= "self" then
+      local list = r.events or {}
+      local seen = {}
+      for j = r.evI + 1, #list do
+        local x = list[j]
+        if x.kind == "use" or x.kind == "over" or x.kind == "cheer" or x.kind == "item" then break end
+        local who = x.target or ((x.kind == "status" or x.kind == "stage") and x.who ~= e.who and x.who) or nil
+        if who and not seen[who] then seen[who] = true; targets[#targets + 1] = who end
+      end
+    end
+    local words = #(e.text or "") / Rd.MSG.CPS + 0.25
+    local gmax = mv and mv.isGmax
+    local at = r.t + words + (gmax and Rd.GMAX_CHARGE_S or 0)
+    local K = Fx.KIND[(spec[1] == "drop" and spec.shape == "slab") and "slab" or spec[1]] or Fx.KIND.slam
+    local len = K[1] * (gmax and Fx.GMAX_K or 1)
+    if spec[1] == "multi" then len = K[1] * (spec.n or 3) + 0.2 end
+    r.anim = { at = at, spec = spec, user = e.who, targets = targets, type = mv and mv.typeName or "NORMAL",
+      gmax = gmax, chargeAt = gmax and (r.t + words) or nil, len = len,
+      impact = K[2] and K[2] * (gmax and Fx.GMAX_K or 1) or len }
+  end
+
+  -- each frame: the G-Max charge, the look's start, the boss's lunge
+  function Rd.stepMove()
+    local a = r.anim
+    if not a then r.lunge = 0; return end
+    if a.chargeAt and not a.charged and r.t >= a.chargeAt then
+      a.charged = true
+      r.say = nil
+      local LB = Scene and Scene.lastBoss
+      if Scene then Scene.shot("boss", 0.5); Scene.burst(); Scene.shake(0.2, 1.0) end
+      Rd.cry(r.key)
+      if LB then Fx.charge(LB.x, LB.y, LB.h, r.t, Rd.GMAX_CHARGE_S) end
+    end
+    if not a.started and r.t >= a.at then
+      a.started = true
+      r.say = nil
+      -- (a G-Max move: back to whom it falls on for the blow)
+      if a.gmax and Scene then
+        if #a.targets > 1 then Scene.shot("spread", 0.3)
+        elseif a.targets[1] and memberIndex(a.targets[1]) then Scene.shot("target", 0.3, memberIndex(a.targets[1])) end
+      end
+      local from = placeOf(a.user)
+      local tg = {}
+      for _, t in ipairs(a.targets) do
+        local p = placeOf(t)
+        if p then tg[#tg + 1] = p end
+      end
+      if from then Fx.move(a.spec, a.type, from, tg, r.t, a.gmax) end
+    end
+    -- the boss rears and lunges into its strikes
+    r.lunge = 0
+    if a.started and a.user.boss and LUNGE[a.spec[1]] then
+      local u = (r.t - a.at) / math.max(0.1, a.impact)
+      if u >= 0 and u <= 1.4 then r.lunge = math.sin(math.min(1, u) * math.pi) end
+    end
+    if r.t > a.at + a.len + 0.2 then r.anim = nil end
+  end
+
   -- the members a boss's move at events[k] falls on: those hit, missed or touched by it, up to the
   -- next move
   function Rd.targetsAhead(k)
@@ -752,12 +848,14 @@ return function(mod, deps)
     local E = Rd.EVENT
     r.evT = r.t
     showFor(e)
+    if e.fieldType then r.fieldShown = e.fieldType end
     -- the barrier's pills follow the events (gone once broken)
     if e.kind == "shield" and r.boss then
       r.boss.shieldShown = e.step ~= "break" and { left = e.left, max = e.max } or nil
       if e.step == "hit" and Scene then Scene.shake(0.06, 0.25) end
     end
     if e.kind == "faint" and not e.who.boss then r.shownFaints = (r.shownFaints or 0) + 1 end
+    if e.kind == "use" then Rd.scheduleMove(e) end
     if e.kind == "use" then
       local i = memberIndex(e.who)
       if Scene then
@@ -784,6 +882,8 @@ return function(mod, deps)
     if e.text then
       Rd.say(e.text)
       r.evDur = #e.text / Rd.MSG.CPS + E.HOLD_S
+      -- (a move's use lasts until its look has landed)
+      if e.kind == "use" and r.anim then r.evDur = max(r.evDur, r.anim.at - r.t + (r.anim.impact or r.anim.len) + 0.15) end
     else
       -- (a hit lands with no words: the band steps aside while the bar drains)
       r.say = nil
@@ -1437,12 +1537,22 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       bossPic.image, bossPic.quad, bossPic.box, bossPic.size = img, q, loaded.box, Rd.sizeOf(r.key)
       -- (drawn into the ball once thrown at: caught, or broken free and gone)
       bossPic.shrink = r.throw and (r.shrink or 1) or 1
+      bossPic.lunge = r.lunge or 0
     end
     for i = 1, 4 do
       local m = r.members[i]
       memberPicsShown[i] = m and m.draw or nil
     end
     if Scene then Scene.draw(G, 0, 0, w, h, r.t, img and bossPic or nil, memberPicsShown) end
+    if Fx and r.phase ~= "rewards" then
+      local LB = Scene and Scene.lastBoss
+      if r.fieldShown then Fx.drawField(G, w, h, r.t, r.fieldShown) end
+      if r.boss and (r.boss.veil or 0) > 0 and not r.throw then Fx.drawVeil(G, LB, r.t) end
+      local sh = r.boss and r.boss.shieldShown
+      if sh and not r.throw then Fx.drawBarrier(G, LB, r.t, sh.left, sh.max) end
+      Fx.drawMoves(G, r.t)
+      Fx.draw(G, w, h, r.t)
+    end
     drawHud(G, w, h)
     -- the commands: the order down the top left, the one choosing in the lower left, the pad (only
     -- once a message has gone, as the game)

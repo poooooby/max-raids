@@ -78,6 +78,10 @@ local function body(game, log)
   -- the commands: each member in turn, the selection moving, B stepping back
   local R = X.raid
   local function after(s) local t0 = X.state().t or 0; waitFor(function() return (X.state().t or 0) >= t0 + s end, 6000) end
+  -- PROBE_GMAX=1: the boss uses its G-Max move every turn (for the look)
+  if os.getenv("PROBE_GMAX") == "1" and R.current() and R.current().boss then
+    R.current().boss.script = { { kind = "gmax", every = 1, from = 1 } }
+  end
   local st = X.state()
   check(st.turn == 1 and st.actor == 1 and st.chosen == 0, ("turn 1, the first member choosing (turn %s actor %s chosen %s)")
     :format(tostring(st.turn), tostring(st.actor), tostring(st.chosen)))
@@ -129,6 +133,16 @@ local function body(game, log)
     log("  the boss's move falls on members:", table.concat(R.targetsAhead(c.evI), " "))
     after(0.6)
     shot("r10e_boss_move")
+    -- its look: mid-flight and at the impact (a G-Max move: the charge, then the blow)
+    local cm = R.current()
+    local mv = cm and cm.events and cm.events[cm.evI] and cm.events[cm.evI].move
+    log("  the boss's move:", mv and mv.name, mv and mv.key, mv and mv.isGmax and "G-Max" or "")
+    after(mv and mv.isGmax and 0.9 or 0.5)
+    shot("r10f_move_a")
+    after(mv and mv.isGmax and 1.3 or 0.45)
+    shot("r10g_move_b")
+    after(0.4)
+    shot("r10h_move_c")
   end
   waitFor(function() local c = R.current(); local e = c and c.events and c.events[c.evI]; return not c or (e and e.kind == "damage") end, 6000)
   after(0.3)

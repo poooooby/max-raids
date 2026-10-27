@@ -278,6 +278,26 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
   `m.orig`, kept by setupBattle -: the boss's Exp, `Experience.gainFor` (one participant) x the
   multiplier, `Experience.apply`, a friendship step a level - `m.levelFrom / levelTo` for the
   after-raid evolutions and moves -; the tier's EVs in the boss's best base stat, 252 / 510).
+- `src/fx.lua` (Fx) + `data/raid_move_fx.lua`, the moves acted out (Wooble 2026-10-26: each boss move
+  as its description says it plays out - Max Rockfall's slab in his capture). Data: `MOVES` (the 99
+  moves the bosses use), `GMAX` (the 34 G-Max moves), `DEFAULT` by type (the party's moves) ->
+  `{ kind, shape, n, big }`, kinds beam, shot, drop (slab: one great slab of rock over the whole
+  group, `Fx.drawSlab`), slam, slash, bite, bolt, wave (water / fire / ground / wind / sound /
+  light), rings, powder, self (an aura, arrows up), drain, spikes, multi. `Fx.move(spec, type, from,
+  targets, now, big)` plays one (`Fx.KIND`: length and impact; a G-Max x `GMAX_K`); at the impact
+  each target gets its type's hit (`Fx.hit`, 18 effects). Lasting: `drawField` (the G-Max field
+  along the party's feet), `drawVeil`, `drawBarrier` (a hex dome while the shield stands), and
+  `Fx.charge` (the G-Max charge: a red wash, streaks into the boss). Shaders, made on first use
+  (`Fx.shader`; drawn shapes stand in without them): fire (`fireRect`: fbm noise rising through a
+  fire ramp, on a stretched white texel - the fire wave, field and hits) and rock (`rockPoly`: noise on
+  screen position - the slab). raid.lua: `Rd.scheduleMove` at a "use" (whom it falls on, the
+  events up to the next move; the look starts once the words are typed, a G-Max move after
+  `GMAX_CHARGE_S` of charge: the boss shot, its cry, the roar's burst), `Rd.stepMove` (starts it with
+  the band aside, the G-Max blow's camera, the boss's lunge `r.lunge` -> `bossPic.lunge` for slam /
+  multi / bite / slash), the use event lasting until the impact. `Bt.ALIAS` (HIGH_JUMP_KICK ->
+  HI_JUMP_KICK) and a retry without underscores (ANCIENTPOWER) find the Gen 3 names. Probe
+  `PROBE_GMAX=1` makes the boss use its G-Max move every turn (its later checks then fail: the
+  party is knocked about); shots r10f-h.
 - `src/battler_hud.lua` (Bh), the command phase's HUD, same capture: `Bh.drawOrder` - the four down the
   top left in choosing order (`Bh.ORDER`), white boxes with a dark edge, the party icon, a thought
   bubble while waiting (its dots ripple on the one choosing, which is wider with a pink stripe) or,
@@ -425,8 +445,9 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
     pills under the boss's bar, grey once broken, gone with the last), G-Max moves and their effects,
     the boss's scripts, cheers, the pouch (Bag -> item -> target).
   - Phase 3b, the catch and rewards (2026-10-26).
-- **Next.** The boss's attack cinematics and G-Max effects drawn
-  (shaders), sound; the second-screen pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4:
+  - Phase 3c, the moves acted out (2026-10-26, first pass; polish later: Wooble).
+- **Next.** Polish of the move looks; sound;
+  the second-screen pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4:
   polish and the Thor. Weather moves (the video's sandstorm) are not in the sim.
 - **Not in the sim yet:** confusion, flinch, multi-hit (Surging Strikes' three), Spectral Thief's
   theft, the battle.damage hook's abilities (Adaptability, Filter ...: the engine runs them in its own
