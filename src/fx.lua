@@ -2348,8 +2348,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           if az > 0 and bz > 0 then G2.line(cx + ax * rad, cy - ay * rad, cx + bx * rad, cy - by * rad) end
         end
       end
-      -- its rim alight
-      screenRing(G2, cx, cy, rad, rad, rad * 0.08, 1, 0.55, 0.9, 0.6 * d * aOut)
+      -- its rim alight (the closed ball's outline: gone as it opens, the halves no longer a sphere)
+      local rimA = 0.6 * d * aOut * max(0, 1 - open * 4)
+      if rimA > 0 then screenRing(G2, cx, cy, rad, rad, rad * 0.08, 1, 0.55, 0.9, rimA) end
       G2.setBlendMode("alpha")
       G2.setLineWidth(1)
     end

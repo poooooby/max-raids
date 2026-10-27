@@ -90,6 +90,12 @@ local function body(game, log)
     { M.close + 0.1, "c14_close" }, { M.turn + 0.25, "c14b_turn" }, { M.fall + 0.3, "c15_fall" }, { M.land + 0.08, "c16_land" }, { M.check + 0.6, "c17_check1" },
     { M.check + 1.6, "c18_check2" }, { M.done + 0.25, "c19_flare" }, { M.shrink + 0.35, "c20_shrink" },
     { M.gotcha + 0.5, "c21_gotcha" }, { M.gotcha + 1.6, "c22_words" } }
+  if os.getenv("PROBE_FAIL") == "1" then
+    -- broken free: the burst, the boss back, its going
+    marks = { { M.check + 0.6, "c17_check1" }, { M.done - 0.1, "f19_last" }, { M.done + 0.05, "f20_burst" },
+      { M.done + 0.25, "f21_burst2" }, { M.done + 0.6, "f22_back" }, { M.done + 1.3, "f23_words" },
+      { M.done + 2.1, "f24_going" }, { M.done + 2.6, "f25_gone" }, { M.done + 3.6, "f26_disappeared" } }
+  end
   for _, m in ipairs(marks) do
     waitFor(function() return not R.current() or X.state().phase ~= "throw" or (X.state().t or 0) - t0 >= m[1] end, 8000)
     if X.state().phase ~= "throw" then break end

@@ -1437,9 +1437,12 @@ return function(mod, deps)
       th.burstAt = r.t
       if Fx then
         Fx.barrierBreak({ X = Gr.X, Y = Gr.Y, Z = Gr.Z, h = R * 2, foot = 0 }, r.t)
-        Fx.flash({ 1, 0.5, 0.8 }, 0.6, 0.35, r.t)
+        Fx.flash({ 1, 0.5, 0.8 }, 0.28, 0.3, r.t)
       end
-      if Scene then Scene.shot("catch", 0.3) end
+      if Scene then
+        Scene.shot("field", 0.6)
+        Scene.shake(0.25, 0.5)
+      end
     end
     local _ = Ga
     if th.burstAt then
@@ -2041,6 +2044,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       Fx.drawMoves(G, r.t)
       Fx.draw(G, w, h, r.t)
     end
+    -- (the throw under the band, so the words stay clear of the ball and its crater)
+    if r.phase == "throw" then Rd.drawThrow(G, w, h) end
     if r.phase == "outro" then
       local O = Rd.OUTRO
       Rd.drawIris(G, w, h, min(1, max(0, (r.t - r.outroT - O.HOLD) / O.CLOSE)))
@@ -2061,8 +2066,6 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       BattlerHud.drawRows(G, w, h, r.rows, r.t)
     elseif r.phase == "catch" then
       if not r.say then Rd.drawCatch(G, w, h) end
-    elseif r.phase == "throw" then
-      Rd.drawThrow(G, w, h)
     elseif r.phase == "rewards" then
       Rd.drawRewards(G, w, h)
     elseif r.phase == "after" then
@@ -2114,9 +2117,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         G.setLineWidth(1)
       end
     end
-    if x and not (th.burstAt and r.t - th.burstAt > 0.05) then
+    local bv = th.burstAt and (r.t - th.burstAt) or nil
+    if x and not (bv and bv > 0.3) then
       o.now = r.t
       o.rgb = th.rgb
+      if bv then
+        -- broken free: it bursts open, flaring, and is gone
+        o.open = min(1, bv / 0.15)
+        o.bright = 0.6
+        o.alpha = 1 - bv / 0.3
+        o.lean, o.button = 0, 0
+      end
       Fx.drawBall(G, x, y, rad * k, o)
     end
     if th.rocks then
