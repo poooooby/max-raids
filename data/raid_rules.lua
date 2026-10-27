@@ -18,7 +18,7 @@ N.RAID = {
     [2] = { lv = { 25, 30 }, hpMult = 1.6, iv = 15, shields = { 0.5 }, ev = 8, bag = "m", medalTurns = 7 },
     [3] = { lv = { 35, 40 }, hpMult = 1.9, iv = 20, shields = { 0.7, 0.3 }, ev = 12, bag = "m", medalTurns = 7 },
     [4] = { lv = { 45, 50 }, hpMult = 2.5, iv = 25, shields = { 0.7, 0.3 }, ev = 20, bag = "l", medalTurns = 8 },
-    [5] = { lv = { 55, 60 }, hpMult = 3.0, iv = 31, shields = { 0.7, 0.3 }, ev = 32, bag = "l", medalTurns = 8 },
+    [5] = { lv = { 55, 60 }, hpMult = 5.0, iv = 31, shields = { 0.7, 0.3 }, ev = 32, bag = "l", medalTurns = 8 },
   },
   -- shield segments: BASE + floor((base Def + base Sp. Def) / PER), within MIN..MAX
   SEGMENTS = { BASE = 2, PER = 60, MIN = 2, MAX = 8 },
@@ -98,7 +98,7 @@ N.EVIDENCE = {
   ["RAID.SHIELD_DMG"] = { class = "ours", source = "the games greatly reduce damage through the barrier, by an unpublished formula (Bulbapedia Max Raid Battle); a quarter is ours", confidence = "medium" },
   ["RAID.BREAK_DROP"] = { class = "verified", source = "Pokemon.com; GameSpot: breaking the barrier sharply lowers the boss's Defense and Sp. Def", confidence = "medium" },
   ["RAID.ITEM_PRIORITY"] = { class = "ours", source = "items before moves, as the main games run the bag; raids have no bag", confidence = "high" },
-  ["RAID.STARS"] = { class = "inferred", source = "levels by tier: Serebii (15-20 .. 55-60); HP x1.4 / 1.6 / 1.9 / 2.5 for 1-4★: Bulbapedia Max Raid Battle; 5★ x3.0, the thresholds, IVs, EVs, bags and medal turns are ours; shields: none at 1-2★ in the games (one here, to teach it), one at 3-4★, two at 5★ (Bulbapedia, Pokemon.com)", confidence = "medium" },
+  ["RAID.STARS"] = { class = "inferred", source = "levels by tier: Serebii (15-20 .. 55-60); HP x1.4 / 1.6 / 1.9 / 2.5 for 1-4★: Bulbapedia Max Raid Battle; 5★ x5.0 (ours: x3.0 let a Lv 70 team, IVs 31, 252-EV spreads, win every 5★ in 3-8 of its 10 turns - balance_probe, 2026-10-26), the thresholds, IVs, EVs, bags and medal turns are ours; shields: none at 1-2★ in the games (one here, to teach it), one at 3-4★, two at 5★ (Bulbapedia, Pokemon.com)", confidence = "medium" },
   ["RAID.SEGMENTS"] = { class = "ours", source = "the games: 2 to 8 segments, by the boss's defensive stats (Bulbapedia, Serebii); this formula is ours", confidence = "medium" },
   ["RAID.CHEER"] = { class = "verified", source = "Serebii: cheer heals, raises a stat, sets a screen or breaks the barrier, about 16% each, nothing 20%; the screens are a Defense / Sp. Def raise here", confidence = "medium" },
   ["RAID.POUCH"] = { class = "ours", source = "raids in the games have no bag; ITEM is ours", confidence = "high" },

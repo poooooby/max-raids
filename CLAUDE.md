@@ -507,6 +507,18 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - The end card: Next -> phase "outro" (`Rd.OUTRO`): the den once more (wide, the boss gone), a circle
     closing to black (`Rd.drawIris`), then the evolutions / moves over black.
   - Driver `tests/drivers/catch_probe.lua` (the roll made sure; `PROBE_FAIL=1` a miss).
+- **The party's pictures whole** (2026-10-26, Wooble: big sprites cut off at the top): `memberPics` took
+  a 64 x 64 corner of the back pic; a sprite mod paints a big Pokemon on a canvas larger than the 64 x 64
+  it reports (g9-battle-sprites-gen3), so the head was cut. Now the provider's own quad when it gives
+  one, else the whole image; the scale stays one for every member (`cell` = the size it reports), so a
+  big one stands taller. balance_probe shoots its team (team_<boss>*.png).
+- **Balance** (2026-10-26): `tests/drivers/balance_probe.lua` plays whole raids with a strong team
+  (PROBE_LEVEL, default 70: Blaziken, Swampert, Sceptile, Gardevoir, IVs 31, 252-EV spreads, each using
+  its strongest move) against PROBE_BOSSES, PROBE_RUNS each, the raid's clock fast-forwarded
+  (`Rd.SPEED`, drivers only; 1 in play). At 5★ x3.0 HP it won every 5★ in 3-8 turns with at most one
+  knock-out; now x5.0: 4-10 turns, 0-1 knock-outs (Snorlax 7 / 9 / 10). The levels stay the game's
+  (Serebii: 5★ 55-60; 65-70 is Crown Tundra's Dynamax Adventures, not dens). A Lv 30 team against
+  the 4★ Charizard (46-50) is wiped by its G-Max move - the level gap, as the game.
 - **The other versions** (2026-10-26): FireRed and Ruby checked (LeafGreen / Sapphire share their code):
   the raid (songs by version: Mewtwo's theme / Regi's), the catch (each version's ball words, its caught
   fanfare), the dens (FireRed's routes are `FR_ROUTE_1` ..., Hoenn's `RU_ROUTE101` ...; towns and the

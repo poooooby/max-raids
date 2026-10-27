@@ -266,16 +266,24 @@ return function(mod, deps)
       local pic = backPicOf(m.mon)
       if pic then
         local img = pic.image
-        local w, h = pic.w or 64, pic.h or 64
+        -- its whole picture: the provider's own crop when it gives one, else the whole image - a
+        -- sprite mod may paint a big Pokemon on a canvas larger than the 64 x 64 it reports
+        -- (g9-battle-sprites-gen3: Rapidash 76 x 78), and a 64 x 64 corner of it cut the head off
+        local iw, ih = img:getDimensions()
+        local qx, qy, w, h = 0, 0, iw, ih
+        if pic.quad and pic.quad.getViewport then qx, qy, w, h = pic.quad:getViewport() end
         m.draw = m.draw or {}
         local d = m.draw
         d.image = img
-        if not d.quad or d.qw ~= w or d.qh ~= h or d.src ~= img then
-          d.quad = love.graphics.newQuad(0, 0, w, h, img:getDimensions())
-          d.qw, d.qh, d.src = w, h, img
+        local fresh = false
+        if not d.quad or d.qw ~= w or d.qh ~= h or d.qx ~= qx or d.qy ~= qy or d.src ~= img then
+          d.quad = love.graphics.newQuad(qx, qy, w, h, iw, ih)
+          fresh = d.qw ~= w or d.qh ~= h
+          d.qx, d.qy, d.qw, d.qh, d.src = qx, qy, w, h, img
         end
-        d.cell = h
-        if not d.box then d.box = opaqueBox(img, d.quad) end
+        -- (one scale for every member: the size the provider reports, so a big one is drawn bigger)
+        d.cell = pic.h or 64
+        if not d.box or fresh then d.box = opaqueBox(img, d.quad) end
       end
     end
   end
@@ -445,7 +453,8 @@ return function(mod, deps)
 
   function Rd.update(dt)
     if not r then return end
-    dt = min(0.1, dt or 0)
+    -- (drivers: Rd.SPEED runs the raid's clock faster; 1 in play)
+    dt = min(0.1, (dt or 0) * (Rd.SPEED or 1))
     -- a blow's hit-stop: the raid's clock all but held for a moment (real time)
     if (r.hitStop or 0) > 0 then
       r.hitStop = r.hitStop - dt
