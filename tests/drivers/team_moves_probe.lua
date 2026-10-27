@@ -32,7 +32,7 @@ local function body(game, log)
   local s0 = Runtime.getSession()
   s0.party = {}
   local SETS = {
-    { "SPECIES_ALAKAZAM", { "LIGHT_SCREEN", "REFLECT", "PSYCHIC" } },
+    { "SPECIES_ALAKAZAM", { "LIGHT_SCREEN", "REFLECT", "PSYCHIC", "SURF" } },
     { "SPECIES_BLISSEY", { "SAFEGUARD", "MIST", "WISH" } },
     { "SPECIES_HITMONTOP", { "WIDE_GUARD", "PROTECT", "QUICK_GUARD" } },
     { "SPECIES_TOGEKISS", { "TAILWIND", "FOLLOW_ME", "HELPING_HAND", "LIFE_DEW" } },
@@ -59,7 +59,7 @@ local function body(game, log)
   local cur = R.current()
   for i, m in ipairs(cur.members) do
     local names = {}
-    for _, mv in ipairs(m.b.moves) do names[#names + 1] = mv.name .. (mv.team and ("[" .. mv.team.kind .. "]") or "") end
+    for _, mv in ipairs(m.b.moves) do names[#names + 1] = mv.name .. (mv.team and ("[" .. mv.team.kind .. "]") or "") .. (" t" .. tostring(mv.ref and mv.ref.target)) .. (mv.friendly and "*" or "") end
     log(("member %d %s: %s"):format(i, m.b.name, table.concat(names, ", ")))
   end
   -- a member's move by its name (a target for an ally move)
@@ -73,6 +73,11 @@ local function body(game, log)
     R.choose("move" .. slot)
     if R.current().cmd.menu == "target" then
       if target == "shot" then return true end
+      if not target then
+        for k, row in ipairs(R.current().cmd.moveList or {}) do
+          if row.live ~= false then target = k; break end
+        end
+      end
       R.choose("move" .. (target or 1))
     end
     return true
@@ -87,6 +92,15 @@ local function body(game, log)
       local e = c.events and c.events[c.evI]
       if e and not seen[e] then
         seen[e] = true
+        if e.kind == "damage" and e.who and not e.who.boss and e.target then
+          log(("hit %s -> %s %d%s"):format(e.who.name, e.target.name, e.amount or 0, e.target.boss and "" or " (an ally)"))
+          if not e.target.boss and shots.friendly then
+            local t0 = c.t
+            waitFor(function() return R.current().t >= t0 + 0.5 end, 4000)
+            shot(shots.friendly)
+            shots.friendly = nil
+          end
+        end
         if e.kind == "side" or e.kind == "guard" then
           log(("event %s %s %s: %s"):format(e.kind, tostring(e.what), tostring(e.up), tostring(e.text)))
           local name = shots[e.what or (e.protect and "protect") or ""]
@@ -108,8 +122,15 @@ local function body(game, log)
     return ("light %d reflect %d safeguard %d mist %d tailwind %d"):format(sd.light, sd.reflect, sd.safeguard, sd.mist, sd.tailwind)
   end
 
-  -- turn 1
-  pickMove("Light Screen"); pickMove("Safeguard"); pickMove("Wide Guard"); pickMove("Tailwind")
+  -- turn 1 (Light Screen's target screen: the arrow on all four)
+  pickMove("Light Screen", "shot")
+  U.wait(20)
+  shot("t00_team_pick")
+  local arrows = 0
+  for _, row in ipairs(R.current().cmd.moveList or {}) do if row.hit then arrows = arrows + 1 end end
+  check(R.current().cmd.allPick == "team" and arrows == 4, "Light Screen: the arrow on all four (" .. arrows .. ")")
+  R.choose("move1")
+  pickMove("Safeguard"); pickMove("Wide Guard"); pickMove("Tailwind")
   playTurn({ light = "t01_light_screen", safeguard = "t02_safeguard", wide = "t03_wide_guard", tailwind = "t04_tailwind" })
   waitFor(function() return X.state().phase == "command" and not R.current().say end, 20000)
   shot("t05_lasting")
@@ -120,8 +141,35 @@ local function body(game, log)
   playTurn({ reflect = "t06_reflect", mist = "t07_mist", protect = "t08_protect", redirect = "t09_follow_me" })
   waitFor(function() return X.state().phase == "command" and not R.current().say end, 20000)
   log("after turn 2:", sides())
-  -- turn 3: Helping Hand's target menu
-  pickMove("Psychic"); pickMove("Wish"); pickMove("Quick Guard")
+  -- turn 3: Surf's target screen (the arrow on the three allies, the user immune), Helping Hand's
+  pickMove("Surf", "shot")
+  U.wait(20)
+  shot("t14_surf_pick")
+  -- the same on the second screen (its display stood in for: the last frame pushed)
+  local S2 = X._test.screen2
+  local last = nil
+  local keep = S2.bridge
+  S2.bridge = { detected = function() return true end, available = function() return true end, setEnabled = function() end,
+    push = function(data) last = data:clone(); return true end, pollTouch = function() return nil end }
+  X._test.padSecond(true)
+  U.wait(40)
+  if last then
+    local f = io.open(dir .. "/t14b_surf_second.png", "wb")
+    if f then f:write(last:encode("png"):getString()); f:close() end
+    log("frame t14b_surf_second", last:getWidth() .. "x" .. last:getHeight())
+  else
+    log("FAIL no second-screen frame")
+  end
+  X._test.padSecond(false)
+  S2.bridge = keep
+  U.wait(5)
+  local hits, userHit = 0, false
+  for k, row in ipairs(R.current().cmd.moveList or {}) do
+    if row.hit then hits = hits + 1; if k == 1 then userHit = true end end
+  end
+  check(R.current().cmd.allPick == "spread" and hits == 3 and not userHit, "Surf: the arrow on the three allies, not its user")
+  R.choose("move2")
+  pickMove("Wish"); pickMove("Quick Guard")
   pickMove("Helping Hand", "shot")
   U.wait(20)
   shot("t10_target")
@@ -130,7 +178,10 @@ local function body(game, log)
   for i, row in ipairs(R.current().cmd.moveList or {}) do live[#live + 1] = ("%d %s %s"):format(i, row.name, tostring(row.live)) end
   log("targets:", table.concat(live, " | "))
   R.choose("move1")
-  playTurn({ help = "t11_helping_hand", wish = "t12_wish", quick = "t13_quick_guard" })
+  local hpBefore = {}
+  for k, m in ipairs(R.current().members) do hpBefore[k] = m.b.mon.hp end
+  playTurn({ help = "t11_helping_hand", wish = "t12_wish", quick = "t13_quick_guard", friendly = "t15_surf_allies" })
+  log("Surf turn HP:", hpBefore[2], "->", R.current().members[2].b.mon.hp, "|", hpBefore[3], "->", R.current().members[3].b.mon.hp)
   waitFor(function() return X.state().phase == "command" and not R.current().say end, 20000)
   -- turn 4: Life Dew
   pickMove("Psychic"); pickMove("Safeguard"); pickMove("Protect"); pickMove("Life Dew")

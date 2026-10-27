@@ -322,10 +322,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local cx, cy = t.x + t.h * 0.3, t.y + (t.h - ch) / 2
     G.setColor(c[1], c[2], c[3], live and 1 or 0.5)
     G.rectangle("fill", cx, cy, cw, ch, ch / 2, ch / 2)
+    local chip = mv.chip or ((mv.typeName or ""):sub(1, 1) .. (mv.typeName or ""):sub(2):lower())
+    -- (a longer word, "Immune", shrinks to the chip)
     local fc = font(ch * 0.62)
+    if fc:getWidth(chip) > cw * 0.9 then fc = font(ch * 0.62 * cw * 0.9 / fc:getWidth(chip)) end
     G.setFont(fc)
     G.setColor(1, 1, 1, 1)
-    local chip = mv.chip or ((mv.typeName or ""):sub(1, 1) .. (mv.typeName or ""):sub(2):lower())
     G.printf(chip, cx, cy + (ch - fc:getHeight()) / 2, cw, "center")
     -- the PP's width first: the name shrinks to fit before it
     local fp = font(t.h * 0.28)
@@ -563,16 +565,21 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     rset(where.panel, left, ptop, right - left, bottom - ptop)
     local cur = r.cmd.cursor or 1
     local u = ph / 92
+    -- (a move reaching several - Surf on the boss and allies, Light Screen on the team: the arrow on
+    -- every one it reaches, all lit)
+    local all = r.cmd.menu == "target" and r.cmd.allPick ~= nil
     for i = 1, 4 do
       local t = where["move" .. i]
       if list[i] then
         rset(t, right - pw, top + (i - 1) * pitch, pw, ph)
-        movePill(G, t, list[i], i == cur, u)
+        movePill(G, t, list[i], (all and list[i].hit == true) or (not all and i == cur), u)
       else
         rset(t, 0, 0, 0, 0)
       end
     end
-    if list[cur] then chevron(G, where["move" .. cur], u) end
+    if all then
+      for i = 1, 4 do if list[i] and list[i].hit then chevron(G, where["move" .. i], u) end end
+    elseif list[cur] then chevron(G, where["move" .. cur], u) end
   end
 
   -- on the main window, in the lower right
@@ -767,12 +774,21 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       elseif c.menu == "items" then title = "Choose an item"
       elseif c.menu == "target" then
         local mv = c.moveSlot and m and m.b and m.b.moves[c.moveSlot]
-        title = mv and ("Use %s on whom?"):format(mv.name) or "Use it on whom?"
+        if mv and c.allPick == "spread" then
+          title = ("%s hits %s and your team"):format(mv.name, r.boss and r.boss.name or "the boss")
+        elseif mv and c.allPick then title = ("%s works on your team"):format(mv.name)
+        else title = mv and ("Use %s on whom?"):format(mv.name) or "Use it on whom?" end
       else title = ("What will %s do?"):format(nm) end
     elseif ask then title = r.phase == "leaveq" and "Leave the den?" or "Yes or no?"
     elseif catchUp then
       title = c.menu == "ballbox" and "Choose a Pok\195\169 Ball" or "Will you catch it?"
     else title = "Max Raid Battle" end
+    -- (shrunk to end before Back: "Surf hits Snorlax and your team")
+    local room = w - hh * 2.2 - h * 0.03 - h * 0.08
+    if fh:getWidth(title) > room then
+      fh = font(hh * 0.42 * room / fh:getWidth(title))
+      G.setFont(fh)
+    end
     G.print(title, h * 0.04, (hh - fh:getHeight()) / 2)
     for i = #sWhere.cells, 1, -1 do sWhere.cells[i] = nil end
     rset(sWhere.back, 0, 0, 0, 0)
@@ -871,14 +887,21 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         sWhere.cells[i] = t
         local live
         if mv.live ~= nil then live = mv.live else live = (mv.pp or 0) > 0 end
-        local sub = mv.right or (mv.maxPp and ("PP %d/%d"):format(mv.pp or 0, mv.maxPp or 0)) or nil
+        local sub = mv.note or mv.right or (mv.maxPp and ("PP %d/%d"):format(mv.pp or 0, mv.maxPp or 0)) or nil
         local icon = nil
         if mv.typeName and not mv.chip then
           icon = typeChip(mv.rgb or { 0.6, 0.6, 0.6 }, (mv.typeName:sub(1, 1) .. mv.typeName:sub(2):lower()))
         end
         local subIn = nil
         if not icon then subIn = sub end
-        quadButton(G, t, mv.rgb, c.cursor == i, held == t.id, live, icon, mv.name, subIn, icon and 0.24 or nil)
+        local all = c.menu == "target" and c.allPick ~= nil
+        quadButton(G, t, mv.rgb, (all and mv.hit == true) or (not all and c.cursor == i), held == t.id, live, icon, mv.name, subIn,
+          icon and 0.24 or nil)
+        -- (a move reaching several: the arrow on each it reaches)
+        if all and mv.hit then
+          local down = held == t.id and ch * 0.045 or 0
+          chevron(G, { x = x + ch * 0.2, y = y + down + ch * 0.36, h = ch * 0.28 })
+        end
         if mv.max then
           -- (a Max form: the Dynamax red round it)
           local down = held == t.id and ch * 0.045 or 0

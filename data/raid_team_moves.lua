@@ -74,6 +74,18 @@ T.MOVES = {
   allyswitch = { kind = "none" },
 }
 
+-- the moves that strike every Pokemon round the user - the boss and the user's allies - in Sword /
+-- Shield (its "all adjacent Pokemon"; Gen 3's MOVE_TARGET_FOES_AND_ALLY has only Earthquake, Magnitude,
+-- Explosion, Self-Destruct and Teeter Dance: Surf hit only the foes until Gen 4). Bt.move marks them
+-- `friendly` with any move whose target is FOES_AND_ALLY. EVIDENCE: Bulbapedia's pages ("may affect
+-- all adjacent Pokemon" / "hits all adjacent Pokemon"), Pokemon Showdown's moves (target allAdjacent).
+T.FRIENDLY = {
+  surf = true, earthquake = true, magnitude = true, explosion = true, selfdestruct = true, teeterdance = true,
+  bulldoze = true, discharge = true, lavaplume = true, sludgewave = true, searingshot = true,
+  petalblizzard = true, boomburst = true, paraboliccharge = true, sparklingaria = true, mindblown = true,
+  brutalswing = true, synchronoise = true, mistyexplosion = true, corrosivegas = true,
+}
+
 -- the words
 T.WORDS = {
   screenUp = { reflect = "Reflect made {SIDE} stronger against physical moves!",

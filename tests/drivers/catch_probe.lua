@@ -81,11 +81,19 @@ local function body(game, log)
       Rw.throw = function() return false, nil end
     else
       -- (a sure catch: the real throw with the Master Ball's odds, the ball thrown kept)
-      Rw.throw = function(key, level, ball, rng, ivs)
+      Rw.throw = function(key, level, ball, rng, ivs, gender)
         local sure = {}
         for k, v in pairs(ball) do sure[k] = v end
         sure.mult = 0
-        local caught, info = real(key, level, sure, rng, ivs)
+        local caught, info = real(key, level, sure, rng, ivs, gender)
+        -- ... and its gender
+        local cm = type(info) == "table" and info.mon
+        if cm then
+          local P = require("src.core.game3.pokemon")
+          local g = P.gender(P.speciesOf(cm), cm.personality)
+          log("boss gender", tostring(gender), "caught", tostring(g))
+          check(gender == nil or gender == "U" or g == gender, "the caught Pokemon keeps the boss's gender")
+        end
         -- the caught Pokemon keeps the boss's IVs
         local mon = type(info) == "table" and info.mon
         if mon and ivs then

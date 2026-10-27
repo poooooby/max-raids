@@ -2509,7 +2509,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- Safeguard: a mint dome over the team, its foot a glowing ring on the ground (half drawn behind the
   -- team, half in front, as the G-Max fields)
   local function drawDome(G2, E, back, t0, off, now)
-    if not stripReady() then return end
+    -- (up, or fading out after it ended; nothing else)
+    if not (t0 or (off and now - off < Fx.TEAM.FADE_S)) or not stripReady() then return end
     local rise = ease1(min(1, (now - (t0 or 0)) / 0.6))
     local a = (off and max(0, 1 - (now - off) / Fx.TEAM.FADE_S) or 1) * rise
     if a <= 0 then return end
@@ -2545,8 +2546,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local X = E.x0 - 0.8 + (E.x1 - E.x0 + 1.6) * ((rnd(51, j) + now * 0.02 * (rnd(53, j) - 0.5)) % 1)
       local Z = E.cz - 2.2 + 3.6 * rnd(57, j)
       local x, y, k = P(X, 0.25, Z)
-      if x then
-        glowAt(G2, x, y, k * (1.6 + rnd(59, j)), C[1], C[2], C[3], a * (0.26 + 0.08 * sin(now * 0.7 + j)))
+      -- (thinning out close to the eye, so a near shot is not a wall of fog)
+      local near = k and max(0, 1 - k / 260) or 0
+      if x and near > 0 then
+        glowAt(G2, x, y, k * (1.6 + rnd(59, j)), C[1], C[2], C[3], a * near * (0.26 + 0.08 * sin(now * 0.7 + j)))
       end
     end
   end
@@ -2572,6 +2575,39 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           G2.line(x1, y1, x2, y2)
         end
       end
+    end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+
+  -- Gravity: streaks of violet light driving down over the whole den (those at Z in this layer) and a
+  -- ring pressing out over the ground under each side, again and again
+  Fx.TEAM.GRAVITY = { 0.72, 0.5, 1 }
+  local function drawGravity(G2, layer, t0, off, now, E, B)
+    local a = (off and max(0, 1 - (now - off) / Fx.TEAM.FADE_S) or 1) * min(1, (now - (t0 or 0)) / 0.5)
+    if a <= 0 then return end
+    local C = Fx.TEAM.GRAVITY
+    G2.setBlendMode("add")
+    for j = 1, 34 do
+      local per = 0.55 + 0.35 * rnd(61, j)
+      local u = ((now + rnd(63, j) * per) / per) % 1
+      local X = -7 + 14 * rnd(65, j)
+      local Z = -11 + 13 * rnd(67, j)
+      if layerOf(Z) == layer then
+        local Y = 7 * (1 - u)
+        local x1, y1, k = P(X, Y, Z)
+        local x2, y2 = P(X, Y + 1.1, Z)
+        if x1 and x2 then
+          G2.setLineWidth(max(1, k * 0.045))
+          G2.setColor(C[1], C[2], C[3], a * 0.6 * sin(u * pi))
+          G2.line(x1, y1, x2, y2)
+        end
+      end
+    end
+    if layer == "mid" then
+      local u = (now * 0.8) % 1
+      if E then groundRing(G2, E.cx, 0.02, E.cz, (E.x1 - E.x0) * 0.6 * (0.3 + 0.7 * u), 0.25, C[1], C[2], C[3], a * 0.5 * (1 - u)) end
+      if B then groundRing(G2, B.X, (B.foot or 0) + 0.02, B.Z, B.h * 0.9 * (0.3 + 0.7 * u), 0.3, C[1], C[2], C[3], a * 0.5 * (1 - u)) end
     end
     G2.setBlendMode("alpha")
     G2.setLineWidth(1)
@@ -2652,6 +2688,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local E = teamExtent()
     local sides = team.sides or {}
     local ts = sides.team or {}
+    -- Gravity over the whole field
+    local fs = sides.field or {}
+    if fs.gravity or (fs.gravityOff and now - fs.gravityOff < Fx.TEAM.FADE_S) then
+      drawGravity(G2, layer, fs.gravity, not fs.gravity and fs.gravityOff or nil, now, E, team.boss)
+    end
     if E then
       if layer == "mid" then
         drawDome(G2, E, true, ts.safeguard, ts.safeguard == nil and ts.safeguardOff or nil, now)
@@ -2729,7 +2770,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       if ts.mist then
         local C = Fx.TEAM.MIST
         emit("smoke", X, 0.2, Z, (rnd(seedN, 5) - 0.5) * 0.4, 0.06, (rnd(seedN, 6) - 0.5) * 0.3, 3, 0.9,
-          C[1], C[2], C[3], 0.4)
+          C[1], C[2], C[3], 0.28)
       end
     end
   end

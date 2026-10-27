@@ -97,7 +97,19 @@ local function body(game, log)
   local reverted = false
   for _ = 1, 3 do
     local c = R.current().cmd
-    while c and c.actor do R.choose("fight"); R.choose("move1"); c = R.current().cmd end
+    local guard = 0
+    while c and c.actor and guard < 20 do
+      guard = guard + 1
+      R.choose("fight"); R.choose("move1")
+      c = R.current().cmd
+      -- (a move asking whom: the first it can)
+      if c and c.menu == "target" then
+        for k, row in ipairs(c.moveList or {}) do
+          if row.live ~= false then R.choose("move" .. k); break end
+        end
+        c = R.current().cmd
+      end
+    end
     deadline = clock() + 40
     while clock() < deadline and X.state().active do
       local cc = R.current()

@@ -43,7 +43,8 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 
 ### The Raid
 
-- 🏔️ **A 3D den:** a cave lit red, the giant towering over your four in its red Dynamax aura.
+- 🏔️ **A 3D den:** a cave lit red, the giant towering over your four in its red Dynamax aura, its
+  three dark-red clouds circling over its head. A Dynamax Pokémon's cry is its own, deeper and slower.
   It bursts in with a roar, and the camera follows the fight: over your Pokémon's shoulder as you
   choose, pulled back as the giant attacks, and onto each of your Pokémon as an effect lands on them.
 - 🐉 **37 Gigantamax Pokémon:** Charizard, Pikachu, Eevee, Snorlax, Gengar, Lapras and more,
@@ -53,11 +54,19 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 - ⚔️ **Fight, Bag, Run:** each of your four picks a move, or uses an item from the raid's pouch
   (Potions, a Full Heal and a Revive shared by the team). **Run** asks first: leave, and you're
   blown out of the den, which is spent for the day.
-- 💥 **G-Max and Max Moves:** a Gigantamax boss's G-Max Move strikes all four at once and leaves
-  its mark: a sea of fire burning your team each turn, vines, rocks, status conditions and more. A
-  Dynamax boss uses a Max Move of its strongest attack's type, with its effect on your team's or
-  its own stats. Every attack has its own look: beams, waves, falling rocks, bites, slashes,
-  earthquakes that crack the ground.
+- 💥 **G-Max and Max Moves:** as in Sword and Shield, a Max or G-Max Move strikes one of your
+  Pokémon, and its effect reaches whoever the game says it does. Volt Crash paralyzes all four,
+  Smite and Gold Rush confuse all four, Cuddle makes those of the other gender fall in love (half
+  their turns lost while the boss stands), Meltdown torments all four (no move twice in a row),
+  Gravitas brings down Gravity for five turns (moves land more often, Ground moves reach Flying
+  types and Levitate, Fly and the jumping moves fail), Wildfire leaves a sea of fire burning your team each turn,
+  Snooze makes only the one it hit drowsy, and Depletion drains the PP of that Pokémon's last move.
+  A Dynamax boss uses a Max Move of its strongest attack's type. A confused Pokémon may hurt itself
+  instead of attacking, until the confusion wears off.
+- 🌊 **Attacks on the whole party:** the boss's own spread attacks, such as Dazzling Gleam, Rock
+  Slide, Heat Wave, Earthquake or Surf, hit all four of your Pokémon, each for three quarters of the
+  damage, as in Sword and Shield. Every attack has its own look: beams, waves, falling rocks, bites,
+  slashes, earthquakes that crack the ground.
 - 🛡️ **Barriers:** as its HP falls, the boss throws up a barrier that blocks most of each hit
   until enough blows break it. Breaking it sharply lowers the boss's Defense and Sp. Def.
 - 📣 **Cheers:** a Pokémon that fainted cheers the team on from the sidelines: healing, raised
@@ -89,6 +98,12 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
   Aromatic Mist ask which ally to use them on. Life Dew, Jungle Healing, Heal Bell, Aromatherapy, Wish,
   Howl, Coaching, Gear Up, Magnetic Flux and Flower Shield work on the team. A boss's own screens and
   Protect work against your team the same way.
+- 🌊 **Friendly fire:** moves that hit everyone around the user in Sword and Shield (Surf,
+  Earthquake, Discharge, Lava Plume, Bulldoze, Boomburst, Explosion and more) hit the boss and your
+  other three too, never the user. Picking one shows your four with an arrow on each it will hit (the
+  user marked Immune); a move for the whole team, such as Light Screen or Wide Guard, shows the arrow
+  on all four. Wide Guard and Protect shield your team from an ally's Surf too, and Explosion faints
+  its user.
 - 🔒 **Your Pokémon are safe:** your four fight as copies. Nothing in your party or boxes changes
   in a raid, win or lose.
 

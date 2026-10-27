@@ -55,7 +55,7 @@ S.SIDE = {
   mist = "SE_M_MIST", tailwind = "SE_M_GUST", wide = "SE_M_BARRIER", quick = "SE_M_DETECT", mat = "SE_M_MEGA_KICK",
   crafty = "SE_M_BARRIER", endure = "SE_M_HARDEN", endured = "SE_M_HARDEN", redirect = "SE_M_ENCORE",
   help = "SE_M_ENCORE", cure = "SE_M_HEAL_BELL", wish = "SE_M_MORNING_SUN", sacrifice = "SE_M_MORNING_SUN",
-  blown = "SE_M_GUST2",
+  blown = "SE_M_GUST2", gravity = "SE_M_STRENGTH", torment = "SE_M_SWAGGER",
 }
 S.STATUS = { BRN = "SE_M_EMBER", PSN = "SE_M_TOXIC", TOX = "SE_M_TOXIC", PAR = "SE_M_THUNDER_WAVE",
   SLP = "SE_M_YAWN", FRZ = "SE_M_ICY_WIND" }

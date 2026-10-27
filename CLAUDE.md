@@ -127,11 +127,69 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
     Protect / Max Guard a bubble (green / red; a ripple when struck), a wish's star; `Fx.teamCast`
     flashes, `Fx.healSparkle` on every heal. Sounds `Sounds.SIDE` by what (Gen 3's own: SE_M_REFLECT,
     SE_M_MIST, SE_M_GUST, SE_M_HEAL_BELL ...).
+  - Friendly fire (2026-10-27, Wooble): a member's move marked `friendly` (`Bt.move`: target bit 32
+    FOES_AND_ALLY, or `T.FRIENDLY` - Sword / Shield's all-adjacent list: Surf was foes-only in Gen 3)
+    falls on the boss and every other member present (`targetsFor`), never its user; Protect, Max
+    Guard and the side's guards stand against an ally's move too (`stopped` skips only the user),
+    Safeguard and mist against any but the target itself; Explosion / Self-Destruct / Misty Explosion
+    faint the member (`Sim.SELF_KO`, a faint counted), Mind Blown / Steel Beam cost half its max HP
+    (`HALF_COST`); the boss is spared both.
+  - The target screen for a move reaching several (`Rd.areaOf`: "spread" friendly, "team" a screen /
+    side / guard / cure / team heal or boost, "allies" Coaching): `c.allPick`, the four members with
+    `row.hit` on each reached (the user `Immune` - chip on the main screen, `row.note` under its name
+    on the second - for spread / allies), every hit row lit with the chevron on both screens (`Pad`
+    moveStack / drawSecond), a press on any confirms `{ move }`; the header "Surf hits Snorlax and
+    your team" / "Light Screen works on your team", shrunk to end before Back.
+  - Max / G-Max Moves have ONE target (2026-10-27, Wooble; Sword / Shield's): `Bt.gmaxMove` and
+    `Bt.maxMove` spread false, the boss's G-Max falls on a random member (or Follow Me's). The effect's
+    `scope = "foes"` (raid_gmax.lua: Volt Crash, Befuddle, Malodor, Stun Shock, Foam Burst, Tartness)
+    reaches every opponent on the field (`Sim:gmaxEffect` -> `gmaxMain`), else the one struck
+    (Snooze, Centiferno, Sandblast, Depletion - the last move used, `m.lastMove`); `confuse` (Smite,
+    Gold Rush) confuses every opponent (`Sim:confuse`: 2-5 turns, Safeguard stops it; `held`: 1 in 3
+    a 40-power typeless blow on itself, the adapter's `A.confusionHit` = engine `Damage.base`, else
+    1/8). Their looks (`Rd.oneTarget`): a "wave" over the party becomes a big beam / spikes / rings /
+    blades; `scheduleMove` aims a Max / G-Max look at the damage events only, not the statuses.
+  - Genders and G-Max Cuddle (2026-10-27, Wooble: "It should"): `Bt.genderOf` (engine Pokemon.gender);
+    members' `b.gender` from their personality, the boss's rolled once (`mon.genderRoll`, rng 0-255)
+    and kept by the catch (`Rw.keepGender`: personality + 50k keeps nature, ability and shininess).
+    `Sim:attract` (male / female only, not the genderless, not OBLIVIOUS; Safeguard does not stop it),
+    `held`: after confusion, "in love with X", 1 in 2 "immobilized by love"; over when the loved one
+    faints or sits out (`fainted` clears `boss.attract`). Cuddle `effect = { kind = "none", attract }`.
+    Left out: Terror's no-escape (nothing to escape: Run leaves the den whatever).
+  - G-Max Meltdown (2026-10-27): `torment` on every opponent (`Sim:torment`; a Dynamax battler -
+    the boss, a giant member - immune); `Sim:tormented(b, mv)` bars its `lastMove` while it has
+    another move with PP (none: Struggle in the games, let through here); `use` says it cannot;
+    raid.lua greys that row (`row.live` false, "Torment"); cleared at a faint.
+  - G-Max Gravitas: `Sim:setGravity` (5 turns, the whole field, a second fails while it holds;
+    `side` events side "field" what "gravity"): `A.hits(..., gravity)` x5/3, `Sim.NO_GRAVITY` moves
+    fail (Fly, Bounce, Sky Drop, Splash, (Hi) Jump Kick, Magnet Rise, Telekinesis, Flying Press,
+    Floaty Fall), A.damage `opts.gravity`: a Ground move on a Flying type sets its Flying type aside
+    for the hit (types restored), Levitate no longer immune. Looks: Fx `drawGravity` (violet streaks
+    driving down over the den, rings pressing out under each side; `r.sideFx.field`). Sounds
+    `Sounds.SIDE.gravity` / `torment`. Driver gmax_probe `PROBE_FORCE_GMAX=1` (the G-Max move every
+    turn) on ORBEETLE_2 / MELMETAL_2; it also checks Earthquake on Salamence with and without Gravity
+    through the engine's damage.
+  - The Dynamax cloud (Wooble's SwSh captures; "long and lumpy, curved, a three part halo, more
+    separation"): `Sc.dynaCloud` (raid_scene.lua, `Sc.CLOUD`): three dark-red cloud banks, each
+    `LUMPS` lumps laid along `ARC` radians of a flat ring over the head (`RING_W` / `RING_UP` /
+    `RING_FLAT`; the gaps 2pi/3 - ARC), every other lump lifted and sizes uneven for a lumpy top,
+    thin at the ends, turning (`SPIN`), the far side smaller and dimmer; `cloudBank` draws a bank in
+    four passes (shadow, body, lit, shine) so it reads as one cloud; a puff breaks off each bank's
+    end. Pinker for a Gigantamax one (`pic.gmax`; the boss's `bossPic.gmax` = not dyna). The boss's
+    (it replaced the rising "antenna" wisps) and a giant member's, drawn over its sprite.
+  - Giant cries: `Rd.bigCry(species)` plays the engine's (or a cry mod's) cry and sets its Source's
+    pitch to `Rd.GIANT_CRY` 0.8 (lower and 25% longer); a Dynamax boss's (`Rd.cry` for `L.dyna`), a
+    member growing giant, its Max Move's charge. The pack's G-Max cries are left as they are.
+  - Spread moves (target BOTH / FOES_AND_ALLY, the boss's and the team's friendly fire) take
+    Sword / Shield's x3/4 (`Sim.SPREAD_K`) in the sim; the adapter no longer passes Gen 3's halving
+    `spread` to Damage.calc.
   - Not in Sword / Shield, left out: Lucky Chant, Lunar Blessing, Silk Trap, Burning Bulwark, Dragon
     Cheer. Ally Switch does nothing (no places).
   - Tests: raid_sim_test (screens, Wind Rage, Safeguard, Mist, Tailwind, every guard, Protect / pierce /
-    Spiky Shield, Endure, Follow Me, Helping Hand, heals, Wish, Healing Wish, boosts); driver
-    `tests/drivers/team_moves_probe.lua` (t01-t13 shots, the target menu).
+    Spiky Shield, Endure, Follow Me, Helping Hand, heals, Wish, Healing Wish, boosts, friendly fire);
+    driver `tests/drivers/gmax_probe.lua` (HATTERENE_2: Dazzling Gleam on all four, G-Max Smite on one
+    and confusing all; g01-g03); driver `tests/drivers/team_moves_probe.lua` (t00 Light Screen's arrows, t01-t13 shots, t14 / t14b
+    Surf's target screen on both screens, t15 Surf on the allies).
 - **The Dynamax Crystal** (National Dex item 958; 2026-10-27, Wooble: "legendary raid key"): the den
   screen's cursor 7, a pill over START (over EXIT on a quiet den) while `Rd.crystals()` > 0 or one is in
   use (`r.legend`). `Rd.useCrystal` picks `Dy.pickLegend` (every legendary and mythical that can Dynamax:
@@ -512,7 +570,8 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
   (`thresholdHp`, rounded) for the floor and `checkShield` alike - comparing shares against 0.7
   left 252 / 360 a hair above it, the barrier never rose and the boss was held there for good;
   a barrier pending when one breaks rises at once; driver `tests/drivers/shield_probe.lua`); the boss's script (`due`: the
-  G-Max move instead of a plain one on its turns, on all four; at the turn's end the wipe of the
+  G-Max move instead of a plain one on its turns, on ONE member (2026-10-27: a Max Move has one
+  target; its spread moves still fall on all four); at the turn's end the wipe of the
   team's stat changes and, once below its HP share, the aura's +1 all round); the G-Max effects
   (`gmaxEffect`: data/raid_gmax.lua's field over the team for its turns, traps, statuses, drowsiness,
   stat drops, PP, the boss's veil halving damage, heal, cure, crit); a member sitting out cheers
@@ -575,7 +634,7 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
 - `data/raid_gmax.lua`: the bosses' 34 G-Max moves (type, a fixed 160 power where the game has one,
   else `POWER_BANDS` from the boss's strongest move of that type - `Bt.maxPower`; the effect as the
   sim runs it; the effects meaningless without switching - Stealth Rock, Gravity, Torment ... - plain)
-  and `WORDS` for their messages. `Bt.gmaxMove` builds the move (on all four, never missing; a move
+  and `WORDS` for their messages. `Bt.gmaxMove` builds the move (one target, never missing; a move
   table `ref` for `Damage.calc`); `Bt.boss` also sets `shields`, `segments`
   (`RAID.SEGMENTS` from base Def + Sp. Def) and `script`.
 - `data/raid_bosses.lua`: `ORDER`; per key `national`, `name`, modern `types`, `stars` (tiers by Giga

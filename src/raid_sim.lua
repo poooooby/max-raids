@@ -103,6 +103,9 @@ local function isDmax(b) return b.boss or b.dmax ~= nil end
 Sim.WEIGHT = { lowkick = true, grassknot = true, heatcrash = true, heavyslam = true }
 Sim.NO_DMAX = { encore = true, disable = true, instruct = true, roar = true, whirlwind = true }
 Sim.ANTI_DMAX = { behemothblade = true, behemothbash = true, dynamaxcannon = true }
+Sim.SPREAD_K = 3072 / 4096
+Sim.SELF_KO = { explosion = true, selfdestruct = true, mistyexplosion = true }
+Sim.HALF_COST = { mindblown = true, steelbeam = true }
 local function fill(text, boss, mon)
   return ((text or ""):gsub("{BOSS}", boss and boss.name or ""):gsub("{MON}", mon and mon.name or ""))
 end
@@ -198,9 +201,9 @@ end
 
 -- ------- effects
 
--- (by: who caused it - a drop from the other side is stopped by the side's mist)
+-- (by: who caused it - a drop from any other, an ally's spread move too, is stopped by the side's mist)
 function Sim:stage(ev, b, stat, n, by)
-  if n < 0 and by and foes(by, b) and self:sideOf(b).mist > 0 then
+  if n < 0 and by and by ~= b and self:sideOf(b).mist > 0 then
     if not b.mistSaid then
       b.mistSaid = true
       ev[#ev + 1] = { kind = "fail", who = b, text = self:tword("misted", nil, b) or ("%s is protected by the mist!"):format(b.name) }
@@ -223,9 +226,9 @@ function Sim:stage(ev, b, stat, n, by)
 end
 
 -- a major status: false (and no words when quiet) when it does not take (by: who caused it - from the
--- other side, the side's Safeguard stops it)
+-- other side or an ally's spread move, the side's Safeguard stops it)
 function Sim:status(ev, b, st, quiet, by)
-  if by and foes(by, b) and self:sideOf(b).safeguard > 0 and not b.status then
+  if by and by ~= b and self:sideOf(b).safeguard > 0 and not b.status then
     if not quiet then
       ev[#ev + 1] = { kind = "fail", who = b, text = self:tword("safeguarded", nil, b) or ("%s is protected by Safeguard!"):format(b.name) }
     end
@@ -309,7 +312,9 @@ function Sim:fainted(ev, b)
   end
   self.faints = self.faints + 1
   if b.dmax then self:undynamax(ev, b, true) end
-  b.guard, b.guardRun, b.endure, b.helped = nil, nil, nil, nil
+  b.guard, b.guardRun, b.endure, b.helped, b.confused, b.attract, b.torment = nil, nil, nil, nil, nil, nil, nil
+  -- (whoever loved it: it has left the field)
+  if self.boss.attract == b then self.boss.attract = nil end
   if self.sides.team.redirect == b then self.sides.team.redirect = nil end
   b.down = 2
   b.status, b.sleep, b.tox, b.trap = nil, nil, nil, nil
@@ -388,11 +393,99 @@ function Sim:held(ev, b)
     end
     b.status = nil
     ev[#ev + 1] = { kind = "status", who = b, status = nil, text = ("%s thawed out!"):format(b.name) }
-  elseif b.status == "PAR" and self.rng(1, 4) == 1 then
+  end
+  -- confused (G-Max Smite, Gold Rush): 2-5 turns, a 1 in 3 chance each turn to strike itself instead
+  -- (Gen 7 on), a 40-power typeless physical blow (the adapter's confusionHit)
+  if b.confused then
+    b.confused = b.confused - 1
+    if b.confused <= 0 then
+      b.confused = nil
+      ev[#ev + 1] = { kind = "status", who = b, text = ("%s snapped out of its confusion!"):format(b.name) }
+    else
+      ev[#ev + 1] = { kind = "cant", who = b, confused = true, text = ("%s is confused!"):format(b.name) }
+      if self.rng(1, 3) == 1 then
+        local cut = (self.A.confusionHit and self.A.confusionHit(b)) or max(1, floor(maxHpOf(b) / 8))
+        cut = self:capAtShield(b, min(hpOf(b), cut))
+        b.mon.hp = hpOf(b) - cut
+        ev[#ev + 1] = { kind = "residual", who = b, amount = cut, hp = b.mon.hp,
+          text = "It hurt itself in its confusion!" }
+        if not alive(b) then self:fainted(ev, b) elseif b.boss then self:checkShield(ev) end
+        return true
+      end
+    end
+  end
+  -- in love (G-Max Cuddle): while the one it loves is on the field, half the time it cannot move
+  if b.attract then
+    local by = b.attract
+    if not alive(by) or (by.down or 0) > 0 then
+      b.attract = nil
+    else
+      ev[#ev + 1] = { kind = "cant", who = b, attract = true, text = ("%s is in love with %s!"):format(b.name, by.name) }
+      if self.rng(1, 100) <= 50 then
+        ev[#ev + 1] = { kind = "cant", who = b, attract = true, text = ("%s is immobilized by love!"):format(b.name) }
+        return true
+      end
+    end
+  end
+  if b.status == "PAR" and self.rng(1, 4) == 1 then
     ev[#ev + 1] = { kind = "cant", who = b, text = ("%s is paralyzed! It can't move!"):format(b.name) }
     return true
   end
   return false
+end
+
+-- Torment (G-Max Meltdown): not the same move twice in a row until it leaves the field; a Dynamax
+-- Pokemon is immune (the boss always)
+function Sim:torment(ev, b)
+  if not alive(b) or b.torment or isDmax(b) or (b.down or 0) > 0 then return false end
+  b.torment = true
+  ev[#ev + 1] = { kind = "status", who = b, torment = true,
+    text = fill(self.words.torment or "{MON} was subjected to torment!", self.boss, b) }
+  return true
+end
+-- whether a tormented battler is barred from `mv` now (its last move, and it has another to use)
+function Sim:tormented(b, mv)
+  if not b.torment or isDmax(b) or not b.lastMove then return false end
+  local pm = mv.base or mv
+  if pm ~= b.lastMove then return false end
+  for _, other in ipairs(b.moves or {}) do
+    if other ~= pm and (other.pp or 0) > 0 then return true end
+  end
+  return false
+end
+
+-- Gravity (G-Max Gravitas) over the whole field for `turns`
+Sim.NO_GRAVITY = { fly = true, bounce = true, skydrop = true, splash = true, highjumpkick = true, hijumpkick = true,
+  jumpkick = true, magnetrise = true, telekinesis = true, flyingpress = true, floatyfall = true }
+function Sim:setGravity(ev, by, turns)
+  if (self.gravity or 0) > 0 then return false end
+  self.gravity = turns
+  ev[#ev + 1] = { kind = "side", side = "field", what = "gravity", up = true, who = by,
+    text = self.words.gravity or "Gravity intensified!" }
+  return true
+end
+
+-- infatuation (by: who it falls for): only between a male and a female ("M" / "F", the battlers'
+-- `gender`), never the genderless; an Oblivious Pokemon is immune; Safeguard does not stop it
+function Sim:attract(ev, b, by)
+  if not (alive(b) and by and alive(by)) or b.attract or (b.down or 0) > 0 then return false end
+  local g1, g2 = b.gender, by.gender
+  if not ((g1 == "M" and g2 == "F") or (g1 == "F" and g2 == "M")) then return false end
+  if self.A.abilityName and self.A.abilityName(b) == "OBLIVIOUS" then return false end
+  b.attract = by
+  ev[#ev + 1] = { kind = "status", who = b, attract = true,
+    text = fill(self.words.attract or "{MON} fell in love!", self.boss, b) }
+  return true
+end
+
+-- confusion (by: who caused it - the other side's Safeguard stops it)
+function Sim:confuse(ev, b, by)
+  if not alive(b) or b.confused or (b.down or 0) > 0 then return false end
+  if by and by ~= b and self:sideOf(b).safeguard > 0 then return false end
+  b.confused = self.rng(2, 5)
+  ev[#ev + 1] = { kind = "status", who = b, confused = true,
+    text = fill(self.words.confused or "{MON} became confused!", self.boss, b) }
+  return true
 end
 
 -- the damage a hit on the boss does through its barrier; a hit breaks a segment (its veil is a screen
@@ -416,9 +509,26 @@ end
 
 -- a G-Max / Max move's effect on those it hit (`hit`): the boss's on the team, or one of the team's
 -- on the boss, its raising and healing on the whole team
+-- (a Max / G-Max Move has one target: `hit` is that one; scope "foes" reaches every opponent on the
+-- field; confuse confuses them all besides)
 function Sim:gmaxEffect(ev, att, mv, hit)
   local e = mv.gmaxEffect
   if not e or not alive(att) then return end
+  if e.scope == "foes" then hit = self:onSide(att.boss and "team" or "boss") end
+  if e.kind == "gravity" then self:setGravity(ev, att, e.turns or 5)
+  else self:gmaxMain(ev, att, mv, hit, e) end
+  if e.torment and not self.over and alive(att) then
+    for _, m in ipairs(self:onSide(att.boss and "team" or "boss")) do self:torment(ev, m) end
+  end
+  if e.confuse and not self.over and alive(att) then
+    for _, m in ipairs(self:onSide(att.boss and "team" or "boss")) do self:confuse(ev, m, att) end
+  end
+  if e.attract and not self.over and alive(att) then
+    for _, m in ipairs(self:onSide(att.boss and "team" or "boss")) do self:attract(ev, m, att) end
+  end
+end
+
+function Sim:gmaxMain(ev, att, mv, hit, e)
   local W = self.words
   if not att.boss then
     local b = self.boss
@@ -493,10 +603,18 @@ function Sim:gmaxEffect(ev, att, mv, hit)
   elseif e.kind == "boost" then
     for stat, n in pairs(e.self or {}) do self:stage(ev, att, stat, n) end
   elseif e.kind == "pp" then
+    -- (the last move each used loses n PP)
     for _, m in ipairs(hit) do
-      for _, mvm in ipairs(m.moves or {}) do mvm.pp = max(0, (mvm.pp or 0) - (e.n or 2)) end
+      local last = m.lastMove
+      if last and alive(m) then
+        local cut = min(last.pp or 0, e.n or 2)
+        last.pp = (last.pp or 0) - cut
+        if cut > 0 then
+          ev[#ev + 1] = { kind = "field", who = m,
+            text = ("%s's %s lost %d PP!"):format(m.name, last.name or "move", cut) }
+        end
+      end
     end
-    ev[#ev + 1] = { kind = "field", who = att, text = fill(W.pp or "The team's moves lost PP!", att) }
   elseif e.kind == "veil" then
     self.sides.boss.veil = e.turns or 5
     self:syncVeil()
@@ -558,8 +676,9 @@ end
 
 -- what stops `mv` reaching def (before its hit): nil, or "block" / "pierce" (a Max Move's quarter)
 -- with the event to show
+-- (an ally's spread move too: Protect, Max Guard and the side's guards stand against it)
 function Sim:stopped(att, mv, def)
-  if mv.pierce or not foes(att, def) then return nil end
+  if mv.pierce or att == def then return nil end
   if def.guard == "max" then return "block", { kind = "guard", who = def, blocked = true, max = true,
     text = fill(self.words.guard or "{MON} protected itself!", self.boss, def) } end
   local how, what = nil, nil
@@ -726,8 +845,21 @@ end
 function Sim:use(ev, att, mv, targets, ally)
   if not alive(att) or self.over then return end
   if self:held(ev, att) then return end
+  -- tormented: not the move it used last
+  if self:tormented(att, mv) then
+    ev[#ev + 1] = { kind = "cant", who = att, torment = true,
+      text = ("%s can't use the same move twice in a row due to the torment!"):format(att.name) }
+    return
+  end
   ev[#ev + 1] = { kind = "use", who = att, move = mv, gmax = mv.isGmax == true,
     text = ("%s used %s!"):format(att.name, mv.name) }
+  -- (the move it last used: G-Max Depletion takes its PP, Torment bars it)
+  att.lastMove = mv.base or mv
+  -- under Gravity the moves that leave the ground fail
+  if (self.gravity or 0) > 0 and Sim.NO_GRAVITY[squash(mv.key)] then
+    ev[#ev + 1] = { kind = "fail", text = ("%s can't use %s because of gravity!"):format(att.name, mv.name) }
+    return
+  end
   -- (a Max Move spends its base move's PP)
   if not att.boss then
     local pm = mv.base or mv
@@ -767,7 +899,7 @@ function Sim:use(ev, att, mv, targets, ally)
     elseif alive(def) and isDmax(def) and (Sim.WEIGHT[key] or Sim.NO_DMAX[key]) then
       ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
     elseif alive(def) then
-      if not self.A.hits(att, def, mv) then
+      if not self.A.hits(att, def, mv, (self.gravity or 0) > 0) then
         ev[#ev + 1] = { kind = "miss", who = att, target = def, text = ("%s avoided the attack!"):format(def.name) }
       elseif mv.status then
         self:side(ev, att, def, mv, false)
@@ -775,13 +907,16 @@ function Sim:use(ev, att, mv, targets, ally)
         -- (the target side's screens; Helping Hand on the user)
         local sd = self:sideOf(def)
         local dmg, info = self.A.damage(att, def, mv, spread, { reflect = sd.reflect > 0 or sd.veil > 0,
-          lightScreen = sd.light > 0 or sd.veil > 0, doubleScreens = not def.boss, helped = att.helped or nil })
+          lightScreen = sd.light > 0 or sd.veil > 0, doubleScreens = not def.boss, helped = att.helped or nil,
+          gravity = (self.gravity or 0) > 0 or nil })
         info = info or {}
         local eff = tonumber(info.effectiveness) or 1
         if eff == 0 then
           ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = ("It doesn't affect %s..."):format(def.name) }
         else
           local hadShield = def.shield ~= nil
+          -- (a move striking more than one: Sword / Shield's 3 / 4)
+          if spread then dmg = floor(dmg * Sim.SPREAD_K) end
           if Sim.ANTI_DMAX[key] and isDmax(def) then dmg = dmg * 2 end
           if stop == "pierce" then dmg = floor(dmg / 4) end
           dmg = self:throughBoss(ev, def, max(1, dmg))
@@ -812,6 +947,21 @@ function Sim:use(ev, att, mv, targets, ally)
     end
   end
   if mv.gmaxEffect and #hit > 0 and not self.over then self:gmaxEffect(ev, att, mv, hit) end
+  -- Explosion / Self-Destruct / Misty Explosion: the member that used it faints, hit or not; Mind
+  -- Blown / Steel Beam cost it half its max HP (the boss is spared both)
+  if not att.boss and alive(att) and not self.over then
+    if Sim.SELF_KO[key] then
+      att.mon.hp = 0
+      ev[#ev + 1] = { kind = "residual", who = att, amount = 0, hp = 0 }
+      self:fainted(ev, att)
+    elseif Sim.HALF_COST[key] then
+      local cut = min(hpOf(att), math.ceil(maxHpOf(att) / 2))
+      att.mon.hp = hpOf(att) - cut
+      ev[#ev + 1] = { kind = "residual", who = att, amount = cut, hp = att.mon.hp,
+        text = ("%s cut its own HP!"):format(att.name) }
+      if not alive(att) then self:fainted(ev, att) end
+    end
+  end
 end
 
 -- ------- cheers and the pouch
@@ -914,8 +1064,18 @@ end
 -- whom a move falls on: the boss for the members; for the boss, a spread move every member on the
 -- field, else one of them at random
 -- (a team's centre of attention - Follow Me, Rage Powder - draws the boss's single-target moves)
+-- (a member's move that hits its allies too - Surf, Earthquake, Discharge ...: `friendly` - falls on
+-- the boss and every other member on the field, never on its user)
 function Sim:targetsFor(att, mv)
-  if not att.boss then return { self.boss } end
+  if not att.boss then
+    if not mv.friendly then return { self.boss } end
+    local list = { self.boss }
+    for i = 1, #self.members do
+      local m = self.members[i]
+      if m ~= att and self:present(i) then list[#list + 1] = m end
+    end
+    return list
+  end
   local list = {}
   for i = 1, #self.members do
     if self:present(i) then list[#list + 1] = self.members[i] end
@@ -1003,6 +1163,14 @@ function Sim:endTurn(ev)
             text = self:tword("wishTrue", nil, { name = w.name }) or ("%s's wish came true!"):format(w.name) }
         end
       end
+    end
+  end
+  -- Gravity runs down
+  if (self.gravity or 0) > 0 then
+    self.gravity = self.gravity - 1
+    if self.gravity == 0 then
+      ev[#ev + 1] = { kind = "side", side = "field", what = "gravity", up = false,
+        text = W.gravityEnd or "Gravity returned to normal!" }
     end
   end
   -- the sides' screens, Safeguard, mist and tailwind run down

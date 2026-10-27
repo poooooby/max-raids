@@ -163,6 +163,10 @@ return function(mod, deps)
       typeName = Bt.typeName(m.type), power = power, accuracy = tonumber(m.accuracy) or 0,
       priority = tonumber(m.priority) or 0, status = power == 0,
       spread = bitlib and (bitlib.band(tonumber(m.target) or 0, SPREAD) ~= 0) or false,
+      -- (MOVE_TARGET_FOES_AND_ALLY, or Sword / Shield's all-adjacent list: Surf, Earthquake ... strike the
+      -- user's allies too)
+      friendly = (bitlib and bitlib.band(tonumber(m.target) or 0, 32) ~= 0)
+        or (key ~= nil and TeamMoves.FRIENDLY ~= nil and TeamMoves.FRIENDLY[Bt.squash(key)] == true) or false,
       side = extraSide(dexExtra(m)) or sideOf(m.effect, tonumber(m.secondaryChance) or 0),
       pp = pp or tonumber(m.pp) or 10, maxPp = maxPp or tonumber(m.pp) or 10,
     }
@@ -211,6 +215,8 @@ return function(mod, deps)
       if ok and type(n) == "string" then b.name = titled(n) end
     end
     b.status = (type(b.status) == "string" and b.status ~= "" and b.status ~= "NONE") and b.status or nil
+    -- its gender ("M" / "F" / "U"), for G-Max Cuddle's infatuation
+    b.gender = Bt.genderOf(b.species or copy.species, copy.personality)
     b.moves = {}
     for i = 1, 4 do
       local ref = copy.moves and copy.moves[i]
@@ -241,6 +247,13 @@ return function(mod, deps)
     b.maxMoves = {}
     for i, mv in ipairs(b.moves) do b.maxMoves[i] = Bt.maxOf(mv, b.gmaxId) end
     return b
+  end
+
+  -- a species' gender for a personality (the engine's Pokemon.gender: "M" / "F" / "U")
+  function Bt.genderOf(species, personality)
+    if not (Pokemon and Pokemon.gender and species) then return "U" end
+    local ok, g = pcall(Pokemon.gender, species, personality or 0)
+    return ok and (g == "M" or g == "F") and g or "U"
   end
 
   -- the National Dex's Dynamax (exports.dynamax), or nil on an older one
@@ -296,6 +309,9 @@ return function(mod, deps)
       evs = { hp = 0, atk = 0, def = 0, spe = 0, spa = 0, spd = 0 },
       personality = 0, ability = 0, abilityId = 0, friendship = 255,
     }
+    -- its gender, rolled by its species' ratio (kept by the catch: Rw.throw)
+    local gp = rng and rng(0, 255) or 0
+    mon.genderRoll = gp
     mon.atk, mon.def, mon.spa, mon.spd, mon.spe = mon.attack, mon.defense, mon.spAtk, mon.spDef, mon.speed
     local types = b.types or { "NORMAL" }
     local t1, t2 = Bt.typeNum(types[1]), types[2] and Bt.typeNum(types[2]) or nil
@@ -304,6 +320,7 @@ return function(mod, deps)
       ability = 0, stages = { attack = 0, defense = 0, spAtk = 0, spDef = 0, speed = 0, accuracy = 0, evasion = 0 },
       name = b.name, boss = true, key = key, moves = {},
     }
+    boss.gender = Bt.genderOf(mon.species, gp)
     if b.moves then
       for _, name in ipairs(b.moves) do
         local mv = Bt.move(name, 99, 99)
@@ -345,8 +362,8 @@ return function(mod, deps)
     return 130
   end
 
-  -- the boss's G-Max move (data/raid_gmax.lua) as the sim runs it: on all four, never missing; its
-  -- power fixed, else the band of the boss's strongest move of its type
+  -- the boss's G-Max move (data/raid_gmax.lua) as the sim runs it: one target (a Max Move's), never
+  -- missing; its power fixed, else the band of the boss's strongest move of its type
   function Bt.gmaxMove(id, boss)
     local g = id and Gmax.MOVES and Gmax.MOVES[id]
     if not g then return nil end
@@ -367,14 +384,14 @@ return function(mod, deps)
     end
     return {
       name = g.name or ("G-Max " .. titled(id)), type = t, typeName = g.type, power = power, accuracy = 0, key = id,
-      priority = 0, status = false, spread = true, isGmax = true, gmaxEffect = effect, pierce = g.pierce, pp = 99, maxPp = 99,
+      priority = 0, status = false, spread = false, isGmax = true, gmaxEffect = effect, pierce = g.pierce, pp = 99, maxPp = 99,
       ref = { id = "MAX_RAIDS_GMAX_" .. id, numId = 0, power = power, type = t, accuracy = 0, pp = 1, effect = 0,
         priority = 0, target = 8, flags = 0, secondaryChance = 0 },
     }
   end
 
   -- a plain Max Move (Gmax.MAX) from the boss's strongest damaging move (a move of its own type
-  -- counting half again): its type, the Max power band of its power, on all four, never missing;
+  -- counting half again): its type, the Max power band of its power, one target, never missing;
   -- drawn as that move (isMax, baseKey)
   function Bt.maxMove(boss)
     local best, bestScore = nil, -1
@@ -386,9 +403,7 @@ return function(mod, deps)
       end
     end
     if not best then return nil end
-    local mv = Bt.maxOf(best)
-    mv.spread = true
-    return mv
+    return Bt.maxOf(best)
   end
 
   -- the Max form of one move (a Dynamaxed Pokemon's): a damaging move the Max Move of its type
@@ -461,10 +476,25 @@ return function(mod, deps)
     end
 
     -- the damage of att's move on def: dmg, info (effectiveness, critical); 0 for an immunity
+    -- (under Gravity a Ground move reaches a Flying type or one with Levitate: the target's Flying
+    -- type set aside for the hit - the engine's chart then reads its other type alone)
+    local GROUND, FLYING = 4, 2
     function A.damage(att, def, mv, spread, o)
       o = o or {}
+      if o.gravity and mv.type == GROUND and (def.type1 == FLYING or def.type2 == FLYING) then
+        local t1, t2 = def.type1, def.type2
+        if t1 == FLYING then def.type1 = (t2 ~= nil and t2 ~= FLYING) and t2 or 0 end
+        if def.type2 == FLYING then def.type2 = nil end
+        local okD, dmg, info = pcall(A.damage, att, def, mv, spread, { reflect = o.reflect, lightScreen = o.lightScreen,
+          doubleScreens = o.doubleScreens, helped = o.helped, gravity = false })
+        def.type1, def.type2 = t1, t2
+        if okD then return dmg, info end
+        return 1, { effectiveness = 1 }
+      end
       local ab = abilityName(def)
-      if ab and IMMUNE[ab] == mv.type then return 0, { effectiveness = 0, immuneBy = ab } end
+      if ab and IMMUNE[ab] == mv.type and not (o.gravity and ab == "LEVITATE") then
+        return 0, { effectiveness = 0, immuneBy = ab }
+      end
       if ab == "WONDER_GUARD" and A.effectiveness(mv.type, def) <= 1 then return 0, { effectiveness = 0, immuneBy = ab } end
       if not Damage then return 1, { effectiveness = 1 } end
       st.player, st.enemy = att.side == "player" and att or def, att.side == "player" and def or att
@@ -477,8 +507,9 @@ return function(mod, deps)
       -- (the target side's screens; Helping Hand: the engine's own x1.5)
       local helpedWas = att.expHelpingHand
       if o.helped then att.expHelpingHand = true end
+      -- (a spread move's cut is the sim's: Sword / Shield's 3 / 4, not Gen 3's half)
       local ok, dmg, info = pcall(Damage.calc, att, def, mv.ref, { adapter = engineAdapter, st = st, rng = rng,
-        weather = st.weather, spread = spread or nil, highCrit = (att.critUp or 0) > 0 or nil,
+        weather = st.weather, highCrit = (att.critUp or 0) > 0 or nil,
         reflect = o.reflect or nil, lightScreen = o.lightScreen or nil, doubleScreens = o.doubleScreens or nil })
       att.expHelpingHand = helpedWas
       if heldBack ~= nil then att.item = heldBack end
@@ -494,13 +525,24 @@ return function(mod, deps)
       return max(0, floor(tonumber(dmg) or 0)), info
     end
 
+    -- a confused battler hitting itself: a 40-power typeless physical blow on itself (the engine's
+    -- Damage.base, as its own battle does)
+    function A.confusionHit(b)
+      if not (Damage and Damage.base) then return nil end
+      local ok, dmg = pcall(Damage.base, b, b, { power = 40, type = 0, effect = 0 }, { power = 40, moveType = 0,
+        adapter = engineAdapter })
+      return ok and tonumber(dmg) and max(1, floor(dmg)) or nil
+    end
+
     -- Gen 3's accuracy check (the engine's formula: stages, the move's accuracy)
     local ACC = Rules and Rules.ACCURACY_STAGE
-    function A.hits(att, def, mv)
+    -- (gravity: x5/3, G-Max Gravitas)
+    function A.hits(att, def, mv, gravity)
       if (mv.accuracy or 0) <= 0 then return true end
       local buff = max(-6, min(6, (att.stages.accuracy or 0) - (def.stages.evasion or 0)))
       local r = ACC and ACC[buff] or { 1, 1 }
       local calc = floor(r[1] * mv.accuracy / r[2])
+      if gravity then calc = floor(calc * 5 / 3) end
       return rng(1, 100) <= calc
     end
 

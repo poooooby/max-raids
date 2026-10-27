@@ -1,5 +1,8 @@
 -- The bosses' G-Max moves (data/raid_bosses.lua `gmax`). In a raid the boss uses its G-Max move on
--- its script's turns (data/raid_rules.lua SCRIPTS) instead of a plain move, on all four at once.
+-- its script's turns (data/raid_rules.lua SCRIPTS) instead of a plain move. As every Max Move, it
+-- strikes ONE Pokemon (Sword / Shield: a Max Move has a single target); its effect reaches what the
+-- game says - `scope = "foes"` every opponent on the field (Volt Crash "paralyzes opponents"), else
+-- the target hit (Snooze, Centiferno, Depletion), and the fields cover the opponents' side.
 --   type     the move's type
 --   power    a fixed power (Sword / Shield's 160 for the moves that have one), else nil: the Max Move
 --            band of the boss's strongest move of that type (POWER_BANDS), or 130 without one
@@ -7,24 +10,33 @@
 --     { kind = "field", turns, frac, spare }   each turn's end every member not of `spare` loses
 --                                              1 / frac of its HP (Wildfire, Cannonade, Vine Lash,
 --                                              Volcalith)
---     { kind = "trap", turns, frac }           the members hit lose 1 / frac a turn (Centiferno,
+--     { kind = "trap", turns, frac }           the target loses 1 / frac a turn (Centiferno,
 --                                              Sandblast)
---     { kind = "status", list }                each member hit takes one of `list` at random
---     { kind = "drowsy", chance }              each member hit falls asleep, chance %, (Snooze's
+--     { kind = "status", list }                one of `list` at random on each (scope)
+--     { kind = "drowsy", chance }              the target falls asleep, chance %, (Snooze's
 --                                              drowsiness next turn, on the spot here)
---     { kind = "stages", foe = { stat = n } }  the members' stats
---     { kind = "pp", n }                       each member's moves lose n PP (Depletion: the last
---                                              move's in the game)
+--     { kind = "stages", foe = { stat = n } }  the stats of each (scope)
+--     { kind = "pp", n }                       the target's last move used loses n PP (Depletion)
+--     confuse = true                           (besides) confuses every opponent (Smite, Gold Rush)
+--     attract = true                           (besides) every opponent of the other gender falls in
+--                                              love (Cuddle; not the genderless, not Oblivious)
+--     torment = true                           (besides) every opponent is tormented: not the same
+--                                              move twice in a row (Meltdown; a Dynamax Pokemon is
+--                                              immune, so the boss is)
+--     { kind = "gravity", turns }              Gravity over the whole field (Gravitas): accuracy
+--                                              x5/3, Flying types and Levitate hit by Ground moves,
+--                                              Fly / Bounce / Splash / Jump Kick ... fail
 --     { kind = "veil", turns }                 the boss's damage taken halved (Aurora Veil)
 --     { kind = "heal", frac }                  the boss heals 1 / frac (Finale)
 --     { kind = "cure" }                        the boss's status cured (Sweetness)
 --     { kind = "crit", n }                     the boss's critical-hit stage up (Chi Strike)
 --     nil                                      none in a raid (Stealth Rock / Steelsurge hit a
---                                              Pokemon switching in; Gravity, Torment, no escape,
---                                              infatuation, the Max move's protection pierced)
+--                                              Pokemon switching in; Terror's no escape - Run
+--                                              leaves the den whatever -, the Max move's
+--                                              protection pierced)
 -- EVIDENCE: Bulbapedia "G-Max Move" and each move's page (effects, the 160-power moves);
--- Serebii "Max Moves" (the power bands). The raid adaptations (the fields hit the party, the
--- confusion and infatuation moves plain) are ours.
+-- Serebii "Max Moves" (the power bands); Pokemon Showdown's data/moves.ts (each G-Max move's
+-- target: the opponents' side, or the target alone; attract's rules).
 local G = {}
 
 -- the Max Move power from the base move's: { below this power, max power }; Fighting and Poison
@@ -39,23 +51,23 @@ G.POWER_BANDS = {
 G.MOVES = {
   -- (coins: the user's level x 100 a use, x2 the second, x3 the third and after, picked up after the
   -- win; its confusion is not run)
-  GOLD_RUSH = { type = "NORMAL", effect = { kind = "coins" } },
-  VOLT_CRASH = { type = "ELECTRIC", effect = { kind = "status", list = { "PAR" } } },
-  CUDDLE = { type = "NORMAL" },
-  BEFUDDLE = { type = "BUG", effect = { kind = "status", list = { "SLP", "PSN", "PAR" } } },
-  MALODOR = { type = "POISON", effect = { kind = "status", list = { "PSN" } } },
-  FOAM_BURST = { type = "WATER", effect = { kind = "stages", foe = { speed = -2 } } },
+  GOLD_RUSH = { type = "NORMAL", effect = { kind = "coins", confuse = true } },
+  VOLT_CRASH = { type = "ELECTRIC", effect = { kind = "status", list = { "PAR" }, scope = "foes" } },
+  CUDDLE = { type = "NORMAL", effect = { kind = "none", attract = true } },
+  BEFUDDLE = { type = "BUG", effect = { kind = "status", list = { "SLP", "PSN", "PAR" }, scope = "foes" } },
+  MALODOR = { type = "POISON", effect = { kind = "status", list = { "PSN" }, scope = "foes" } },
+  FOAM_BURST = { type = "WATER", effect = { kind = "stages", foe = { speed = -2 }, scope = "foes" } },
   STONESURGE = { type = "WATER" },
   SWEETNESS = { type = "GRASS", effect = { kind = "cure" } },
-  TARTNESS = { type = "GRASS", effect = { kind = "stages", foe = { evasion = -1 } } },
+  TARTNESS = { type = "GRASS", effect = { kind = "stages", foe = { evasion = -1 }, scope = "foes" } },
   FINALE = { type = "FAIRY", effect = { kind = "heal", frac = 6 } },
   STEELSURGE = { type = "STEEL" },
-  MELTDOWN = { type = "STEEL" },
+  MELTDOWN = { type = "STEEL", effect = { kind = "none", torment = true } },
   TERROR = { type = "GHOST" },
-  STUN_SHOCK = { type = "ELECTRIC", effect = { kind = "status", list = { "PSN", "PAR" } } },
+  STUN_SHOCK = { type = "ELECTRIC", effect = { kind = "status", list = { "PSN", "PAR" }, scope = "foes" } },
   SNOOZE = { type = "DARK", effect = { kind = "drowsy", chance = 50 } },
-  SMITE = { type = "FAIRY" },
-  GRAVITAS = { type = "PSYCHIC" },
+  SMITE = { type = "FAIRY", effect = { kind = "none", confuse = true } },
+  GRAVITAS = { type = "PSYCHIC", effect = { kind = "gravity", turns = 5 } },
   CHI_STRIKE = { type = "FIGHTING", effect = { kind = "crit", n = 1 } },
   VOLCALITH = { type = "ROCK", effect = { kind = "field", turns = 4, frac = 6, spare = "ROCK" } },
   SANDBLAST = { type = "GROUND", effect = { kind = "trap", turns = 4, frac = 8 } },
@@ -144,6 +156,11 @@ G.WORDS = {
   cure = "{BOSS}'s status returned to normal!",
   crit = "{BOSS} is getting pumped!",
   drowsy = "{MON} grew drowsy!",
+  confused = "{MON} became confused!",
+  attract = "{MON} fell in love!",
+  torment = "{MON} was subjected to torment!",
+  gravity = "Gravity intensified!",
+  gravityEnd = "Gravity returned to normal!",
 }
 
 return G

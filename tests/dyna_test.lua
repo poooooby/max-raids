@@ -159,7 +159,7 @@ local mv = Bt.maxMove({ moves = {
   { status = false, power = 75, typeName = "FIRE", type = 10, key = "FIRE_FANG" },
 } })
 check(mv and mv.name == "Max Flare" and mv.typeName == "FIRE" and mv.power == 130, "Max Flare from Fire Fang (75 -> 130)")
-check(mv.spread and mv.isGmax and mv.isMax and mv.baseKey == "FIRE_FANG", "on all four, drawn as Fire Fang")
+check(not mv.spread and mv.isGmax and mv.isMax and mv.baseKey == "FIRE_FANG", "one target (a Max Move's), drawn as Fire Fang")
 local knuckle = Bt.maxMove({ moves = { { status = false, power = 60, typeName = "FIGHTING", type = 1, key = "BRICK_BREAK" } } })
 check(knuckle.power == 80 and knuckle.gmaxEffect.kind == "boost", "Max Knuckle: the lower column, raises its Attack")
 check(Bt.maxMove({ moves = { { status = true, power = 0, typeName = "NORMAL" } } }) == nil, "no damaging move: none")

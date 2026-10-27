@@ -123,18 +123,19 @@ F.MOVES = {
   ZEN_HEADBUTT = { "slam", shape = "head" },            -- focuses its will on its head
 }
 
--- the G-Max moves (data/raid_gmax.lua), from what each does: all on the whole party, larger
+-- the G-Max moves (data/raid_gmax.lua), from what each does: on the one Pokemon it strikes (a Max
+-- Move has one target), larger
 F.GMAX = {
   GOLD_RUSH = { "drop", shape = "coin", n = 8 },        -- coins rain on the targets
   VOLT_CRASH = { "bolt", n = 3 },                       -- lightning strikes everyone
-  CUDDLE = { "wave", shape = "light" },                 -- a cuddling wave of affection
+  CUDDLE = { "powder", shape = "heart" },               -- a cuddle of affection
   BEFUDDLE = { "powder", shape = "spore" },             -- befuddling scales and spores
   MALODOR = { "powder", shape = "gas" },                -- the reek of garbage poisons them
   FOAM_BURST = { "shot", shape = "ball", n = 6 },       -- a burst of foam
   STONESURGE = { "spikes", shape = "rock" },            -- sharp stones rise round them
   SWEETNESS = { "drop", shape = "apple" },              -- sweet nectar pours down
   TARTNESS = { "powder", shape = "gas" },               -- a tart acid spray
-  FINALE = { "wave", shape = "light" },                 -- a finale of cream
+  FINALE = { "rings", shape = "light" },                -- a finale of cream
   STEELSURGE = { "spikes", shape = "steel" },           -- sharp steel spikes rise round them
   MELTDOWN = { "beam" },                                -- molten metal blasted at them
   TERROR = { "rings", shape = "dark" },                 -- shadows that hold them in place
@@ -147,15 +148,15 @@ F.GMAX = {
   SANDBLAST = { "powder", shape = "sand" },             -- a sandstorm traps them
   VINE_LASH = { "slash" },                              -- huge vines lash them
   DRUM_SOLO = { "spikes", shape = "root" },             -- a drum beat sends roots up
-  CENTIFERNO = { "wave", shape = "fire" },              -- a vortex of fire traps them
+  CENTIFERNO = { "beam", big = true },                  -- a vortex of fire traps it
   FIREBALL = { "shot", shape = "ball", n = 1, big = true }, -- a giant fireball kicked
-  WILDFIRE = { "wave", shape = "fire" },                -- flames engulf them
+  WILDFIRE = { "beam", big = true },                    -- flames engulf it (then round the team)
   HYDROSNIPE = { "beam" },                              -- a sniper's shot of water
-  CANNONADE = { "wave", shape = "water" },              -- a vortex of water
+  CANNONADE = { "beam", big = true },                   -- a vortex of water
   RESONANCE = { "rings", shape = "sound" },             -- an aurora's melody
   DEPLETION = { "beam" },                               -- dragon energy saps their PP
-  REPLENISH = { "wave", shape = "light" },              -- a wave of restoring energy
-  WIND_RAGE = { "wave", shape = "wind" },               -- a raging wind
+  REPLENISH = { "rings", shape = "light" },             -- restoring energy
+  WIND_RAGE = { "shot", shape = "blade", n = 4, big = true }, -- a raging wind
   ONE_BLOW = { "slam", shape = "fist", big = true },    -- one fearsome blow
   RAPID_FLOW = { "multi", shape = "fist", n = 4 },      -- a flurry of flowing strikes
   ETERNABEAM = { "beam", big = true },                  -- its full power, a beam

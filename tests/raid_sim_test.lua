@@ -259,12 +259,13 @@ do
   check(boss3.mon.hp < 252, ("and hurt again through and past it (hp %d)"):format(boss3.mon.hp))
 end
 
--- the G-Max move on its script's turns, on all four, its effect after
+-- the G-Max move on its script's turns: one target struck, its effect on every opponent (Volt Crash
+-- paralyzes them all)
 do
   local boss = battler("Boss", 100000, 1, { mv("Tap", { power = 1 }) }, true)
-  boss.gmax = mv("G-Max Volt Crash", { power = 5, spread = true })
+  boss.gmax = mv("G-Max Volt Crash", { power = 5, spread = false })
   boss.gmax.isGmax = true
-  boss.gmax.gmaxEffect = { kind = "status", list = { "PAR" } }
+  boss.gmax.gmaxEffect = { kind = "status", list = { "PAR" }, scope = "foes" }
   boss.script = RULES.SCRIPTS.basic
   local m = team(4, 1000)
   local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(22), rules = RULES }
@@ -278,8 +279,11 @@ do
     if e.kind == "use" and e.gmax then gm = true end
     if e.kind == "status" and e.status == "PAR" then para = para + 1 end
   end
-  check(gm and para == 4, ("turn 2: G-Max on all four, all paralysed (%d)"):format(para))
+  local struck = 0
+  for _, e in ipairs(ev2) do if e.kind == "damage" and e.who == boss and e.move == boss.gmax then struck = struck + 1 end end
+  check(gm and struck == 1 and para == 4, ("turn 2: G-Max on one, all four paralysed (%d struck, %d)"):format(struck, para))
 end
+
 
 -- a G-Max field hurts every member not of its type at the turn's end, for its turns
 do
@@ -652,7 +656,7 @@ do
   local s = newSim(boss, m, 30)
   local ev = s:turn({ pick(1), { move = 1 } })
   check(has(ev, function(e) return e.kind == "side" and e.what == "light" and e.up end) ~= nil, "Light Screen goes up")
-  check(m[2].mon.hp == 1000 - 60, "Light Screen: 90 -> 60 on the team (" .. m[2].mon.hp .. ")")
+  check(m[2].mon.hp == 1000 - 45, "Light Screen: 90 -> 60 on the team, x3/4 spread -> 45 (" .. m[2].mon.hp .. ")")
   for _ = 1, 3 do s:turn({ { move = 1 }, { move = 1 } }) end
   check(s.sides.team.light == 1, "Light Screen: one turn left after four")
   local ev5 = s:turn({ { move = 1 }, { move = 1 } })
@@ -721,13 +725,15 @@ do
   local s = newSim(battler("Boss", 100000, 1, { mv("Surf", { power = 80, spread = true }) }, true), m, 50)
   s:turn({ pick(1), { move = 1 } })
   check(m[1].mon.hp == 1000 and m[2].mon.hp == 1000, "Wide Guard: the spread move stopped")
-  local gmax = { name = "G-Max Hydrosnipe", power = 80, spread = true, isGmax = true, status = false, priority = 0, type = 11,
+  -- (a G-Max move has one target: Wide Guard, for spread moves, does not stand against it)
+  local gmax = { name = "G-Max Hydrosnipe", power = 80, spread = false, isGmax = true, status = false, priority = 0, type = 11,
     accuracy = 0, pp = 99, maxPp = 99 }
   local m2 = team(2, 1000)
   m2[1].moves = { tm("WIDE_GUARD") }
-  local ev2 = newSim(battler("Boss", 100000, 1, { gmax }, true), m2, 51):turn({ pick(1), { move = 1 } })
-  check(m2[2].mon.hp == 1000 - 20, "a G-Max move through Wide Guard: a quarter (" .. (1000 - m2[2].mon.hp) .. ")")
-  check(has(ev2, function(e) return e.kind == "guard" and e.pierced end) ~= nil, "... said so")
+  m2[2].moves = { mv("Wait", { power = 0, status = true }) }
+  newSim(battler("Boss", 100000, 1, { gmax }, true), m2, 51):turn({ pick(1), { move = 1 } })
+  local lost = (1000 - m2[1].mon.hp) + (1000 - m2[2].mon.hp)
+  check(lost == 80 and (m2[1].mon.hp == 1000 or m2[2].mon.hp == 1000), "a G-Max move: one target, past Wide Guard (" .. lost .. ")")
   local m3 = team(2, 1000)
   m3[1].moves = { tm("QUICK_GUARD") }
   local quick = mv("Quick Attack", { power = 40, priority = 1 })
@@ -744,7 +750,7 @@ do
   s5:turn({ pick(1), { move = 1 } })
   check(m5[2].mon.hp == 1000, "Mat Block on the first turn: stopped")
   local ev5 = s5:turn({ pick(1), { move = 1 } })
-  check(has(ev5, function(e) return e.kind == "fail" end) ~= nil and m5[2].mon.hp == 970, "Mat Block after the first turn: fails")
+  check(has(ev5, function(e) return e.kind == "fail" end) ~= nil and m5[2].mon.hp == 978, "Mat Block after the first turn: fails")
 end
 
 -- Protect: the user safe, a Max move through for a quarter, Spiky Shield hurting the boss's contact
@@ -853,6 +859,183 @@ do
   check(g[2].stages.attack == 1 and g[1].stages.attack == 0, "Gear Up: only Plus / Minus")
   local f = one("FLOWER_SHIELD", nil, function(m) m[3].type1 = 12 end)
   check(f[3].stages.defense == 1 and f[1].stages.defense == 0, "Flower Shield: the Grass types")
+end
+
+-- friendly fire: a member's Surf hits the boss and its allies, never itself; Wide Guard and Protect
+-- stand against an ally's too; Explosion faints its user, Mind Blown costs half its HP
+do
+  local surf = mv("Surf", { power = 90, spread = true }); surf.friendly = true
+  local m = team(3, 1000, { 90, 10, 10 })
+  m[1].moves = { surf }
+  m[2].moves = { mv("Wait", { power = 0, status = true }) }
+  m[3].moves = { mv("Wait", { power = 0, status = true }) }
+  local boss = battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true)
+  local s = newSim(boss, m, 100)
+  s:turn({ pick(1), pick(1), pick(1) })
+  check(boss.mon.hp == 100000 - 67 and m[2].mon.hp == 933 and m[3].mon.hp == 933 and m[1].mon.hp == 1000,
+    "Surf: the boss and both allies (x3/4 each), not its user")
+  local m2 = team(3, 1000, { 10, 90, 10 })
+  local surf2 = mv("Surf", { power = 90, spread = true }); surf2.friendly = true
+  m2[1].moves = { surf2 }
+  m2[2].moves = { tm("WIDE_GUARD") }
+  m2[3].moves = { mv("Wait", { power = 0, status = true }) }
+  newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m2, 101):turn({ pick(1), pick(1), pick(1) })
+  check(m2[2].mon.hp == 1000 and m2[3].mon.hp == 1000, "an ally's Wide Guard stops the Surf on the team")
+  local m3 = team(2, 1000, { 90, 10 })
+  local boom = mv("Explosion", { power = 250, spread = true }); boom.friendly = true; boom.key = "EXPLOSION"
+  m3[1].moves = { boom }
+  m3[2].moves = { tm("PROTECT") }
+  local s3 = newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m3, 102)
+  s3:turn({ pick(1), pick(1) })
+  check(m3[1].mon.hp == 0 and s3.faints == 1 and m3[2].mon.hp == 1000, "Explosion: its user faints, Protect keeps the ally safe")
+  local m4 = team(1, 1000)
+  local blown = mv("Mind Blown", { power = 150, spread = true }); blown.friendly = true; blown.key = "MIND_BLOWN"
+  m4[1].moves = { blown }
+  newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m4, 103):turn({ pick(1) })
+  check(m4[1].mon.hp == 500, "Mind Blown: half its max HP")
+  -- Safeguard stands against an ally's Discharge paralysis too
+  local m5 = team(2, 1000, { 90, 10 })
+  local dis = mv("Discharge", { power = 80, spread = true }); dis.friendly = true; dis.side = { status = "PAR", statusChance = 100 }
+  m5[1].moves = { tm("SAFEGUARD") }
+  m5[2].moves = { dis }
+  local s5 = newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m5, 104)
+  s5:turn({ pick(1), pick(1) })
+  s5:turn({ pick(1), pick(1) })
+  check(m5[1].status == nil, "Safeguard: no paralysis from an ally's Discharge")
+end
+
+-- a G-Max effect on the target alone (Snooze); Smite confuses every opponent; confusion strikes
+-- itself now and then and wears off; Depletion takes the last move's PP; the boss's plain spread
+-- move still hits all four, each for 3 / 4
+do
+  local snooze = mv("G-Max Snooze", { power = 1 }); snooze.isGmax = true
+  snooze.gmaxEffect = { kind = "drowsy", chance = 100 }
+  local m = team(4, 1000)
+  local boss = battler("Boss", 100000, 1, { snooze }, true)
+  newSim(boss, m, 120):turn(all(4))
+  local asleep = 0
+  for _, x in ipairs(m) do if x.status == "SLP" then asleep = asleep + 1 end end
+  check(asleep == 1, "G-Max Snooze: only the one struck grows drowsy (" .. asleep .. ")")
+  local smite = mv("G-Max Smite", { power = 1 }); smite.isGmax = true
+  smite.gmaxEffect = { kind = "none", confuse = true }
+  local m2 = team(4, 1000)
+  newSim(battler("Boss", 100000, 1, { smite }, true), m2, 121):turn(all(4))
+  local conf = 0
+  for _, x in ipairs(m2) do if x.confused then conf = conf + 1 end end
+  check(conf == 4, "G-Max Smite: every opponent confused (" .. conf .. ")")
+  -- confusion: over 40 seeded turns some self-hits, and it wears off within five
+  local selfHits, cleared = 0, 0
+  for seed = 1, 40 do
+    local c = team(1, 1000)
+    local sc = newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), c, seed)
+    c[1].confused = 3
+    for _ = 1, 3 do
+      for _, e in ipairs(sc:turn(all(1))) do
+        if e.kind == "residual" and e.who == c[1] then selfHits = selfHits + 1 end
+      end
+    end
+    if not c[1].confused then cleared = cleared + 1 end
+  end
+  check(selfHits > 5 and selfHits < 40 and cleared == 40, ("confusion: self-hits %d, cleared %d / 40"):format(selfHits, cleared))
+  local depl = mv("G-Max Depletion", { power = 1 }); depl.isGmax = true
+  depl.gmaxEffect = { kind = "pp", n = 2 }
+  local m3 = team(1, 1000, { 50 })
+  m3[1].moves = { mv("Tackle", { power = 10 }), mv("Ember", { power = 10 }) }
+  local s3 = newSim(battler("Boss", 100000, 1, { depl }, true), m3, 122)
+  s3:turn({ pick(2) })
+  check(m3[1].moves[2].pp == 7 and m3[1].moves[1].pp == 10, "G-Max Depletion: the last move used loses 2 PP")
+  local m4 = team(4, 1000)
+  local quake = mv("Earthquake", { power = 100, spread = true })
+  local ev4 = newSim(battler("Boss", 100000, 1, { quake }, true), m4, 123):turn(all(4))
+  local hits4 = 0
+  for _, e in ipairs(ev4) do if e.kind == "damage" and e.target and not e.target.boss and e.amount == 75 then hits4 = hits4 + 1 end end
+  check(hits4 == 4, "the boss's Earthquake: all four, 75 each (" .. hits4 .. ")")
+end
+
+-- G-Max Cuddle: every opponent of the other gender falls in love (not the genderless, not one of
+-- the same gender, not Oblivious); in love, half its turns lost; it ends when the one it loves leaves
+do
+  local cuddle = mv("G-Max Cuddle", { power = 1 }); cuddle.isGmax = true
+  cuddle.gmaxEffect = { kind = "none", attract = true }
+  local m = team(4, 1000)
+  m[1].gender, m[2].gender, m[3].gender, m[4].gender = "M", "F", "U", "M"
+  m[4].ability = "OBLIVIOUS"
+  local boss = battler("Boss", 100000, 1, { cuddle }, true)
+  boss.gender = "F"
+  newSim(boss, m, 130):turn(all(4))
+  check(m[1].attract == boss and not m[2].attract and not m[3].attract and not m[4].attract,
+    "G-Max Cuddle: the male falls in love; the female, the genderless and the Oblivious one do not")
+  local lost = 0
+  for seed = 1, 40 do
+    local c = team(1, 1000)
+    local b2 = battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true)
+    local sc = newSim(b2, c, seed)
+    c[1].attract = b2
+    for _, e in ipairs(sc:turn(all(1))) do if e.kind == "cant" and e.text and e.text:find("immobilized") then lost = lost + 1 end end
+  end
+  check(lost > 8 and lost < 32, "in love: about half its turns lost (" .. lost .. " / 40)")
+  -- a member's Cuddle on the boss: over when that member faints
+  local m2 = team(2, 1000, { 90, 10 })
+  m2[1].gender = "M"
+  local cud2 = mv("G-Max Cuddle", { power = 1 }); cud2.isGmax = true; cud2.gmaxEffect = { kind = "none", attract = true }
+  m2[1].moves = { cud2 }
+  local boss2 = battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true)
+  boss2.gender = "F"
+  local s2 = newSim(boss2, m2, 131)
+  s2:turn({ pick(1), pick(1) })
+  check(boss2.attract == m2[1], "a member's Cuddle: the boss in love with it")
+  m2[1].mon.hp = 0
+  s2:fainted({}, m2[1])
+  check(boss2.attract == nil, "... until that member leaves the field")
+end
+
+-- G-Max Meltdown: every opponent tormented (not the same move twice in a row; a Dynamax Pokemon -
+-- the boss - immune); G-Max Gravitas: Gravity five turns (accuracy x5/3 asked of the adapter, the
+-- airborne moves failing, the ground reaching Flying types through the adapter's `gravity`)
+do
+  local melt = mv("G-Max Meltdown", { power = 1 }); melt.isGmax = true
+  melt.gmaxEffect = { kind = "none", torment = true }
+  local m = team(2, 1000, { 90, 90 })
+  local a1, a2 = mv("Tackle", { power = 10 }), mv("Ember", { power = 10 })
+  m[1].moves = { a1, a2 }
+  local boss = battler("Boss", 100000, 1, { melt }, true)
+  local s = newSim(boss, m, 140)
+  s:turn({ pick(1), pick(1) })
+  check(m[1].torment and m[2].torment, "G-Max Meltdown: both tormented")
+  check(s:tormented(m[1], a1) and not s:tormented(m[1], a2), "tormented: Tackle again barred, Ember free")
+  local ev = s:turn({ pick(1), pick(1) })
+  check(has(ev, function(e) return e.kind == "cant" and e.torment and e.who == m[1] end) ~= nil,
+    "Tackle twice in a row: it cannot")
+  check(not s:tormented(m[2], m[2].moves[1]), "one with no other move: not barred (Struggle in the games)")
+  local m2 = team(1, 1000)
+  local melt2 = mv("G-Max Meltdown", { power = 1 }); melt2.isGmax = true; melt2.gmaxEffect = { kind = "none", torment = true }
+  m2[1].moves = { melt2 }
+  local boss2 = battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true)
+  newSim(boss2, m2, 141):turn({ pick(1) })
+  check(not boss2.torment, "the boss (Dynamaxed) is not tormented")
+  -- Gravity
+  local grav = mv("G-Max Gravitas", { power = 1 }); grav.isGmax = true
+  grav.gmaxEffect = { kind = "gravity", turns = 5 }
+  local m3 = team(1, 1000, { 90 })
+  local fly = mv("Fly", { power = 90 }); fly.key = "FLY"
+  local quake = mv("Earthquake", { power = 100 }); quake.key = "EARTHQUAKE"
+  m3[1].moves = { fly, quake }
+  local seen = {}
+  local A = screenAdapter()
+  local baseHits, baseDmg = A.hits, A.damage
+  A.hits = function(att, def, mv2, g) seen.hitsGravity = seen.hitsGravity or g; return baseHits(att, def, mv2) end
+  A.damage = function(att, def, mv2, spread, o) if o and o.gravity then seen.dmgGravity = true end return baseDmg(att, def, mv2, spread, o) end
+  local boss3 = battler("Boss", 100000, 1, { grav }, true)
+  local s3 = Sim.new{ boss = boss3, members = m3, adapter = A, rng = rngOf(142), teamWords = TM, rules = { TURNS = 20, FAINTS = 4 } }
+  s3:turn({ pick(2) })
+  check(s3.gravity == 4, "G-Max Gravitas: Gravity, four turns left after its first (" .. tostring(s3.gravity) .. ")")
+  s3.boss.moves = { mv("Hit", { power = 1, accuracy = 100 }) }
+  local ev3 = s3:turn({ pick(1) })
+  check(has(ev3, function(e) return e.kind == "fail" and e.text and e.text:find("gravity") end) ~= nil, "Fly fails under Gravity")
+  s3:turn({ pick(2) })
+  check(seen.hitsGravity and seen.dmgGravity, "accuracy and the Ground move's reach told to the adapter")
+  for _ = 1, 3 do s3:turn({ pick(2) }) end
+  check((s3.gravity or 0) == 0, "Gravity wears off after five turns")
 end
 
 -- the same seed, the same turn

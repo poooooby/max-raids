@@ -6,7 +6,8 @@
 -- Bottle Cap (RAID.REWARD); nothing straight to the four who fought.
 --   Rw = rewards(mod, { N, Bosses, Sprites }) ; Rw.battle = src/battle.lua's (for the TMs' moves)
 --   Rw.balls() -> { { item, name, n, mult }, ... } ; Rw.chance(stars, mult) (pure)
---   Rw.throw(key, level, ball, rng, ivs) -> caught, { name, toPC } | why   (ivs: the boss's, kept)
+--   Rw.throw(key, level, ball, rng, ivs, gender) -> caught, { name, toPC } | why   (ivs, gender: the
+--   boss's, kept)
 --   Rw.rollItems(key, rng) -> { { id, n }, ... } ; Rw.give(r, rng) -> { items, firstWin }
 
 return function(mod, deps)
@@ -94,7 +95,28 @@ return function(mod, deps)
   end
 
   -- the throw: the ball used up, the roll; caught, the boss's species at `level` in that ball
-  function Rw.throw(key, level, ball, rng, ivs)
+  -- the caught Pokemon made the boss's gender: its personality moved by steps of 50 (nature = p % 25
+  -- and ability = p % 2 stay) until Pokemon.gender says so, its shininess unchanged
+  function Rw.keepGender(mon, species, gender)
+    if not (Pokemon and Pokemon.gender and mon.personality) then return false end
+    local p0 = tonumber(mon.personality) or 0
+    local okG, now = pcall(Pokemon.gender, species, p0)
+    if not okG or now == gender then return okG end
+    local shiny0 = Pokemon.isShiny and select(2, pcall(Pokemon.isShiny, mon))
+    for k = 1, 5000 do
+      local p = (p0 + k * 50) % 4294967296
+      local okP, g = pcall(Pokemon.gender, species, p)
+      if okP and g == gender then
+        mon.personality = p
+        local shiny = Pokemon.isShiny and select(2, pcall(Pokemon.isShiny, mon))
+        if shiny == shiny0 then return true end
+        mon.personality = p0
+      end
+    end
+    return false
+  end
+
+  function Rw.throw(key, level, ball, rng, ivs, gender)
     local s = session()
     local b = Bosses[key]
     if not (s and b and ball) then return false, "no session" end
@@ -116,6 +138,8 @@ return function(mod, deps)
       if Pokemon and Pokemon.applyStats then pcall(Pokemon.applyStats, mon, s) end
       mon.hp = mon.maxHp or mon.hp
     end
+    -- (the boss's gender: a personality as near as keeps its nature, ability and shininess)
+    if (gender == "M" or gender == "F") then Rw.keepGender(mon, species, gender) end
     -- its Dynamax marks, as Sword / Shield's raid catches: a Dynamax Level by the stars, and the
     -- G-Max Factor from a Gigantamax boss (National Dex's, when it has them)
     local dx = Rw.dynamax()

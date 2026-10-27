@@ -151,13 +151,22 @@ return function(mod, deps)
   end
 
   -- the boss's cry: the pack's .ogg, at the game's effects volume; a Dynamax boss's the game's own
+  -- a Dynamax Pokemon's cry (a route one's boss, one of the four grown giant): its own cry played
+  -- lower and slower, as the much bigger creature - the engine's cry (or a cry mod's) then its voice
+  -- pitched to GIANT_CRY (a Source's pitch slows it with it: 0.8 is ~4 semitones down, 25% longer).
+  -- The Giga Megas pack's G-Max cries are the giant's already.
+  Rd.GIANT_CRY = 0.8
+  function Rd.bigCry(species)
+    if not (species and Audio and Audio.playCry) then return false end
+    local ok = pcall(Audio.playCry, species)
+    local src = ok and Audio._crySource
+    if src and src.setPitch then pcall(src.setPitch, src, Rd.GIANT_CRY) end
+    return ok
+  end
+
   function Rd.cry(key)
     local L = Rd.load(key)
-    if L and L.dyna then
-      if not (Audio and Audio.playCry) then return false end
-      local ok = pcall(Audio.playCry, L.slot)
-      return ok
-    end
+    if L and L.dyna then return Rd.bigCry(L.slot) end
     if not (L and L.sp.cry and love and love.audio and love.sound) then return false end
     if not L.cry then
       local ok, sd = pcall(function()
@@ -835,7 +844,7 @@ return function(mod, deps)
   local function nextOrFight()
     local c = r.cmd
     local nxt = nextActor(c.actor + 1)
-    c.cursor, c.menu, c.item, c.dmax, c.moveSlot = 1, "main", nil, nil, nil
+    c.cursor, c.menu, c.item, c.dmax, c.moveSlot, c.allPick = 1, "main", nil, nil, nil, nil
     if nxt then
       c.actor = nxt
       toMember(nxt)
@@ -881,7 +890,10 @@ return function(mod, deps)
       Rd.moveList()
       return true
     elseif c.menu == "target" then
-      if c.moveSlot then
+      if c.moveSlot and c.allPick then
+        -- (a move reaching several: a press on any it reaches confirms it)
+        c.chosen[c.actor] = { move = c.moveSlot }
+      elseif c.moveSlot then
         -- (an ally move's pick: a member, or Pollen Puff's boss)
         c.chosen[c.actor] = { move = c.moveSlot, target = row.boss and "boss" or row.member }
       else
@@ -895,8 +907,11 @@ return function(mod, deps)
     if not mv or (mv.pp or 0) <= 0 then return false end
     -- an ally move (Helping Hand, Heal Pulse, Decorate, Pollen Puff ...): whom it goes to first
     -- (Dynamaxed it is Max Guard)
-    if mv.team and mv.team.ally and not Rd.maxShown() then
-      c.moveSlot, c.menu, c.cursor = slot, "target", 1
+    -- a move reaching several (Surf, Earthquake on the boss and the allies; Light Screen, Wide Guard,
+    -- Life Dew on the team): the four shown, the arrow on each it reaches, a press confirms
+    local area = Rd.areaOf(mv)
+    if (area or (mv.team and mv.team.ally)) and not Rd.maxShown() then
+      c.moveSlot, c.allPick, c.menu, c.cursor = slot, area, "target", 1
       Rd.moveList()
       for i, row2 in ipairs(c.moveList) do
         if row2.live ~= false then c.cursor = i; break end
@@ -906,6 +921,20 @@ return function(mod, deps)
     c.chosen[c.actor] = { move = slot, dmax = c.dmax or nil }
     nextOrFight()
     return true
+  end
+
+  -- what a move reaches besides its target, for the target screen: "spread" (it hits the boss and the
+  -- user's allies - MOVE_TARGET_FOES_AND_ALLY), "team" (the user and its allies: a screen, Safeguard,
+  -- a guard, a team heal or boost), "allies" (Coaching), else nil
+  local TEAM_KINDS = { screen = true, side = true, guard = true, cure = true }
+  function Rd.areaOf(mv)
+    if not mv then return nil end
+    if mv.friendly and not mv.status then return "spread" end
+    local T = mv.team
+    if not T then return mv.friendly and "spread" or nil end
+    if TEAM_KINDS[T.kind] or (T.kind == "heal" and T.team) or (T.kind == "boost" and (T.team or T.grass)) then return "team" end
+    if T.kind == "boost" and T.allies then return "allies" end
+    return nil
   end
 
   -- whether the member choosing shows its moves' Max forms: Dynamaxed, or about to
@@ -950,6 +979,22 @@ return function(mod, deps)
         else
           list[i] = nil
         end
+      elseif c.menu == "target" and c.moveSlot and c.allPick then
+        -- (a move reaching several: `hit` on each it reaches - its user immune to a spread move)
+        local m = r.members[i]
+        if m and m.b then
+          local hp, mhp = tonumber(m.b.mon.hp) or 0, max(1, tonumber(m.b.mon.maxHp) or 1)
+          local here = r.sim ~= nil and r.sim:present(i)
+          local hit = here and (c.allPick == "team" or i ~= c.actor)
+          row.member, row.name, row.hit = i, m.b.name, hit or nil
+          -- (the second screen's cell has no chip: the word under its name)
+          row.note = here and not hit and "Immune" or nil
+          row.chip = not here and "Out" or (not hit and "Immune") or "HP"
+          row.right = ("%d/%d"):format(hp, mhp)
+          row.rgb, row.live = hpRgb(hp / mhp), hit and true or false
+        else
+          list[i] = nil
+        end
       elseif c.menu == "target" and c.moveSlot then
         -- (an ally move: the others on the field; Pollen Puff's own row is the boss)
         local m = r.members[i]
@@ -983,6 +1028,8 @@ return function(mod, deps)
           local shown = maxForms and b.maxMoves and b.maxMoves[i] or mv
           row.name, row.typeName, row.pp, row.maxPp = shown.name, shown.typeName, mv.pp, mv.maxPp
           row.max = maxForms or nil
+          -- (tormented: the move it used last cannot be picked)
+          if not maxForms and r.sim and r.sim:tormented(b, mv) then row.live = false; row.right = "Torment" end
           row.rgb = Battle and Battle.TYPE_RGB[shown.typeName] or nil
           if not shown.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(shown.type, r.boss)) end
         else
@@ -1092,7 +1139,8 @@ return function(mod, deps)
       end
     end
     T.boss = r.boss and not r.bossGone and placeOf(r.boss) or nil
-    r.sideFx = r.sideFx or { team = {}, boss = {} }
+    r.sideFx = r.sideFx or { team = {}, boss = {}, field = {} }
+    r.sideFx.field = r.sideFx.field or {}
     T.sides = r.sideFx
     -- (the turn's guards; Follow Me's where its user stands)
     T.turn = T.turn or {}
@@ -1365,15 +1413,27 @@ return function(mod, deps)
     Scene.onMid = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "mid", r.t) end end
   end
 
+  -- a look made for the whole party, for a move with one target (a Max Move): a wave of water / fire /
+  -- light -> a big beam, of the ground -> spikes under it, of sound -> rings, of wind -> blades
+  Rd.ONE_TARGET = { ground = { "spikes", shape = "rock", big = true }, sound = { "rings", shape = "sound", big = true },
+    wind = { "shot", shape = "blade", n = 4, big = true } }
+  function Rd.oneTarget(spec)
+    if spec[1] ~= "wave" then return spec end
+    return Rd.ONE_TARGET[spec.shape or ""] or { "beam", big = true }
+  end
+
   function Rd.specOf(mv, asTeam)
     if not (MoveFx and mv) then return { "slam" } end
     if mv.guard then return { "self", shape = "light" } end
     -- (a team move - a screen, a guard, a heal: its own look is drawn by its event)
     if mv.team and (mv.status or asTeam) then return { "self", shape = "light" } end
     if mv.isGmax then
-      -- (a plain Max Move: the look of the move it comes from)
-      if mv.isMax then return MoveFx.MOVES[mv.baseKey or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "wave", shape = "light" } end
-      return MoveFx.GMAX[mv.key or ""] or { "wave", shape = "light" }
+      -- (a plain Max Move: the look of the move it comes from - on its one target: a wave over the
+      -- whole party becomes its single-target kin)
+      if mv.isMax then
+        return Rd.oneTarget(MoveFx.MOVES[mv.baseKey or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "beam" })
+      end
+      return Rd.oneTarget(MoveFx.GMAX[mv.key or ""] or { "beam", big = true })
     end
     return MoveFx.MOVES[mv.key or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "slam" }
   end
@@ -1400,7 +1460,10 @@ return function(mod, deps)
       for j = r.evI + 1, #list do
         local x = list[j]
         if x.kind == "use" or x.kind == "over" or x.kind == "cheer" or x.kind == "item" then break end
-        local who = x.target or ((x.kind == "status" or x.kind == "stage") and x.who ~= e.who and x.who) or nil
+        -- (a Max / G-Max Move strikes one: its effect on the others - Volt Crash paralysing them all -
+        -- is not where its look lands)
+        local who = x.target or (not (mv and mv.isGmax) and (x.kind == "status" or x.kind == "stage") and x.who ~= e.who
+          and x.who) or nil
         if who and not seen[who] then seen[who] = { b = who }; targets[#targets + 1] = seen[who] end
         -- (how hard it lands on each: the share of its HP the move takes)
         -- (its hits are felt in its look: their own events make no second sound or shake)
@@ -1439,7 +1502,7 @@ return function(mod, deps)
         local i = memberIndex(a.user)
         if Scene and i then Scene.shot("member", 0.5, i); Scene.shake(0.12, 0.8) end
         local sp = a.user.species or (a.user.mon and a.user.mon.species)
-        if sp and Audio and Audio.playCry then pcall(Audio.playCry, sp) end
+        if sp then Rd.bigCry(sp) end
       end
       if Sounds then Rd.se(Sounds.GMAX_CHARGE) end
       Fx.charge(placeOf(a.user), r.t, Rd.GMAX_CHARGE_S)
@@ -1518,10 +1581,12 @@ return function(mod, deps)
   -- Safeguard, mist, Tailwind - is kept from the event that raised it to the one that ends it (the sim
   -- has run the whole turn already, so its own state is the turn's end); a turn's guards, Follow Me
   -- and Protect last until the next turn's commands; a wish waits over its place until it comes true
-  Rd.SIDE_LASTING = { reflect = true, light = true, veil = true, safeguard = true, mist = true, tailwind = true }
+  Rd.SIDE_LASTING = { reflect = true, light = true, veil = true, safeguard = true, mist = true, tailwind = true,
+    gravity = true }
   Rd.SIDE_TURN = { wide = true, quick = true, mat = true, crafty = true, redirect = true }
   local function sideFx()
-    r.sideFx = r.sideFx or { team = {}, boss = {} }
+    r.sideFx = r.sideFx or { team = {}, boss = {}, field = {} }
+    r.sideFx.field = r.sideFx.field or {}
     return r.sideFx
   end
   function Rd.sideEvent(e)
@@ -1592,6 +1657,9 @@ return function(mod, deps)
       elseif e.kind == "cheer" then Rd.se(E2.cheer)
       elseif e.kind == "stage" then Rd.se((e.n or 0) >= 0 and E2.up or E2.down)
       elseif e.kind == "status" and e.status then Rd.se(Sounds.STATUS[e.status])
+      elseif (e.kind == "status" or e.kind == "cant") and e.confused then Rd.se(Sounds.SHAPE.eye)
+      elseif (e.kind == "status" or e.kind == "cant") and e.attract then Rd.se(Sounds.SHAPE.heart)
+      elseif (e.kind == "status" or e.kind == "cant") and e.torment then Rd.se(Sounds.SIDE.torment)
       elseif e.kind == "field" and (e.fieldType or e.foeField) then Rd.se(Sounds.FIELD[e.fieldType or e.foeField])
       elseif e.kind == "shield" then
         Rd.se(e.step == "up" and E2.shieldUp or e.step == "break" and E2.shieldBreak or E2.shieldHit)
@@ -1646,10 +1714,7 @@ return function(mod, deps)
           end
         end
         if Sounds then Rd.se(up and Sounds.EVENT.dmaxGrow or Sounds.EVENT.dmaxEnd) end
-        if up and Audio and Audio.playCry then
-          local sp = e.who.species or (e.who.mon and e.who.mon.species)
-          if sp then pcall(Audio.playCry, sp) end
-        end
+        if up then Rd.bigCry(e.who.species or (e.who.mon and e.who.mon.species)) end
         if e.hp then e.who.dispTarget = e.hp end
         if e.text then
           Rd.say(e.text)
@@ -1816,7 +1881,7 @@ return function(mod, deps)
     local ball = r.cmd.balls[i or r.cmd.ball]
     if not ball then return false end
     local level = r.boss and r.boss.mon.level or 20
-    local caught, info = Rewards.throw(r.key, level, ball, r.rng, r.boss and r.boss.mon.ivs or nil)
+    local caught, info = Rewards.throw(r.key, level, ball, r.rng, r.boss and r.boss.mon.ivs or nil, r.boss and r.boss.gender)
     r.throw = { t0 = r.t, caught = caught, info = type(info) == "table" and info or nil, ball = ball,
       rgb = BALL_RGB[ball.key] or BALL_RGB.ITEM_POKE_BALL, said = {}, cues = {}, acc = 0 }
     r.phase = "throw"
@@ -2384,7 +2449,7 @@ return function(mod, deps)
     if not (r and r.phase == "command" and r.cmd.actor) then return false end
     if r.cmd.menu == "target" then
       if r.cmd.moveSlot then
-        r.cmd.menu, r.cmd.cursor, r.cmd.moveSlot = "moves", r.cmd.moveSlot, nil
+        r.cmd.menu, r.cmd.cursor, r.cmd.moveSlot, r.cmd.allPick = "moves", r.cmd.moveSlot, nil, nil
       else
         r.cmd.menu, r.cmd.cursor, r.cmd.item = "items", 1, nil
       end
@@ -2813,6 +2878,8 @@ return function(mod, deps)
       bossPic.shrink = r.throw and (r.shrink or 1) or 1
       bossPic.lunge = r.lunge or 0
       bossPic.jump = r.jump or 0
+      -- (a Gigantamax boss: its cloud lit pinker)
+      bossPic.gmax = not loaded.dyna or nil
     end
     for i = 1, 4 do
       local m = r.members[i]

@@ -830,6 +830,82 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local hpx = Sc.MEMBER_H * (size or 3.5) * cam.F / d
     return x, y, hpx
   end
+  -- the Dynamax cloud (Sword / Shield's): a three-part halo over its head - three long, lumpy dark-red
+  -- cloud banks, each curving along a ring round it (ARC of it, small gaps between them), turning
+  -- slowly; thin at their ends, the far side smaller and dimmer, each lump churning, a small puff
+  -- breaking off each bank's end. (hx, hy) the top of its head, w its width on screen, a its
+  -- strength; gmax: a Gigantamax one's, lit pinker. Sc.CLOUD holds the numbers (LUMP a lump's
+  -- radius x w).
+  Sc.CLOUD = { RING_W = 0.56, RING_UP = 0.3, RING_FLAT = 0.32, SPIN = 0.3, ARC = 1.3, LUMP = 0.085, LUMPS = 15,
+    DARK = { 0.2, 0.0, 0.02 }, BODY = { 0.48, 0.01, 0.05 }, LIT = { 0.78, 0.08, 0.13 }, SHINE = { 1, 0.38, 0.38 },
+    GMAX_LIT = { 1, 0.24, 0.38 } }
+  local lumpX, lumpY, lumpR, lumpD = {}, {}, {}, {}
+  -- one bank: its lumps laid out (lumpX / Y / R / D), then drawn in four passes - the shadow under,
+  -- the body, the light on top, a shine - so the bank reads as one cloud with a lumpy top
+  local function cloudBank(G2, n, a, lit)
+    local C = Sc.CLOUD
+    for pass = 1, 4 do
+      local col = pass == 1 and C.DARK or pass == 2 and C.BODY or pass == 3 and lit or C.SHINE
+      for q = 1, n do
+        local r, depth = lumpR[q], lumpD[q]
+        local ox, oy, sk = 0, 0, 1
+        if pass == 1 then ox, oy, sk = r * 0.1, r * 0.22, 1.05
+        elseif pass == 3 then ox, oy, sk = -r * 0.08, -r * 0.22, 0.6
+        elseif pass == 4 then ox, oy, sk = -r * 0.16, -r * 0.38, 0.22 end
+        local dk = 0.55 + 0.45 * depth
+        local alpha = a * (pass == 4 and 0.3 or 1) * (pass >= 3 and (0.5 + 0.5 * depth) or 1)
+        if r > 0.5 and (pass < 4 or q % 3 == 2) then
+          G2.setColor(col[1] * dk, col[2] * dk, col[3] * dk, alpha)
+          G2.circle("fill", lumpX[q] + ox, lumpY[q] + oy, r * sk, 18)
+        end
+      end
+    end
+  end
+  local cloudOrder = { {}, {}, {} }
+  function Sc.dynaCloud(G2, hx, hy, w, t, a, gmax)
+    if a <= 0 or w <= 0 then return end
+    local C = Sc.CLOUD
+    local rx = w * C.RING_W
+    local ry = rx * C.RING_FLAT
+    local cy = hy - w * C.RING_UP
+    local lit = gmax and C.GMAX_LIT or C.LIT
+    local N = C.LUMPS
+    -- the far banks first (by their middles)
+    for j = 0, 2 do
+      local o = cloudOrder[j + 1]
+      o.ang = t * C.SPIN + j * 2 * pi / 3
+      o.depth, o.j = (sin(o.ang) + 1) / 2, j
+    end
+    table.sort(cloudOrder, function(p, q) return p.depth < q.depth end)
+    for _, o in ipairs(cloudOrder) do
+      local seed = o.j * 7 + 3
+      local bob = sin(t * 1.3 + o.j * 2) * w * 0.01
+      for q = 1, N do
+        local f = (q - 1) / (N - 1) - 0.5
+        -- (along the ring; every other lump higher and the sizes uneven, so its top is lumpy; thin
+        -- at both ends)
+        local th = o.ang + f * C.ARC + (hash(seed, q) - 0.5) * 0.06
+        local depth = (sin(th) + 1) / 2
+        local near = 0.7 + 0.4 * depth
+        local taper = 1 - 1.5 * f * f
+        local r = w * C.LUMP * near * taper * (0.75 + 0.45 * hash(seed, q + 40)) * (1 + 0.06 * sin(t * 2.1 + q * 1.7))
+        local lift = ((q % 2 == 0) and 0.45 or 0) + (hash(seed, q + 20) - 0.5) * 0.5
+        lumpX[q] = hx + cos(th) * rx
+        lumpY[q] = cy + sin(th) * ry + bob - r * lift + sin(t * 1.4 + q * 1.3 + seed) * r * 0.08
+        lumpR[q], lumpD[q] = r, depth
+      end
+      cloudBank(G2, N, a, lit)
+      -- a small puff breaking off the bank's leading end and fading as it rises
+      local u = (t * 0.4 + o.j * 0.33) % 1
+      local th = o.ang + 0.5 * C.ARC
+      local pr = w * C.LUMP * 0.5 * (1 - u)
+      if pr > 0.5 then
+        G2.setColor(C.BODY[1], C.BODY[2], C.BODY[3], a * (1 - u) * 0.8)
+        G2.circle("fill", hx + cos(th + 0.25 * u) * rx, cy + sin(th + 0.25 * u) * ry - w * C.LUMP * (1 + 3 * u), pr, 12)
+      end
+    end
+  end
+
   local function drawBoss(G2, pic, size, t)
     if not (pic and pic.image) then return end
     local box = pic.box
@@ -911,19 +987,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G2.setBlendMode("alpha")
       G2.setShader()
     end
-    -- red wisps curling over its head
-    local hx, hy = x, y - bh * k
-    for w = 1, 2 do
-      local side = w == 1 and -1 or 1
-      for i = 0, 6 do
-        local u = i / 6
-        local px = hx + side * bw * k * (0.12 + 0.1 * u) + sin(t * 1.6 + u * 4 + w) * bw * k * 0.05
-        local py = hy - bh * k * (0.02 + 0.16 * u)
-        local rr = bw * k * (0.06 - 0.03 * u) * (1 + 0.15 * sin(t * 3 + i))
-        G2.setColor(0.55 + 0.25 * (1 - u), 0.02, 0.06, 0.75 * (1 - u * 0.6))
-        G2.circle("fill", px, py, rr, 14)
-      end
-    end
+    -- the Dynamax cloud circling over its head
+    Sc.dynaCloud(G2, x, y - bh * k, math.min(bw, bh * 1.2) * k, t, 1, pic.gmax)
     -- streaks swirling round its body (arcs on an ellipse, each with a fading tail)
     G2.setLineWidth(max(1, k * 1.2))
     local cx, cy = x, y - bh * k * 0.5
@@ -948,8 +1013,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
-  -- a Dynamaxed member's aura, as the boss's (a wide dark-red glow, the bright outline, wisps, swirling
-  -- streaks, rising sparks) at strength g; a Gigantamax one's red clouds crowning it (pic.gmax)
+  -- a Dynamaxed member's aura, as the boss's (a wide dark-red glow, the bright outline, swirling
+  -- streaks, rising sparks) at strength g; its cloud is drawn over its sprite (Sc.dynaCloud)
   function Sc.memberAura(G2, pic, x, y, k, fx, t, g)
     local box = pic.box
     local bw, bh = box[3] - box[1], box[4] - box[2]
@@ -990,21 +1055,6 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local u = (hash(i, 61) + t * (0.25 + 0.3 * hash(i, 62))) % 1
       G2.setColor(1, 0.25 + 0.3 * hash(i, 64), 0.1, (1 - u) * 0.9 * g)
       G2.rectangle("fill", x + (hash(i, 63) - 0.5) * bw * k * 1.1, y - u * bh * k * 1.15, max(1, k * 1.2), max(1, k * 1.2))
-    end
-    -- Gigantamax: a crown of small dark-red cloud puffs over its head, lit red underneath, drifting
-    if pic.gmax then
-      local hx, hy = x, y - bh * k * 1.0
-      local span = min(bw, bh) * k
-      for c = 0, 10 do
-        local u = c / 10 - 0.5
-        local px = hx + u * span * 0.75 + sin(t * 0.9 + c) * span * 0.02
-        local py = hy - span * (0.03 + 0.05 * (1 - math.abs(u) * 2)) + cos(t * 1.3 + c) * span * 0.008
-        local rr = span * (0.045 + 0.02 * hash(c, 71))
-        G2.setColor(0.32, 0.02, 0.06, 0.75 * g)
-        G2.circle("fill", px, py, rr, 14)
-        G2.setColor(1, 0.22, 0.28, 0.5 * g)
-        G2.arc("line", "open", px, py, rr, 0.2, math.pi - 0.2, 10)
-      end
     end
   end
 
@@ -1091,6 +1141,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       else G2.draw(pic.image, sx, sy, 0, kx * fx, kb, ox, oy) end
       G2.setBlendMode("alpha")
       G2.setShader()
+    end
+    -- Dynamaxed: the cloud circling over its head (over the sprite)
+    if g > 0 then
+      local top = sy - (box[4] - box[2]) * kb
+      Sc.dynaCloud(G2, sx, top, math.min(box[3] - box[1], (box[4] - box[2]) * 1.2) * kx, t + i * 1.7, g, pic.gmax)
     end
   end
 

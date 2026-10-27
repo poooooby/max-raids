@@ -34,3 +34,4 @@ tests/drivers/dynamax_probe.lua
 tests/drivers/crystal_probe.lua
 tests/drivers/portrait_probe.lua
 tests/drivers/team_moves_probe.lua
+tests/drivers/gmax_probe.lua
