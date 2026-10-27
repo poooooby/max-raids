@@ -470,7 +470,20 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
     1.5 s of a look's blow.
   - Driver `tests/drivers/fx_probe.lua` (26 cases through `R.testLook(spec, type, user, onto, gmax,
     frac)`, `PROBE_ONLY=a,b`; shots before / at / after each blow; logs particle counts, `Fx.stats`).
-  - Open: the field / veil / barrier are still the first pass's screen-space drawing; bite's fangs
+  - What lasts, in 3D too: `Fx.setLasting(field, bossAnchor, veil, shield, now)` from `Rd.draw` each
+    frame; the G-Max field on a ring round the party (`FIELD` CX 0 CZ -1 RX 5 RZ 2.3; its back half in
+    mid, its front half in front): fire and a water vortex as walls through the fire / wall shaders
+    (`ringWall`), vines curling up (strips + leaves), stones orbiting with shadows; the veil a shimmer
+    sphere with turning bands; the barrier a dome of hexagons on a sphere (only cells facing the eye,
+    fresnel rim, a band climbing it, a hit's ripple from the front: `Fx.barrierUp / barrierHit /
+    barrierBreak` from the shield events - a break bursts it into red shards with a flash, a shake and
+    a jab). fx_probe `PROBE_ONLY=lasting` shoots them.
+  - Fainting (Wooble 2026-10-26: "shrink down and be taken off the field"): a member's faint event sets
+    `m.faintT` (a red light at it), its comeback (`back`) `m.backT`; `Rd.memberShrink(m)` (FAINT_S 0.7,
+    BACK_S 0.5) goes to the pic as `shrink`, and raid_scene's drawMember draws it red, shrinking about
+    its middle and lifting, no shadow, gone at 0; back it grows in the same way. fx_probe
+    `PROBE_ONLY=faint`.
+  - Open: bite's fangs
     and the ground wave are plain; no sound yet; Thor performance unmeasured (particles capped at
     `Fx.MAX_PARTS` 900).
 - **Next after that.** Sound;

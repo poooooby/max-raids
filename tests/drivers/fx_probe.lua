@@ -101,6 +101,50 @@ local function body(game, log)
       after(math.max(0.3, a.len - imp - 0.25) + 0.6)
     end
   end
+  -- what lasts: each G-Max field round the party, the veil, the barrier (up, hit, broken)
+  if next(only) == nil or only.lasting then
+    local cur = R.current()
+    local Fx = X._test.fx
+    Sc.shot("spread", 0)
+    for _, f in ipairs({ "FIRE", "WATER", "GRASS", "ROCK" }) do
+      cur.fieldShown = f
+      after(1.0)
+      shot("fx_field_" .. f)
+    end
+    cur.fieldShown = nil
+    Sc.shot("boss", 0)
+    cur.boss.veil = 3
+    after(0.6)
+    shot("fx_veil")
+    cur.boss.veil = 0
+    Sc.shot("field", 0)
+    cur.boss.shieldShown = { left = 5, max = 5 }
+    Fx.barrierUp(X.state().t)
+    after(0.8)
+    shot("fx_barrier")
+    Fx.barrierHit(X.state().t)
+    cur.boss.shieldShown = { left = 2, max = 5 }
+    after(0.2)
+    shot("fx_barrier_hit")
+    cur.boss.shieldShown = nil
+    Fx.barrierBreak(R.placeOf(cur.boss), X.state().t)
+    after(0.15)
+    shot("fx_barrier_break")
+  end
+  -- a member fainting: shrinking away, gone; then back in the fight
+  if next(only) == nil or only.faint then
+    local cur = R.current()
+    Sc.shot("spread", 0)
+    local m = cur.members[2]
+    m.faintT, m.backT = X.state().t, nil
+    after(0.25)
+    shot("fx_faint_1shrink")
+    after(0.6)
+    shot("fx_faint_2gone")
+    m.backT = X.state().t
+    after(0.25)
+    shot("fx_faint_3back")
+  end
   X.close()
   log("done")
 end

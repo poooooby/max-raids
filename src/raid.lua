@@ -913,8 +913,32 @@ return function(mod, deps)
     if e.kind == "shield" and r.boss then
       r.boss.shieldShown = e.step ~= "break" and { left = e.left, max = e.max } or nil
       if e.step == "hit" and Scene then Scene.shake(0.06, 0.25) end
+      if Fx then
+        if e.step == "up" then Fx.barrierUp(r.t)
+        elseif e.step == "hit" then Fx.barrierHit(r.t)
+        elseif e.step == "break" then
+          Fx.barrierBreak(placeOf(r.boss), r.t)
+          if Scene then Scene.shake(0.25, 0.6); if Scene.kick then Scene.kick(4, 0.4) end end
+        end
+      end
     end
     if e.kind == "faint" and not e.who.boss then r.shownFaints = (r.shownFaints or 0) + 1 end
+    -- a member fainting is taken off the field (it shrinks away, red); one coming back grows in
+    if (e.kind == "faint" or e.kind == "back") and not e.who.boss then
+      local i = memberIndex(e.who)
+      local m = i and r.members[i]
+      if m then
+        if e.kind == "faint" then m.faintT, m.backT = r.t, nil else m.backT = r.t end
+        local A = placeOf(e.who)
+        if Fx and A then
+          if e.kind == "faint" then
+            Fx.emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.5, A.h * 2.5, 1, 0.2, 0.25, 0.45)
+          else
+            Fx.emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.5, A.h * 2.5, 1, 1, 1, 0.45)
+          end
+        end
+      end
+    end
     if e.kind == "use" then Rd.scheduleMove(e) end
     if e.kind == "use" then
       local i = memberIndex(e.who)
@@ -1589,6 +1613,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     button(G, denWhere.back, { 0.2, 0.45, 0.9 }, "BACK", u, true)
   end
 
+  -- a member's size on the field (1 standing, 0 gone): fainted, it shrinks away over FAINT_S; back,
+  -- it grows in over BACK_S
+  Rd.FAINT_S, Rd.BACK_S = 0.7, 0.5
+  function Rd.memberShrink(m)
+    if m.backT and r.t >= m.backT then return min(1, (r.t - m.backT) / Rd.BACK_S) end
+    if m.faintT and r.t >= m.faintT then return max(0, 1 - (r.t - m.faintT) / Rd.FAINT_S) end
+    return 1
+  end
+
   function Rd.draw(G, w, h)
     if not r or r.summary or r.aside then return end
     if r.phase == "den" then return drawDen(G, w, h) end
@@ -1602,14 +1635,16 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     for i = 1, 4 do
       local m = r.members[i]
       memberPicsShown[i] = m and m.draw or nil
+      if m and m.draw then m.draw.shrink = Rd.memberShrink(m) end
+    end
+    if Fx then
+      local b = r.boss
+      Fx.setLasting(r.phase ~= "rewards" and r.fieldShown or nil, b and placeOf(b) or nil,
+        b and (b.veil or 0) > 0 and not r.throw, b and not r.throw and b.shieldShown or nil, r.t)
     end
     if Scene then Scene.draw(G, 0, 0, w, h, r.t, img and bossPic or nil, memberPicsShown) end
     if Fx and r.phase ~= "rewards" then
       local LB = Scene and Scene.lastBoss
-      if r.fieldShown then Fx.drawField(G, w, h, r.t, r.fieldShown) end
-      if r.boss and (r.boss.veil or 0) > 0 and not r.throw then Fx.drawVeil(G, LB, r.t) end
-      local sh = r.boss and r.boss.shieldShown
-      if sh and not r.throw then Fx.drawBarrier(G, LB, r.t, sh.left, sh.max) end
       Fx.drawMoves(G, r.t)
       Fx.draw(G, w, h, r.t)
     end

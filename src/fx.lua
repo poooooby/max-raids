@@ -1816,6 +1816,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
+  local drawLasting, stepField   -- (below: what lasts)
+
   -- ------- the clock
 
   local last = nil
@@ -1824,6 +1826,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     last = now
     if dt > 0 then
       stepCharge(now, dt)
+      stepField(now, dt)
       for i = 1, #moves do
         local m = moves[i]
         stepMove(m, now, dt)
@@ -1845,6 +1848,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     for i = #decals, 1, -1 do decals[i] = nil end
     for i = #flashes, 1, -1 do flashes[i] = nil end
     charge, last = nil, nil
+    if Fx.setLasting then Fx.setLasting(nil, nil, false, nil, 0) end
   end
 
   function Fx.busy(now)
@@ -1860,6 +1864,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G2.push("all")
     if layer == "back" then drawDecals(G2, now) end
     for _, m in ipairs(moves) do drawMove(G2, m, now, layer) end
+    drawLasting(G2, layer, now)
     if layer == "mid" and charge then drawChargeOrb(G2, now) end
     for _, e in ipairs(spots) do
       if layerOf(e.Z) == layer then drawSpot(G2, e, now) end
@@ -1887,111 +1892,312 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- (the raid's first pass drew the moves here; they are in the layers now)
   function Fx.drawMoves() end
 
-  -- ------- what lasts
+  -- ------- what lasts, in the den: the G-Max field round the party, the boss's veil, its barrier.
+  -- The raid sets them each frame (Fx.setLasting); the barrier's moments come as events
+  -- (Fx.barrierUp / barrierHit / barrierBreak).
 
-  -- a G-Max field over the party: along the foot of the screen, by its type
-  local function flame(G2, x, y, w, h)
-    G2.polygon("fill", x - w, y, x - w * 0.6, y - h * 0.45, x, y - h, x + w * 0.6, y - h * 0.45, x + w, y)
-    G2.circle("fill", x, y, w, 12)
+  local lasting = { field = nil, boss = nil, veil = false, shield = nil, fieldT0 = nil, acc = 0 }
+  local barrier = { upT = nil, hitT = nil, breakT = nil }
+  function Fx.setLasting(field, boss, veil, shield, now)
+    if field ~= lasting.field then lasting.fieldT0 = now end
+    lasting.field, lasting.boss, lasting.veil, lasting.shield = field, boss, veil and true or false, shield
   end
-  function Fx.drawField(G2, w, h, now, kind)
-    if not kind then return end
-    G2.push("all")
-    local base = h * 0.98
-    if kind == "FIRE" and fireRect(G2, 0, base - h * 0.22, w, h * 0.24, now, 7, 0.85) then
-      -- (real fire along the party's feet)
-    elseif kind == "FIRE" then
-      for k = 0, 22 do
-        local x = (k + 0.5) / 22 * w
-        local fl = 0.75 + 0.25 * sin(now * 7 + k * 1.7)
-        local fh = h * (0.12 + 0.07 * sin(now * 3 + k)) * fl
-        G2.setColor(1, 0.35, 0.08, 0.55)
-        flame(G2, x, base, w / 44 * 1.6, fh)
-        G2.setColor(1, 0.8, 0.3, 0.55)
-        flame(G2, x, base, w / 44 * 0.7, fh * 0.55)
+  function Fx.barrierUp(now) barrier.upT = now end
+  function Fx.barrierHit(now) barrier.hitT = now end
+  function Fx.barrierBreak(A, now)
+    barrier.breakT = now
+    if not A then return end
+    -- the dome bursts: red shards and sparks flung out, a flash
+    local R = A.h * 0.6
+    for j = 1, 40 do
+      seedN = seedN + 1
+      local th, ph = rnd(seedN, 1) * 2 * pi, (rnd(seedN, 2) - 0.3) * pi * 0.8
+      local nx, ny, nz = cos(ph) * cos(th), sin(ph), cos(ph) * sin(th)
+      local p = emit("shard", A.X + nx * R, A.Y + ny * R, A.Z + nz * R, nx * 5, ny * 4 + 2, nz * 5 + 1, 1.3, 0.12,
+        1, 0.35, 0.5, 1)
+      if p then p.floor = A.foot or 0 end
+    end
+    burstOf("spark", 30, A.X, A.Y, A.Z + R * 0.5, 7, 0.2, 0.6, 0.04, 1, 0.3, 0.5, 1, A.foot)
+    emit("light", A.X, A.Y, A.Z + R, 0, 0, 0, 0.35, A.h * 2.5, 1, 0.3, 0.5, 0.5)
+    flash({ 1, 0.3, 0.45 }, 0.3, 0.25, now)
+  end
+
+  -- the party's middle and the ring a field stands on round it
+  local FIELD = { CX = 0, CZ = -1.0, RX = 5.0, RZ = 2.3 }
+  local function ringAt(th) return FIELD.CX + cos(th) * FIELD.RX, FIELD.CZ + sin(th) * FIELD.RZ end
+
+  -- a band standing on the field's ring from angle a0 to a1, H tall, through a shader set up by the
+  -- caller (tc.x along it, tc.y top to foot)
+  local function ringWall(G2, a0, a1, H, wob, now)
+    if not stripReady() then return end
+    local N = 24
+    local n = 0
+    for i = 0, N do
+      local th = a0 + (a1 - a0) * i / N
+      local X, Z = ringAt(th)
+      local h = H * (1 + wob * sin(th * 5 + now * 2))
+      local tx, ty = P(X, h, Z)
+      local bx, by = P(X, 0, Z)
+      if not (tx and bx) then return end
+      n = n + 1; sv(n, tx, ty, i / N, 0, 1, 1, 1, 1)
+      n = n + 1; sv(n, bx, by, i / N, 1, 1, 1, 1, 1)
+    end
+    stripDraw(G2, n)
+  end
+
+  -- vines: tapered green strokes rising off the ring and curling, swaying
+  local function drawVines(G2, now, back, a)
+    if not stripReady() then return end
+    for j = 1, 14 do
+      local th = (j / 14) * 2 * pi + 0.2
+      if (sin(th) < 0) == back then
+        local X0, Z0 = ringAt(th)
+        local H = 1.8 + 1.0 * rnd(7, j)
+        local n = 0
+        local ok = true
+        local N = 14
+        for q = 0, N do
+          local f = q / N
+          local curl = f * f * 1.6
+          local sway = sin(now * 1.6 + j) * 0.25 * f
+          local X = X0 - cos(th) * curl * 0.5 + sway
+          local Y = f * H * (1 - 0.25 * f) + sin(f * 3) * 0.1
+          local Z = Z0 - sin(th) * curl * 0.3
+          local x, y, k = P(X, Y, Z)
+          if not x then ok = false; break end
+          local w = max(1, 0.13 * k * (1 - f * 0.85))
+          n = n + 1; sv(n, x - w, y, 0, 0, 0.16, 0.42, 0.12, a)
+          n = n + 1; sv(n, x + w, y, 0, 0, 0.32, 0.7, 0.22, a)
+        end
+        if ok then
+          G2.setColor(1, 1, 1, 1)
+          stripDraw(G2, n)
+        end
+        -- a leaf or two along it
+        for l = 1, 2 do
+          local f = 0.35 + 0.3 * l
+          local x, y, k = P(X0 - cos(th) * f * f * 0.8 + sin(now * 1.6 + j) * 0.25 * f, f * H * 0.85, Z0)
+          if x then
+            G2.push()
+            G2.translate(x, y)
+            G2.rotate((l == 1 and -0.7 or 0.8) + sin(now * 2 + j) * 0.15)
+            G2.setColor(0.22, 0.55, 0.16, a)
+            G2.ellipse("fill", k * 0.12, 0, k * 0.14, k * 0.055, 12)
+            G2.setColor(0.4, 0.78, 0.3, a)
+            G2.ellipse("fill", k * 0.1, -k * 0.012, k * 0.1, k * 0.022, 12)
+            G2.pop()
+          end
+        end
+      end
+    end
+  end
+
+  -- stones orbiting the party, tumbling
+  local function drawStones(G2, now, back, a)
+    for j = 1, 16 do
+      local th = (j / 16) * 2 * pi + now * 0.35
+      if (sin(th) < 0) == back then
+        local X, Z = ringAt(th)
+        local Y = 0.5 + 1.5 * rnd(11, j) + 0.15 * sin(now * 2 + j)
+        local x, y, k = P(X, Y, Z)
+        if x then
+          local r = (0.3 + 0.35 * rnd(13, j)) * k
+          -- its shadow on the ground
+          local sx, sy = P(X, 0.01, Z)
+          if sx then
+            G2.setColor(0, 0, 0, 0.25 * a)
+            G2.ellipse("fill", sx, sy, r * 0.8, r * 0.2, 12)
+          end
+          for q = 0, 5 do
+            local an = now * (0.8 + rnd(17, j)) + q * pi / 3
+            local rr = r * (0.7 + 0.45 * rnd(19 + j, q))
+            chunkPts[q * 2 + 1], chunkPts[q * 2 + 2] = x + cos(an) * rr, y + sin(an) * rr * 0.85
+          end
+          for q = 13, #chunkPts do chunkPts[q] = nil end
+          G2.setColor(0.42, 0.34, 0.27, a)
+          rockPoly(G2, chunkPts, max(2, r * 0.4))
+          G2.setColor(0.62, 0.52, 0.4, a * 0.7)
+          G2.polygon("fill", chunkPts[1], chunkPts[2], chunkPts[3], chunkPts[4], chunkPts[5], chunkPts[6], x, y)
+        end
+      end
+    end
+  end
+
+  local function drawField(G2, layer, now)
+    local kind = lasting.field
+    if not kind or layer == "back" then return end
+    local back = layer == "mid"
+    local a = min(1, (now - (lasting.fieldT0 or now)) / 0.6)
+    local a0, a1 = back and pi or 0, back and 2 * pi or pi
+    if kind == "FIRE" then
+      local S = shader("fire")
+      if S then
+        S:send("time", now)
+        S:send("seed", back and 3 or 7)
+        S:send("aspect", 9)
+        S:send("blaze", 0)
+        G2.setShader(S)
+        G2.setColor(1, 1, 1, 0.92 * a)
+        ringWall(G2, a0, a1, back and 2.2 or 1.2, 0.18, now)
+        G2.setShader()
       end
     elseif kind == "WATER" then
-      G2.setLineWidth(max(2, h * 0.006))
-      for k = 0, 5 do
-        local y = base - h * (0.02 + k * 0.03)
-        local pts = {}
-        for i = 0, 40 do
-          local x = i / 40 * w
-          pts[#pts + 1], pts[#pts + 2] = x, y + sin(i * 0.6 + now * (3 + k) + k) * h * 0.012
-        end
-        G2.setColor(0.35, 0.65, 1, 0.5 - k * 0.06)
-        G2.line(pts)
+      local S = shader("wall")
+      if S then
+        local C = WALL.water
+        S:send("time", now * 1.6)
+        S:send("aspect", 3)
+        S:send("deep", C.deep)
+        S:send("shallow", C.shallow)
+        S:send("foam", C.foam)
+        G2.setShader(S)
+        G2.setColor(1, 1, 1, 0.8 * a)
+        ringWall(G2, a0, a1, back and 1.8 or 1.0, 0.2, now)
+        G2.setShader()
       end
     elseif kind == "GRASS" then
-      G2.setLineWidth(max(2, h * 0.008))
-      for k = 0, 9 do
-        local x0 = (k + 0.5) / 10 * w
-        local pts = {}
-        for i = 0, 12 do
-          local f = i / 12
-          pts[#pts + 1] = x0 + sin(f * 5 + now * 2 + k) * w * 0.02
-          pts[#pts + 1] = base - f * h * (0.2 + 0.05 * sin(now + k))
-        end
-        G2.setColor(0.25, 0.65, 0.2, 0.75)
-        G2.line(pts)
-        G2.setColor(0.4, 0.85, 0.3, 0.75)
-        G2.ellipse("fill", pts[#pts - 1], pts[#pts], w * 0.012, h * 0.01, 10)
-      end
+      drawVines(G2, now, back, a)
     elseif kind == "ROCK" then
-      for k = 0, 14 do
-        local x = (k + 0.5) / 15 * w + sin(k * 3.1) * w * 0.02
-        local r = h * (0.03 + 0.02 * ((k * 7) % 3))
-        local y = base - r * 0.6 + sin(now * 2 + k) * h * 0.004
-        G2.setColor(0.45, 0.35, 0.25, 0.85)
-        rockPoly(G2, { x - r, y, x - r * 0.5, y - r, x + r * 0.6, y - r * 0.8, x + r, y, x, y + r * 0.4 }, max(2, r * 0.4))
+      drawStones(G2, now, back, a)
+    end
+  end
+  function stepField(now, dt)
+    local kind = lasting.field
+    if not kind then return end
+    lasting.acc = lasting.acc + dt * 30
+    while lasting.acc >= 1 do
+      lasting.acc = lasting.acc - 1
+      seedN = seedN + 1
+      local th = rnd(seedN, 1) * 2 * pi
+      local X, Z = ringAt(th)
+      if kind == "FIRE" then
+        emit("ember", X, 0.5 + rnd(seedN, 2), Z, (rnd(seedN, 3) - 0.5) * 0.5, 1 + rnd(seedN, 4) * 1.5, 0, 1.2, 0.04,
+          1, 0.5, 0.1, 1)
+        if rnd(seedN, 5) > 0.8 then emit("smoke", X, 1.4, Z, 0, 0.6, 0, 2, 0.4, 0.15, 0.12, 0.11, 0.35) end
+      elseif kind == "WATER" then
+        local tx, tz = -sin(th) * 3, cos(th) * 1.4
+        emit("drop", X, 0.6 + rnd(seedN, 2) * 0.6, Z, tx, 1.5 + rnd(seedN, 3) * 2, tz, 0.7, 0.04, 0.6, 0.85, 1, 0.8)
+      elseif kind == "GRASS" then
+        if rnd(seedN, 2) > 0.85 then emit("leaf", X, 1.5, Z, 0, 0, 0, 2, 0.08, 0.35, 0.8, 0.3, 1) end
+      elseif kind == "ROCK" then
+        if rnd(seedN, 2) > 0.9 then emit("dust", X, 0.15, Z, 0, 0.3, 0, 1.4, 0.35, 0.55, 0.47, 0.38, 0.35) end
       end
     end
-    G2.pop()
   end
 
-  -- the boss's veil: a pale shimmer round it
-  function Fx.drawVeil(G2, LB, now)
-    if not LB then return end
-    G2.push("all")
-    G2.setLineWidth(max(1.5, LB.h * 0.008))
-    for k = 0, 2 do
-      local a = 0.25 + 0.15 * sin(now * 2 + k * 2)
-      G2.setColor(0.7, 0.95, 1, a)
-      G2.ellipse("line", LB.x, LB.y, LB.h * (0.5 + k * 0.04), LB.h * (0.58 + k * 0.04), 48)
+  -- the veil: a pale shimmering sphere round the boss, bands of light turning on it
+  local veilPts = {}
+  local function drawVeil(G2, now)
+    local A = lasting.boss
+    if not (A and lasting.veil) then return end
+    local R = A.h * 0.58
+    local x, y, k = P(A.X, A.Y, A.Z)
+    if not x then return end
+    G2.setBlendMode("add")
+    screenRing(G2, x, y, R * k, R * k * 1.05, R * k * 0.25, 0.55, 0.85, 1, 0.4 + 0.1 * sin(now * 2))
+    screenRing(G2, x, y, R * k * 0.98, R * k * 1.03, max(1, R * k * 0.04), 0.85, 0.97, 1, 0.6)
+    glowAt(G2, x, y, R * k * 2, 0.5, 0.8, 1, 0.12)
+    G2.setLineWidth(max(1, k * 0.025))
+    for b = 0, 2 do
+      local tilt = 0.5 + b * 0.55
+      local spin = now * (0.5 + 0.2 * b) + b * 2
+      local n = 0
+      for q = 0, 32 do
+        local th = spin + q / 32 * 2 * pi
+        local cx, cz = cos(th) * R, sin(th) * R
+        local py, pz = sin(tilt) * cz, cos(tilt) * cz
+        local sx, sy = P(A.X + cx, A.Y + py, A.Z + pz)
+        if not sx then n = 0; break end
+        veilPts[n + 1], veilPts[n + 2] = sx, sy
+        n = n + 2
+      end
+      for q = n + 1, #veilPts do veilPts[q] = nil end
+      if n >= 4 then
+        G2.setColor(0.7, 0.95, 1, 0.45)
+        G2.line(veilPts)
+      end
     end
-    G2.pop()
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
   end
 
-  -- its barrier while it stands: a hexagon dome of light round it, dimmer as segments break
-  function Fx.drawBarrier(G2, LB, now, left, most)
-    if not (LB and left and left > 0) then return end
-    G2.push("all")
-    local share = most and most > 0 and left / most or 1
-    local rx, ry = LB.h * 0.55, LB.h * 0.62
-    G2.setColor(1, 0.25, 0.45, 0.12 + 0.08 * share)
-    G2.ellipse("fill", LB.x, LB.y, rx, ry, 48)
-    G2.setLineWidth(max(1, LB.h * 0.005))
-    local cell = LB.h * 0.11
-    for row = -6, 6 do
-      for col = -6, 6 do
-        local cx = LB.x + (col + (row % 2) * 0.5) * cell * 1.5
-        local cy = LB.y + row * cell * 0.87
-        local nx, ny = (cx - LB.x) / rx, (cy - LB.y) / ry
-        if nx * nx + ny * ny < 1 then
-          local tw = 0.5 + 0.5 * sin(now * 3 + row + col * 1.7)
-          G2.setColor(1, 0.45, 0.6, (0.15 + 0.25 * tw) * (0.5 + 0.5 * share))
-          local pts = {}
-          for i = 0, 5 do
-            pts[#pts + 1], pts[#pts + 2] = cx + cos(i * pi / 3) * cell * 0.5, cy + sin(i * pi / 3) * cell * 0.5
+  -- the barrier: a dome of hexagons round the boss; the cells facing away fade, the rim glows
+  -- (fresnel), a band of light runs up it; a hit ripples out from the front
+  local hexPts = {}
+  local function drawBarrier(G2, now)
+    local A = lasting.boss
+    local sh = lasting.shield
+    if not (A and sh and sh.left and sh.left > 0 and Sc.eye) then return end
+    local share = sh.max and sh.max > 0 and sh.left / sh.max or 1
+    local up = barrier.upT and min(1, max(0, now - barrier.upT) / 0.5) or 1
+    local R = A.h * 0.6
+    local eye = Sc.eye
+    local ex, ey, ez = eye[1] - A.X, eye[2] - A.Y, eye[3] - A.Z
+    local el = sqrt(ex * ex + ey * ey + ez * ez)
+    ex, ey, ez = ex / el, ey / el, ez / el
+    local hitU = barrier.hitT and (now - barrier.hitT) / 0.6 or 2
+    local cx, cy, k0 = P(A.X, A.Y, A.Z)
+    if not cx then return end
+    G2.setBlendMode("add")
+    glowAt(G2, cx, cy, R * k0 * 1.9, 1, 0.2, 0.4, 0.2 * up * (0.6 + 0.4 * share))
+    local ROWS = 11
+    G2.setLineWidth(max(1, k0 * 0.03))
+    for row = 0, ROWS - 1 do
+      local ph = -pi / 2 * 0.92 + (row + 0.5) / ROWS * pi * 0.92
+      local cosP = cos(ph)
+      local nC = max(3, floor(22 * cosP + 0.5))
+      for c = 0, nC - 1 do
+        local th = (c + (row % 2) * 0.5) / nC * 2 * pi + now * 0.05
+        local nx, ny, nz = cosP * cos(th), sin(ph), cosP * sin(th)
+        local d = nx * ex + ny * ey + nz * ez
+        if d > 0.02 then
+          local fres = 1 - d
+          local band = max(0, 1 - abs(((now * 0.35) % 1.4 - 0.2) - (ny + 1) / 2) * 6)
+          local rip = 0
+          if hitU < 1 then
+            local ang = math.acos(min(1, d))
+            rip = max(0, 1 - abs(ang - hitU * 2.2) * 3) * (1 - hitU)
           end
-          G2.polygon("line", pts)
+          local a = (0.18 + 0.7 * fres * fres + 0.3 * band + 0.9 * rip) * up * (0.45 + 0.55 * share)
+          local tx, tz = -sin(th), cos(th)
+          local bx, by, bz = -sin(ph) * cos(th), cosP, -sin(ph) * sin(th)
+          local cr = 0.5 * pi / ROWS
+          local okH = true
+          for q = 0, 5 do
+            local an = q * pi / 3 + pi / 6
+            local ca, sa = cos(an) * cr, sin(an) * cr
+            local px, py, pz = nx + tx * ca + bx * sa, ny + by * sa, nz + tz * ca + bz * sa
+            local l = sqrt(px * px + py * py + pz * pz)
+            local sx, sy = P(A.X + px / l * R, A.Y + py / l * R * 1.08, A.Z + pz / l * R)
+            if not sx then okH = false; break end
+            hexPts[q * 2 + 1], hexPts[q * 2 + 2] = sx, sy
+          end
+          if okH then
+            G2.setColor(1, 0.22, 0.42, a * 0.16)
+            G2.polygon("fill", hexPts)
+            G2.setColor(1, 0.45 + 0.4 * rip, 0.6 + 0.3 * rip, a)
+            G2.polygon("line", hexPts)
+          end
         end
       end
     end
-    G2.setColor(1, 0.5, 0.65, 0.6 * share)
-    G2.ellipse("line", LB.x, LB.y, rx, ry, 48)
-    G2.pop()
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
   end
+
+  function drawLasting(G2, layer, now)
+    drawField(G2, layer, now)
+    if layer == "mid" then
+      drawVeil(G2, now)
+      drawBarrier(G2, now)
+    end
+  end
+
+  -- (the first pass's screen-space drawing; the raid sets what lasts with Fx.setLasting now)
+  function Fx.drawField() end
+  function Fx.drawVeil() end
+  function Fx.drawBarrier() end
+
 
   return Fx
 end

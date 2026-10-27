@@ -883,6 +883,33 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local bw = box[3] - box[1]
     -- one scale for every member (a 64-px pic is MEMBER_PIC_H tall), not each fitted to a height
     local k = hpx * (Sc.MEMBER_PIC_H / Sc.MEMBER_H) / (pic.cell or 64)
+    -- fainted: taken off the field - it turns red and shrinks away about its middle, lifting a little
+    -- (pic.shrink 1 -> 0; back in the fight, 0 -> 1 the same way)
+    local shrink = pic.shrink or 1
+    if shrink < 1 then
+      if shrink <= 0.01 then return end
+      local midY = (box[2] + box[4]) / 2
+      local ks = k * shrink * shrink
+      local cy = y - (box[4] - midY) * k - hpx * 0.15 * (1 - shrink)
+      local ox = (box[1] + box[3]) / 2
+      local s = sil()
+      if s then
+        G2.setShader(s)
+        G2.setBlendMode("add")
+        G2.setColor(1, 0.2, 0.25, 0.7 * shrink)
+        for _, dd in ipairs(OUT) do
+          if pic.quad then G2.draw(pic.image, pic.quad, x + dd[1] * 2, cy + dd[2] * 2, 0, ks, ks, ox, midY)
+          else G2.draw(pic.image, x + dd[1] * 2, cy + dd[2] * 2, 0, ks, ks, ox, midY) end
+        end
+        G2.setBlendMode("alpha")
+        G2.setShader()
+      end
+      G2.setColor(1, 0.55 + 0.45 * shrink, 0.55 + 0.45 * shrink, shrink)
+      if pic.quad then drawPixel(pic.image, pic.quad, x, cy, 0, ks, ks, ox, midY)
+      else drawPixel(pic.image, x, cy, 0, ks, ks, ox, midY) end
+      G2.setColor(1, 1, 1, 1)
+      return
+    end
     G2.setColor(0, 0, 0, 0.5)
     G2.ellipse("fill", x, y, bw * k * 0.42, bw * k * 0.1, 24)
     -- a slow breath
