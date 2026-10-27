@@ -253,6 +253,17 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
     (drawn twice), the pad's chevron; the pale panel carries the pad backdrop's faint hexagon grid
     and drifting light streaks (`panels(G, w, h, t)`).
   - Presses are ignored for `DEN_ARM_S` (0.25 s) after it opens (the A that opened it).
+  - START (2026-10-27, Wooble): `Rd.denStart` sets `r.starting` - the den screen fades to black over
+    `Rd.DEN_FADE.OUT` 0.45 s, holds `BLACK` 0.25 (`stepStarting` from Rd.update), then `begin` and the
+    raid fades in over `IN` 0.7 (`r.fadeIn`, drawn over `Rd.drawMain`) with the intro's clock held at
+    0 meanwhile, so the camera's pull-back starts on a clear screen; presses are ignored while it
+    fades. Drivers wait for phase "intro" after `denStart`.
+  - Driver `tests/drivers/showcase.lua` (to record, real time): set up (six at Lv 70, the first badge,
+    a den on Route 104 / Route 2 made Charizard's with a straight five-tile approach, the zoom at FIT
+    in memory), then waits for "." (`SHOWCASE_AUTO=1` skips it), and plays: out of the first gym,
+    the awakening, the route (the game's fade) and the walk to the den, the den screen and START,
+    the raid (strongest moves, Charizard falls on turn 3), Don't Catch (`SHOWCASE_CATCH=1` throws),
+    the rewards card, the field. `SHOWCASE_BOSS`, `SHOT_DIR` (a few frames).
   - Driver `tests/drivers/den_screen_probe.lua` (a party of six, two boxed: the slots, the menu, the
     party list, a swap, the PC, its menu, the summary, BACK, SELECT, START with the boxed one in
     slot 3, a quiet den; shots p01..p12).
