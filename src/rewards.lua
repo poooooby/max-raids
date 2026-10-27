@@ -50,6 +50,14 @@ return function(mod, deps)
     end
     return "?"
   end
+  -- an item's words in the bag (one line)
+  function Rw.itemDesc(id)
+    if not (ItemsData and ItemsData.info) then return "" end
+    local ok, info = pcall(ItemsData.info, id)
+    local d = ok and type(info) == "table" and info.description or ""
+    if type(d) ~= "string" then return "" end
+    return (d:gsub("\n", " "):gsub("%s+", " "))
+  end
   local function bagCount(id)
     local s = session()
     if not (Bag and Bag.get and s and s.bag and id) then return 0 end

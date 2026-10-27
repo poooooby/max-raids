@@ -483,6 +483,33 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
     BACK_S 0.5) goes to the pic as `shrink`, and raid_scene's drawMember draws it red, shrinking about
     its middle and lifting, no shadow, gone at 0; back it grows in the same way. fx_probe
     `PROBE_ONLY=faint`.
+- **The catch, the card and the end card** (Wooble's capture max-catch-reward-screen-end-card.mp4 and two
+  screenshots, 2026-10-26; the capture has no ball choice):
+  - The choice: two pills at the lower right, Catch / Don't Catch (`Rd.catchChoose`), then the ball box
+    (`r.cmd.menu` "ballbox"): a black bar with left / right arrows, the ball's bag icon, its name
+    (plural) and xN, every ball the bag holds in turn (`Rd.catchBall`), its description
+    (`Rewards.itemDesc`, the engine's ItemsData.info), Use (`Rd.pickBall()` throws the one shown).
+    No chance shown. Taps: `Rd.catchPointer` / `Rd.catchWhere`.
+  - The throw (`Rd.THROW`, marks `Rd.throwTimes()`, pose `Rd.ballNow(u)`): held up behind the party,
+    an arc to the boss, a flash, it opens and the boss goes in on streaks of light, shuts, falls,
+    lands in a crater (dust, chunks, rings, a crack, a shake and jab; `th.rocks` drawn with `Fx.rock`
+    before / behind it by depth), three slow wobbles round a cone with its button lit; caught: the
+    button flares, a flash, the giant ball shrinks into the real one (the thrown ball's colours) whose
+    button glows green with sparkles, "Gotcha!"; broken free: it bursts (`Fx.barrierBreak`). The ball is
+    `Fx.drawBall` (src/fx.lua): a lit sphere mesh (orthographic about its middle; lean / phi / spin,
+    `open` swings the lid on its hinge, `dyna` 1 the pink energy with a checker and a grid of light,
+    0 the real ball; button glow). A magenta cast over the den meanwhile.
+  - The card (`Rd.drawRewards`, `Rd.CARD`): amber with slanted bands, a black bar and title tab ("You
+    caught X!" / "You defeated X!" - the second a guess), the stars popping in, the boss on the left,
+    the items (bag icons via `Rd.itemIcon`: FireRed's bag pictures, else Emerald's), a cursor
+    (`Rd.cardMove`, `r.rw`), a scroll bar past six, Next. Exp / EVs are given but not listed (the
+    game's card lists items only).
+  - The end card: Next -> phase "outro" (`Rd.OUTRO`): the den once more (wide, the boss gone), a circle
+    closing to black (`Rd.drawIris`), then the evolutions / moves over black.
+  - Driver `tests/drivers/catch_probe.lua` (the roll made sure; `PROBE_FAIL=1` a miss).
+- **HP drains as the blow lands:** `scheduleMove` keeps each target's HP after the move (`hp`); at its
+  impact `Rd.impact` sets the bar's target and shows its card (all the members a move hits, together;
+  a damage event for a member already shown keeps the cards).
   - Open: bite's fangs
     and the ground wave are plain; no sound yet; Thor performance unmeasured (particles capped at
     `Fx.MAX_PARTS` 900).

@@ -2199,5 +2199,215 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   function Fx.drawBarrier() end
 
 
+  -- ------- the catch's ball: a sphere drawn as a lit mesh (orthographic about its middle), so it turns,
+  -- wobbles round a cone and opens in 3D. o = {
+  --   lean, phi   its top tipped lean radians toward phi (a wobble: phi turning)
+  --   spin        turned about its own axis (the button's way)
+  --   open        0 shut .. 1 the lid swung up and back on its hinge
+  --   dyna        1 the Dynamax ball (pink energy, a lit grid, glowing) .. 0 the real ball
+  --   rgb         the real ball's top colour
+  --   button      the button's glow 0..1, buttonRGB its colour
+  --   bright      extra light over the energy (a flash)
+  --   now }
+  local BALL_NL, BALL_NJ = 14, 28
+  local ballMesh, ballV, ballN = nil, {}, 0
+  local function ballReady()
+    if ballMesh == nil then
+      local n = BALL_NL * BALL_NJ * 6
+      local ok, m = pcall(G.newMesh, n, "triangles", "stream")
+      ballMesh = ok and m or false
+      for i = 1, n do ballV[i] = { 0, 0, 0, 0, 1, 1, 1, 1 } end
+    end
+    return ballMesh or nil
+  end
+  local function ballPut(n, x, y, cr, cg, cb, a)
+    n = n + 1
+    local t = ballV[n]
+    t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8] = x, y, 0, 0, cr, cg, cb, a
+    return n
+  end
+  local LX, LY, LZ = -0.42, 0.62, 0.66
+  local function ballFrame(o)
+    local L, ph = o.lean or 0, o.phi or 0
+    local ux, uy, uz = sin(L) * cos(ph), cos(L), sin(L) * sin(ph)
+    -- right = up x (0, 0, 1); forward = right x up
+    local rx, ry, rz = uy, -ux, 0
+    local rl = sqrt(rx * rx + ry * ry) + 1e-6
+    rx, ry = rx / rl, ry / rl
+    local fx, fy, fz = ry * uz - rz * uy, rz * ux - rx * uz, rx * uy - ry * ux
+    local s = o.spin or 0
+    local cs, sn = cos(s), sin(s)
+    local Rx, Ry, Rz = rx * cs - fx * sn, ry * cs - fy * sn, rz * cs - fz * sn
+    local Fx2, Fy2, Fz2 = rx * sn + fx * cs, ry * sn + fy * cs, rz * sn + fz * cs
+    return Rx, Ry, Rz, ux, uy, uz, Fx2, Fy2, Fz2
+  end
+  -- a model point (x, y up its axis, z its front) to the view (z toward the eye), the lid swung open
+  local function ballPoint(B, x, y, z, lid, open)
+    if lid and open > 0 then
+      local a = -open * 1.25
+      local yy, zz = y, z + 1
+      y, z = yy * cos(a) - zz * sin(a), yy * sin(a) + zz * cos(a) - 1
+    end
+    return x * B[1] + y * B[4] + z * B[7], x * B[2] + y * B[5] + z * B[8], x * B[3] + y * B[6] + z * B[9]
+  end
+  local Bf = {}
+  function Fx.drawBall(G2, cx, cy, rad, o)
+    if rad <= 0.5 then return end
+    local d = o.dyna or 0
+    local open = o.open or 0
+    local rgb = o.rgb or { 0.9, 0.15, 0.15 }
+    local now = o.now or 0
+    Bf[1], Bf[2], Bf[3], Bf[4], Bf[5], Bf[6], Bf[7], Bf[8], Bf[9] = ballFrame(o)
+    local aOut = o.alpha or 1
+    if d > 0 then
+      G2.setBlendMode("add")
+      glowAt(G2, cx, cy, rad * 2.1, 1, 0.25, 0.65, 0.45 * d * aOut + 0.35 * (o.bright or 0))
+      G2.setBlendMode("alpha")
+    end
+    if ballReady() then
+      local n = 0
+      -- two passes: the faces turned away first (the inside when open), then the near ones
+      for pass = 1, 2 do
+        for i = 0, BALL_NL - 1 do
+          for j = 0, BALL_NJ - 1 do
+            local t0, t1 = i / BALL_NL * pi, (i + 1) / BALL_NL * pi
+            local p0, p1 = j / BALL_NJ * 2 * pi, (j + 1) / BALL_NJ * 2 * pi
+            local lid = i < BALL_NL / 2
+            local tm, pm = (t0 + t1) / 2, (p0 + p1) / 2
+            local nx, ny, nz = ballPoint(Bf, sin(tm) * cos(pm), cos(tm), sin(tm) * sin(pm), lid, open)
+            local front = nz > 0
+            -- (the lid's hinge moves its points; the normal is the same turn, less the hinge's offset)
+            if lid and open > 0 then
+              local hx, hy, hz = ballPoint(Bf, 0, 0, 0, true, open)
+              nx, ny, nz = nx - hx, ny - hy, nz - hz
+              front = nz > 0
+            end
+            if (pass == 2) == front then
+              -- its colour: the real ball's (top, white foot, black band) blended to the energy's
+              -- (pink, a checker of light cells, a red band)
+              local band = abs(tm - pi / 2) < 0.13
+              local cr, cg, cb
+              if band then cr, cg, cb = 0.06, 0.06, 0.08
+              elseif lid then cr, cg, cb = rgb[1], rgb[2], rgb[3]
+              else cr, cg, cb = 0.95, 0.95, 0.95 end
+              local chk = ((i + j) % 2 == 0) and 1 or 0
+              local er, eg, eb = 1, 0.38 + 0.25 * chk, 0.78 + 0.12 * chk
+              if band then er, eg, eb = 0.9, 0.12, 0.3 end
+              cr, cg, cb = cr + (er - cr) * d, cg + (eg - cg) * d, cb + (eb - cb) * d
+              local lam = max(0, nx * LX + ny * LY + nz * LZ)
+              local shade = front and (0.45 + 0.6 * lam) or 0.35
+              local rim = front and (1 - nz) ^ 2 * (0.15 + 0.6 * d) or 0
+              local a = (1 - d * 0.35) * aOut
+              if not front then cr, cg, cb = cr * 0.6, cg * 0.5, cb * 0.6 end
+              cr = min(1, cr * shade + rim + (o.bright or 0))
+              cg = min(1, cg * shade + rim * 0.6 + (o.bright or 0))
+              cb = min(1, cb * shade + rim * 0.9 + (o.bright or 0))
+              local ax, ay = ballPoint(Bf, sin(t0) * cos(p0), cos(t0), sin(t0) * sin(p0), lid, open)
+              local bx, by = ballPoint(Bf, sin(t0) * cos(p1), cos(t0), sin(t0) * sin(p1), lid, open)
+              local qx, qy = ballPoint(Bf, sin(t1) * cos(p1), cos(t1), sin(t1) * sin(p1), lid, open)
+              local ex, ey = ballPoint(Bf, sin(t1) * cos(p0), cos(t1), sin(t1) * sin(p0), lid, open)
+              n = ballPut(n, cx + ax * rad, cy - ay * rad, cr, cg, cb, a)
+              n = ballPut(n, cx + bx * rad, cy - by * rad, cr, cg, cb, a)
+              n = ballPut(n, cx + qx * rad, cy - qy * rad, cr, cg, cb, a)
+              n = ballPut(n, cx + ax * rad, cy - ay * rad, cr, cg, cb, a)
+              n = ballPut(n, cx + qx * rad, cy - qy * rad, cr, cg, cb, a)
+              n = ballPut(n, cx + ex * rad, cy - ey * rad, cr, cg, cb, a)
+            end
+          end
+        end
+      end
+      if n >= 3 then
+        G2.setColor(1, 1, 1, 1)
+        ballMesh:setVertices(ballV, 1, n)
+        ballMesh:setDrawRange(1, n)
+        G2.draw(ballMesh)
+      end
+    end
+    -- the energy's grid: lines of light along the cells' edges, on the near side
+    if d > 0.05 then
+      G2.setBlendMode("add")
+      G2.setLineWidth(max(1, rad * 0.018))
+      G2.setColor(1, 0.75, 0.95, 0.55 * d * aOut)
+      for i = 1, BALL_NL - 1 do
+        local th = i / BALL_NL * pi
+        local lid = i < BALL_NL / 2
+        for j = 0, BALL_NJ - 1 do
+          local p0, p1 = j / BALL_NJ * 2 * pi, (j + 1) / BALL_NJ * 2 * pi
+          local ax, ay, az = ballPoint(Bf, sin(th) * cos(p0), cos(th), sin(th) * sin(p0), lid, open)
+          local bx, by, bz = ballPoint(Bf, sin(th) * cos(p1), cos(th), sin(th) * sin(p1), lid, open)
+          if az > 0 and bz > 0 then G2.line(cx + ax * rad, cy - ay * rad, cx + bx * rad, cy - by * rad) end
+        end
+      end
+      for j = 0, BALL_NJ - 1, 2 do
+        local p = j / BALL_NJ * 2 * pi
+        for i = 0, BALL_NL - 1 do
+          local t0, t1 = i / BALL_NL * pi, (i + 1) / BALL_NL * pi
+          local lid = i < BALL_NL / 2
+          local ax, ay, az = ballPoint(Bf, sin(t0) * cos(p), cos(t0), sin(t0) * sin(p), lid, open)
+          local bx, by, bz = ballPoint(Bf, sin(t1) * cos(p), cos(t1), sin(t1) * sin(p), lid, open)
+          if az > 0 and bz > 0 then G2.line(cx + ax * rad, cy - ay * rad, cx + bx * rad, cy - by * rad) end
+        end
+      end
+      -- its rim alight
+      screenRing(G2, cx, cy, rad, rad, rad * 0.08, 1, 0.55, 0.9, 0.6 * d * aOut)
+      G2.setBlendMode("alpha")
+      G2.setLineWidth(1)
+    end
+    -- the button, on the band's front (a disc facing out of the ball)
+    local bx, by, bz = ballPoint(Bf, 0, 0, 1.0, false, 0)
+    if bz > 0.05 then
+      local rb = rad * 0.24
+      local fx2, fy2 = Bf[7], Bf[8]
+      local fl = sqrt(fx2 * fx2 + fy2 * fy2)
+      local ang = fl > 1e-3 and math.atan2(-fy2, fx2) or 0
+      local sq = max(0.15, bz)
+      G2.push()
+      G2.translate(cx + bx * rad, cy - by * rad)
+      G2.rotate(ang)
+      G2.setColor(0.06 + 0.84 * d, 0.06 + 0.06 * d, 0.08 + 0.2 * d, aOut)
+      G2.ellipse("fill", 0, 0, rb * sq, rb, 24)
+      local w = 0.92 - 0.25 * d
+      G2.setColor(w, w * (1 - 0.3 * d), w * (1 - 0.15 * d), aOut)
+      G2.ellipse("fill", 0, 0, rb * 0.72 * sq, rb * 0.72, 24)
+      G2.setColor(0.4 + 0.4 * d, 0.4, 0.42 + 0.2 * d, aOut)
+      G2.setLineWidth(max(1, rb * 0.08))
+      G2.ellipse("line", 0, 0, rb * 0.45 * sq, rb * 0.45, 20)
+      G2.pop()
+      G2.setLineWidth(1)
+      local bg = o.button or 0
+      if bg > 0 then
+        local c = o.buttonRGB or { 1, 0.85, 0.2 }
+        G2.setBlendMode("add")
+        glowAt(G2, cx + bx * rad, cy - by * rad, rb * 3.2, c[1], c[2], c[3], 0.8 * bg)
+        G2.setColor(c[1], c[2], c[3], bg)
+        G2.circle("fill", cx + bx * rad, cy - by * rad, rb * 0.62, 20)
+        G2.setBlendMode("alpha")
+      end
+    end
+    G2.setColor(1, 1, 1, 1)
+  end
+
+  -- a rock sitting on the ground at (X, Z), size metres across (the crater's ring)
+  local rockPts = {}
+  function Fx.rock(G2, X, Y, Z, size, seed)
+    local x, y, k = P(X, Y + size * 0.3, Z)
+    if not x then return end
+    local r = size * 0.5 * k
+    local n = 11
+    for q = 0, n - 1 do
+      local an = q / n * 2 * pi
+      local rr = r * (0.7 + 0.45 * rnd(seed, q))
+      local flat = sin(an) > 0 and 0.4 or (0.6 + 0.3 * rnd(seed, q + 20))
+      rockPts[q * 2 + 1], rockPts[q * 2 + 2] = x + cos(an) * rr * 1.25, y + sin(an) * rr * flat
+    end
+    for q = n * 2 + 1, #rockPts do rockPts[q] = nil end
+    G2.setColor(0, 0, 0, 0.3)
+    G2.ellipse("fill", x, y + r * 0.45, r * 1.35, r * 0.3, 16)
+    G2.setColor(0.34, 0.25, 0.17, 1)
+    rockPoly(G2, rockPts, max(3, r * 0.6))
+    G2.setColor(0.52, 0.41, 0.29, 0.8)
+    G2.polygon("fill", rockPts[13], rockPts[14], rockPts[15], rockPts[16], rockPts[17], rockPts[18], x, y - r * 0.05)
+  end
+
   return Fx
 end
