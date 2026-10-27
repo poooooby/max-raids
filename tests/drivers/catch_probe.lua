@@ -41,6 +41,13 @@ local function body(game, log)
   log("open:", tostring(ok), tostring(why))
   if not waitFor(function() return X.state().phase == "command" end, 20000) then log("FAIL no commands"); return end
   local R = X.raid
+  -- every sound effect asked of the game, logged at the end
+  local played = {}
+  do
+    local A = require("src.core.game3.audio")
+    local orig = A.playSe
+    A.playSe = function(id, o) played[#played + 1] = tostring(id); return orig(id, o) end
+  end
   local fails = 0
   local function check(c, what) if not c then fails = fails + 1 end; log((c and "ok   " or "FAIL ") .. what) end
   local function after(s)
@@ -121,6 +128,7 @@ local function body(game, log)
   shot("c41_iris")
   waitFor(function() return X.state().phase ~= "outro" end, 8000)
   log("after the end card:", tostring(X.state().phase), tostring(X.state().active))
+  log("sounds played (" .. #played .. "):", table.concat(played, " "))
   log(("%d failures"):format(fails))
   if X.state().active then X.close() end
   log("done")

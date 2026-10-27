@@ -933,7 +933,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if p > 0.4 and not quiet and not m.flashed then
       m.flashed = true
       flash(m.tc, 0.12 + 0.18 * min(1, p), 0.1 + 0.12 * p, now) end
-    if Fx.onImpact then pcall(Fx.onImpact, T, p, m.type, m.big) end
+    if Fx.onImpact then pcall(Fx.onImpact, T, p, m.type, m.big, m.key) end
   end
   local function landOnce(m, key, T, share, now)
     if m.landed[key] then return end

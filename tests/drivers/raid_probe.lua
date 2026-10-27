@@ -77,6 +77,13 @@ local function body(game, log)
   end
   -- the commands: each member in turn, the selection moving, B stepping back
   local R = X.raid
+  -- every sound effect asked of the game, logged at the end
+  local played = {}
+  do
+    local A = require("src.core.game3.audio")
+    local orig = A.playSe
+    A.playSe = function(id, o) played[#played + 1] = tostring(id); return orig(id, o) end
+  end
   local function after(s) local t0 = X.state().t or 0; waitFor(function() return (X.state().t or 0) >= t0 + s end, 6000) end
   -- PROBE_GMAX=1: the boss uses its G-Max move every turn (for the look)
   if os.getenv("PROBE_GMAX") == "1" and R.current() and R.current().boss then
@@ -340,6 +347,7 @@ local function body(game, log)
     check(TC.enabled == before, "the engine's touch pad is back as it was")
   end
   shot("r06_field")
+  log("sounds played (" .. #played .. "):", table.concat(played, " "))
   log(("%d failures"):format(fails))
 end
 

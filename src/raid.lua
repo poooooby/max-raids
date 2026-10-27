@@ -16,6 +16,7 @@ return function(mod, deps)
   local BattlerHud = deps.BattlerHud
   local Rewards = deps.Rewards
   local Fx, MoveFx = deps.Fx, deps.MoveFx
+  local Sounds = deps.Sounds
   local Battle, Sim = deps.Battle, deps.Sim
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
@@ -778,14 +779,34 @@ return function(mod, deps)
   end
   Rd.placeOf = placeOf
 
+  -- a sound by its SE name (data/raid_sounds.lua), through the game's own player
+  function Rd.se(id)
+    if not (id and Audio and Audio.playSe) then return false end
+    local ok, played = pcall(Audio.playSe, id)
+    return ok and played
+  end
+
   -- a blow felt (Fx.onImpact): the raid's clock held a moment, the camera jabbed and shaken, the one
   -- struck flashing white and thrown back - all by the blow's power (0..1+, from the HP it takes)
   Rd.IMPACT = { STOP_S = 0.045, STOP_PER = 0.09, KICK = 1.5, KICK_PER = 4.5, SHAKE = 0.04, SHAKE_PER = 0.2 }
-  function Rd.impact(T, power)
+  function Rd.impact(T, power, key)
     if not r then return end
     local I = Rd.IMPACT
     local p = power or 0.5
     r.lastImpact = r.t
+    -- its sound: what lands hard, once a move; the hit by how it does, once a moment (a spread move
+    -- lands on all four together)
+    if Sounds then
+      if key and Sounds.LAND[key] and r.landSeAt ~= r.anim then
+        r.landSeAt = r.anim
+        Rd.se(Sounds.LAND[key])
+      end
+      if T.frac and (r.hitSeT or -1) + 0.05 < r.t then
+        r.hitSeT = r.t
+        local eff = T.eff or 1
+        Rd.se(eff > 1 and Sounds.HIT.super or eff < 1 and Sounds.HIT.weak or Sounds.HIT.plain)
+      end
+    end
     -- its bar drains now, as the blow lands: the boss's block, or the members' cards at the top left
     -- (all the move hits, together)
     if T.b and T.hp then
@@ -816,7 +837,7 @@ return function(mod, deps)
       if Scene.hit then Scene.hit(T.boss and "boss" or T.i, min(1, p)) end
     end
   end
-  if Fx then Fx.onImpact = function(T, power) Rd.impact(T, power) end end
+  if Fx then Fx.onImpact = function(T, power, _, _, key) Rd.impact(T, power, key) end end
   if Fx and Scene then
     Scene.onBack = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "back", r.t) end end
     Scene.onMid = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "mid", r.t) end end
@@ -843,11 +864,14 @@ return function(mod, deps)
         local who = x.target or ((x.kind == "status" or x.kind == "stage") and x.who ~= e.who and x.who) or nil
         if who and not seen[who] then seen[who] = { b = who }; targets[#targets + 1] = seen[who] end
         -- (how hard it lands on each: the share of its HP the move takes)
+        -- (its hits are felt in its look: their own events make no second sound or shake)
+        if x.kind == "damage" and spec[1] ~= "self" then x.looked = true end
         if who and x.kind == "damage" and x.amount then
           local most = max(1, tonumber(who.mon and who.mon.maxHp) or 1)
           seen[who].frac = (seen[who].frac or 0) + x.amount / most
           seen[who].hp = x.hp
         end
+        if who and x.kind == "effect" and x.eff then seen[who].eff = x.eff end
       end
     end
     local words = #(e.text or "") / Rd.MSG.CPS + 0.25
@@ -871,6 +895,7 @@ return function(mod, deps)
       local LB = Scene and Scene.lastBoss
       if Scene then Scene.shot("boss", 0.5); Scene.burst(); Scene.shake(0.2, 1.0) end
       Rd.cry(r.key)
+      if Sounds then Rd.se(Sounds.GMAX_CHARGE) end
       local _ = LB
       Fx.charge(placeOf(a.user), r.t, Rd.GMAX_CHARGE_S)
     end
@@ -886,9 +911,10 @@ return function(mod, deps)
       local tg = {}
       for _, t in ipairs(a.targets) do
         local p = placeOf(t.b)
-        if p then p.frac, p.hp, p.b = t.frac, t.hp, t.b; tg[#tg + 1] = p end
+        if p then p.frac, p.hp, p.b, p.eff = t.frac, t.hp, t.b, t.eff; tg[#tg + 1] = p end
       end
       if from then Fx.move(a.spec, a.type, from, tg, r.t, a.gmax) end
+      if Sounds then Rd.se(Sounds.moveSe(a.spec, a.type)) end
     end
     -- the boss rears and lunges into its strikes
     r.lunge = 0
@@ -954,6 +980,23 @@ return function(mod, deps)
       end
     end
     if e.kind == "faint" and not e.who.boss then r.shownFaints = (r.shownFaints or 0) + 1 end
+    if Sounds then
+      local E2 = Sounds.EVENT
+      if e.kind == "faint" then Rd.se(E2.faint)
+      elseif e.kind == "back" then Rd.se(E2.back)
+      elseif e.kind == "item" then Rd.se(E2.item)
+      elseif e.kind == "heal" then Rd.se(E2.heal)
+      elseif e.kind == "cheer" then Rd.se(E2.cheer)
+      elseif e.kind == "stage" then Rd.se((e.n or 0) >= 0 and E2.up or E2.down)
+      elseif e.kind == "status" and e.status then Rd.se(Sounds.STATUS[e.status])
+      elseif e.kind == "field" and e.fieldType then Rd.se(Sounds.FIELD[e.fieldType])
+      elseif e.kind == "shield" then
+        Rd.se(e.step == "up" and E2.shieldUp or e.step == "break" and E2.shieldBreak or E2.shieldHit)
+      elseif (e.kind == "damage" or e.kind == "residual") and not e.looked then
+        -- (a hit with no look of its own: poison, a trap, the field)
+        Rd.se(Sounds.HIT.plain)
+      end
+    end
     -- a member fainting is taken off the field (it shrinks away, red); one coming back grows in
     if (e.kind == "faint" or e.kind == "back") and not e.who.boss then
       local i = memberIndex(e.who)
@@ -990,7 +1033,7 @@ return function(mod, deps)
       hit.dispTarget = e.hp
       local i = memberIndex(hit)
       if i then r.focus = i end
-      if (e.kind == "damage" or e.kind == "residual") and Scene and not (r.lastImpact and r.t - r.lastImpact < 1.5) then
+      if (e.kind == "damage" or e.kind == "residual") and Scene and not e.looked then
         Scene.shake(hit.boss and 0.08 or 0.14, 0.4)
       end
     end
@@ -1202,6 +1245,21 @@ return function(mod, deps)
     return true
   end
 
+  -- caught: the version's own fanfare (the engine's battle profile, as its catch plays it), then its
+  -- caught song under the words and the card
+  function Rd.caughtFanfare()
+    local Profile = engine("src.core.game3.battle.profile")
+    local ok, prof = pcall(function() return Profile.get(nil) end)
+    local snd = ok and prof and prof.sounds
+    if not (snd and Audio and Audio.resolveSong) then return end
+    local intro, song = Audio.resolveSong(snd.caughtIntro), Audio.resolveSong(snd.caught)
+    if intro then pcall(Audio.playSe, intro) end
+    local raid = r
+    if song and Audio.waitSe and Audio.playSong then
+      pcall(Audio.waitSe, intro, function() if r == raid then pcall(Audio.playSong, song) end end)
+    end
+  end
+
   -- the throw's marks (seconds from its start)
   local function throwTimes()
     local T = Rd.THROW
@@ -1341,6 +1399,20 @@ return function(mod, deps)
     local b = Bosses[r.key]
     local name = b and b.name or "It"
     local Ga = { X = Gr.X, Y = Gr.Y, Z = Gr.Z, h = R * 2, foot = 0 }
+    if Sounds then
+      local C = Sounds.CATCH
+      if once("seThrow", M.fly) then Rd.se(C.throw) end
+      if once("seOpen", M.open) then Rd.se(C.open) end
+      if once("seSuck", M.suck) then Rd.se(C.suck) end
+      if once("seClose", M.close + T.CLOSE * 0.6) then Rd.se(C.close) end
+      if once("seLand", M.land) then Rd.se(C.land) end
+      for k = 1, T.CHECKS do
+        if once("seWob" .. k, M.check + (k - 1) * T.CHECK) then Rd.se(C.wobble) end
+      end
+      if th.caught and once("seClick", M.done) then Rd.se(C.click) end
+      if not th.caught and once("seBurst", M.done) then Rd.se(C.burst) end
+      if th.caught and once("seFanfare", M.gotcha) then Rd.caughtFanfare() end
+    end
     if once("at", M.at) then
       -- it reaches the boss: a flash, the camera close on it
       if Fx then
@@ -1460,6 +1532,7 @@ return function(mod, deps)
     if not th.caught and u >= M.done + 2.0 and not th.said.gone then
       th.said.gone = true
       Rd.say(("%s disappeared..."):format(name))
+      if Sounds then Rd.se(Sounds.CATCH.gone) end
     end
     local doneAt = holdUntil + (th.pcAt and 1.6 or 0)
     if u >= doneAt then Rd.startRewards() end
@@ -1627,7 +1700,23 @@ return function(mod, deps)
 
   -- ------- input
 
+  local function uiKey()
+    if not r then return "" end
+    local c = r.cmd or {}
+    return table.concat({ r.phase or "", tostring(c.menu), tostring(c.cursor), tostring(c.ball), tostring(c.actor),
+      tostring(r.rw and r.rw.cursor), tostring(r.cursor), tostring(r.ask) }, "|")
+  end
+  local function uiTick(before)
+    if Sounds and r and uiKey() ~= before then Rd.se(Sounds.UI.move) end
+  end
+  local inputInner
   function Rd.input(input)
+    local before = uiKey()
+    local res = inputInner(input)
+    uiTick(before)
+    return res
+  end
+  function inputInner(input)
     if not r or r.summary or r.aside then return end
     if r.skipInput then r.skipInput = nil; return end
     if r.phase == "den" then
@@ -1686,7 +1775,14 @@ return function(mod, deps)
   local function inRect(x, y, t) return t and t.w and x >= t.x and x <= t.x + t.w and y >= t.y and y <= t.y + t.h end
 
   -- a pointer on the window (input.pointer): true when the den screen or the pad took it
+  local pointerInner
   function Rd.pointer(ev)
+    local before = uiKey()
+    local res = pointerInner(ev)
+    uiTick(before)
+    return res
+  end
+  function pointerInner(ev)
     if r and r.phase == "den" then
       if ev.phase == "released" and r.t >= Rd.DEN_ARM_S then
         if inRect(ev.x, ev.y, denWhere.start) then Rd.denStart()

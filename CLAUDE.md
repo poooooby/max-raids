@@ -507,11 +507,23 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - The end card: Next -> phase "outro" (`Rd.OUTRO`): the den once more (wide, the boss gone), a circle
     closing to black (`Rd.drawIris`), then the evolutions / moves over black.
   - Driver `tests/drivers/catch_probe.lua` (the roll made sure; `PROBE_FAIL=1` a miss).
+- **Sound** (2026-10-26): `data/raid_sounds.lua` - Gen 3's own effects by SE name through `Audio.playSe`
+  (`Rd.se`), so the game's settings and pack apply; every name checked against the engine's
+  se_ids.lua. A move's look starts with its sound (`Sounds.moveSe(spec, type)`: a beam / plain shot by
+  type, else its shape, else its kind; the G-Max charge SE_M_CHARGE with the cry); its blow plays the
+  battle's hit by effectiveness (`T.eff`, read ahead from the "effect" events; once a moment) and, for
+  what lands hard, `LAND` once a move; damage events the look covered are marked `looked` (no second
+  sound or shake); the events (faint, back, item, heal, cheer, stages up / down, status, field,
+  shield up / hit / break; a hit with no look). The catch as the engine's catch_seq: throw, open,
+  BALL_TRADE drawing it in, the click shut, the landing's quake, a BALL per wobble, the click, and the
+  version's caught fanfare then caught song (`Rd.caughtFanfare`, the battle profile's sounds);
+  broken free BALL_OPEN, gone SE_FLEE. The menus tick SE_SELECT when a press or tap moves a cursor or
+  picks (`uiKey` before / after `Rd.input` / `Rd.pointer`). raid_probe and catch_probe log every SE.
 - **HP drains as the blow lands:** `scheduleMove` keeps each target's HP after the move (`hp`); at its
   impact `Rd.impact` sets the bar's target and shows its card (all the members a move hits, together;
   a damage event for a member already shown keeps the cards).
   - Open: bite's fangs
-    and the ground wave are plain; no sound yet; Thor performance unmeasured (particles capped at
+    and the ground wave are plain; Thor performance unmeasured (particles capped at
     `Fx.MAX_PARTS` 900).
 - **Next after that.** Sound;
   the second-screen pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4:
