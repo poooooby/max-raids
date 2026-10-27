@@ -130,9 +130,11 @@ function Sim:side(ev, att, def, mv, damaging, dealt)
         att.mon.hp = min(maxHpOf(att), hpOf(att) + amt)
         ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = ("%s had its energy drained!"):format(def.name) }
       else
+        amt = self:capAtShield(att, amt)
         att.mon.hp = max(0, hpOf(att) - amt)
         ev[#ev + 1] = { kind = "residual", who = att, amount = amt, hp = att.mon.hp,
           text = ("%s was damaged by the recoil!"):format(att.name) }
+        if att.boss then self:checkShield(ev) end
         if not alive(att) then self:fainted(ev, att) end
       end
     end
@@ -184,13 +186,35 @@ end
 
 -- ------- the barrier
 
+-- the HP the boss cannot be taken below until its next barrier has risen: that barrier's threshold
+-- (as Sword / Shield: the hit that reaches it stops there, the rest lost, and the barrier goes up);
+-- nil when no barrier is left to come
+-- a threshold's HP, in whole HP: the floor and the barrier's check use this one number (comparing
+-- shares instead left 252 / 360 a hair above 0.7, so the barrier never rose and the boss was held
+-- there for good)
+local function thresholdHp(b, t) return math.floor(maxHpOf(b) * t + 0.5) end
+function Sim:shieldFloor()
+  local b = self.boss
+  for _, t in ipairs(b.shields or {}) do
+    if not b.shieldsUsed[t] then return thresholdHp(b, t) end
+  end
+  return nil
+end
+
+-- damage `cut` to the boss held at its next barrier's threshold (another battler's untouched)
+function Sim:capAtShield(who, cut)
+  if not (who and who.boss) then return cut end
+  local f = self:shieldFloor()
+  if f then cut = min(cut, max(0, hpOf(who) - f)) end
+  return cut
+end
+
 -- after the boss is hurt: a barrier for the first threshold its HP has passed (one at a time)
 function Sim:checkShield(ev)
   local b = self.boss
   if b.shield or not alive(b) then return end
-  local share = hpOf(b) / maxHpOf(b)
   for _, t in ipairs(b.shields or {}) do
-    if not b.shieldsUsed[t] and share <= t then
+    if not b.shieldsUsed[t] and hpOf(b) <= thresholdHp(b, t) then
       b.shieldsUsed[t] = true
       local n = b.segments or 2
       b.shield = { left = n, max = n }
@@ -209,6 +233,8 @@ function Sim:breakShield(ev)
   local drop = self.rules.BREAK_DROP or -2
   self:stage(ev, b, "defense", drop)
   self:stage(ev, b, "spDef", drop)
+  -- (its HP held at the next threshold meanwhile: that barrier now)
+  self:checkShield(ev)
 end
 
 -- ------- a move
@@ -333,7 +359,7 @@ function Sim:use(ev, att, mv, targets)
         else
           local hadShield = def.shield ~= nil
           dmg = self:throughBoss(ev, def, max(1, dmg))
-          dmg = min(hpOf(def), dmg)
+          dmg = self:capAtShield(def, min(hpOf(def), dmg))
           def.mon.hp = hpOf(def) - dmg
           hit[#hit + 1] = def
           ev[#ev + 1] = { kind = "damage", who = att, target = def, amount = dmg, hp = def.mon.hp, move = mv }
@@ -473,10 +499,12 @@ function Sim:endTurn(ev)
   for i = 1, #self.members do if self:present(i) then team[#team + 1] = self.members[i] end end
   local function hurt(who, cut, text)
     if self.over or not alive(who) then return end
-    cut = min(hpOf(who), max(1, cut))
+    cut = self:capAtShield(who, min(hpOf(who), max(1, cut)))
+    if cut <= 0 then return end
     who.mon.hp = hpOf(who) - cut
     ev[#ev + 1] = { kind = "residual", who = who, amount = cut, hp = who.mon.hp, text = text }
-    if not alive(who) then self:fainted(ev, who) end
+    if not alive(who) then self:fainted(ev, who)
+    elseif who.boss then self:checkShield(ev) end
   end
   -- a G-Max field over the team
   local f = self.field

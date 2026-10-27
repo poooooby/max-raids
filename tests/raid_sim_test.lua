@@ -214,13 +214,49 @@ do
   local ev = s:turn(all(1))
   check(boss.shield and boss.shield.left == 2, "a barrier of two at 70%")
   check(kinds(ev):find("shield") ~= nil, "the barrier's words")
+  check(boss.mon.hp == 700, ("the hit that crosses 70%% stops there, the rest lost (hp %d)"):format(boss.mon.hp))
   s:turn(all(1))
-  check(boss.mon.hp == 500 and boss.shield.left == 1, ("a quarter through it, a segment off (hp %d)"):format(boss.mon.hp))
+  check(boss.mon.hp == 600 and boss.shield.left == 1, ("a quarter through it, a segment off (hp %d)"):format(boss.mon.hp))
   local ev3 = s:turn(all(1))
   check(boss.shield == nil and boss.stages.defense == -2 and boss.stages.spDef == -2, "broken: Def and Sp. Def -2")
   local broke = false
   for _, e in ipairs(ev3) do if e.kind == "shield" and e.step == "break" then broke = true end end
   check(broke, "the barrier's break is an event")
+end
+
+-- the threshold holds: a blow far past it stops there (no knock-out through a barrier to come), and
+-- so does poison at the turn's end, the barrier rising
+do
+  local boss = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  boss.shields, boss.segments = { 0.7, 0.3 }, 2
+  local m = team(1, 1000, { 50 })
+  m[1].moves[1] = mv("Slam", { power = 5000 })
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(23), rules = RULES }
+  s:turn(all(1))
+  check(boss.mon.hp == 700 and boss.shield ~= nil and not s.over,
+    ("a blow of 5000 on 1000 HP: held at 70%%, the barrier up, no knock-out (hp %d)"):format(boss.mon.hp))
+
+  local boss2 = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  boss2.shields, boss2.segments = { 0.7 }, 2
+  boss2.mon.hp, boss2.status = 720, "PSN"
+  local m2 = team(1, 1000, { 50 })
+  m2[1].moves[1] = mv("Growl", { status = true })
+  local s2 = Sim.new{ boss = boss2, members = m2, adapter = adapter(), rng = rngOf(24), rules = RULES }
+  s2:turn(all(1))
+  check(boss2.mon.hp == 700 and boss2.shield ~= nil,
+    ("poison past 70%% held there, the barrier up (hp %d)"):format(boss2.mon.hp))
+
+  -- an HP whose 70% is not whole (360: 252): held there and the barrier rises (a share compared
+  -- against 0.7 never did, and the boss could not be hurt again)
+  local boss3 = battler("Boss", 360, 1, { mv("Tap", { power = 1 }) }, true)
+  boss3.shields, boss3.segments = { 0.7, 0.3 }, 2
+  local m3 = team(1, 1000, { 50 })
+  m3[1].moves[1] = mv("Slam", { power = 5000 })
+  local s3 = Sim.new{ boss = boss3, members = m3, adapter = adapter(), rng = rngOf(25), rules = RULES }
+  s3:turn(all(1))
+  check(boss3.mon.hp == 252 and boss3.shield ~= nil, ("360 HP: held at 252, the barrier up (hp %d)"):format(boss3.mon.hp))
+  for _ = 1, 4 do s3:turn(all(1)) end
+  check(boss3.mon.hp < 252, ("and hurt again through and past it (hp %d)"):format(boss3.mon.hp))
 end
 
 -- the G-Max move on its script's turns, on all four, its effect after

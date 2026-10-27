@@ -1244,6 +1244,24 @@ return function(mod, deps)
       end
       if i then r.focus = i end
     end
+    -- an effect resolving on one member - a G-Max field or a status hurting it at the turn's end, a
+    -- G-Max move's status or stat change landing on each - the camera on that member, one after
+    -- another (not while a move's look is still playing: it is left to finish)
+    -- the boss acting on itself or the field - its aura flaring and its stats rising, wiping the
+    -- team's stat changes, its veil - pulled back as for its spread attacks
+    if Scene and (e.kind == "residual" or e.kind == "status" or e.kind == "stage" or e.kind == "field") then
+      local who = e.target or e.who
+      local a = r.anim
+      local looking = a and a.started and r.t < a.at + (a.impact or a.len or 0)
+      if not looking and not (a and not a.started) then
+        if who and who.boss then
+          if (e.kind == "field" or e.kind == "stage") and Scene.shotName() ~= "spread" then Scene.shot("spread", E.CAM_S) end
+        else
+          local i = who and memberIndex(who)
+          if i then Scene.shot("target", E.CAM_S, i) end
+        end
+      end
+    end
     local hit = e.target or e.who
     if e.hp and hit then
       hit.dispTarget = e.hp

@@ -328,12 +328,24 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
   The raid's own rules (Phase 3, 2026-10-26; data/raid_rules.lua): the barrier (`boss.shields` the
   tier's HP shares, `boss.segments`; `checkShield` after each hit on the boss, one at a time; a hit
   through it does `SHIELD_DMG` and breaks a segment, `throughBoss`; the last one broken: Def / Sp. Def
-  `BREAK_DROP`; events "shield" up / hit / break with `left` / `max`); the boss's script (`due`: the
+  `BREAK_DROP`; events "shield" up / hit / break with `left` / `max`; 2026-10-27, Wooble: the next
+  barrier's threshold is a floor - `shieldFloor` / `capAtShield` hold every loss of the boss's HP
+  (a hit, recoil, the turn's end) at it until that barrier has risen, the rest lost as Sword /
+  Shield, so no blow knocks the boss out past a barrier to come; thresholds are whole HP
+  (`thresholdHp`, rounded) for the floor and `checkShield` alike - comparing shares against 0.7
+  left 252 / 360 a hair above it, the barrier never rose and the boss was held there for good;
+  a barrier pending when one breaks rises at once; driver `tests/drivers/shield_probe.lua`); the boss's script (`due`: the
   G-Max move instead of a plain one on its turns, on all four; at the turn's end the wipe of the
   team's stat changes and, once below its HP share, the aura's +1 all round); the G-Max effects
   (`gmaxEffect`: data/raid_gmax.lua's field over the team for its turns, traps, statuses, drowsiness,
   stat drops, PP, the boss's veil halving damage, heal, cure, crit); a member sitting out cheers
-  in its speed slot (`cheer`: `RAID.CHEER` by weight, the barrier-breaker only while one stands);
+  in its speed slot (`cheer`: `RAID.CHEER` by weight, the barrier-breaker only while one stands).
+  The camera on what resolves (raid.lua `startEvent`, 2026-10-27, Wooble): an effect landing on a
+  member (a residual - a G-Max field, a burn -, a status, a stat change) cuts to that member
+  ("target"), one after another; the boss's own (its aura and stat rises, the wipe, its veil, a
+  field it sets: "field" / "stage" on the boss) pulls back to "spread" as its spread attacks do;
+  neither while a move's look is still before its impact. Driver `tests/drivers/field_probe.lua`
+  (the camera at each such event over five turns, shots g2*);
   the pouch (`RAID.POUCH`, `ITEM_PRIORITY` first: Potion half the HP, Full Heal, Revive back at once
   at half HP, the knock-out still counted; used up only when it works). Its events carry their
   words (English).
