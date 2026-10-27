@@ -9,7 +9,7 @@ of your Pokémon, and take on a giant Gigantamax Pokémon in a 3D den, then try 
 > [!NOTE]
 > **Requires [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3).** It brings the
 > raid bosses' and your Pokémon's modern moves, the Fairy type, abilities and the Exp. Candies the
-> raids reward. [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)
+> raids reward (with a National Dex Gen 3 that has no Exp. Candies yet, a Rare Candy takes their place). [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)
 > is recommended for your Pokémon's animated back sprites.
 
 ## ✨ Features
@@ -42,7 +42,8 @@ of your Pokémon, and take on a giant Gigantamax Pokémon in a 3D den, then try 
 - 🐉 **37 Gigantamax and Dynamax Pokémon:** Charizard, Pikachu, Eevee, Snorlax, Gengar, Lapras
   and more, fully animated, with their cries.
 - ⚔️ **Fight, Bag, Run:** each of your four picks a move, or uses an item from the raid's pouch
-  (Potions, a Full Heal and a Revive shared by the team).
+  (Potions, a Full Heal and a Revive shared by the team). **Run** asks first: leave, and you're
+  blown out of the den, which is spent for the day.
 - 💥 **G-Max Moves:** the boss's G-Max Move strikes all four at once and leaves its mark: a sea of
   fire burning your team each turn, vines, rocks, status conditions and more. Every attack has its
   own look: beams, waves, falling rocks, bites, slashes, earthquakes that crack the ground.

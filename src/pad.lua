@@ -554,7 +554,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.setColor(1, 1, 1, 1)
     local c = r and r.cmd
     local cmdUp = r and r.phase == "command" and c and not r.say
-    local ask = r and r.phase == "after" and r.ask and r.ask.kind == "yesno"
+    local ask = r and (r.phase == "after" or r.phase == "leaveq") and r.ask and r.ask.kind == "yesno"
     local catchUp = r and r.phase == "catch" and c and (c.menu == "catchq" or c.menu == "ballbox")
     local title
     if cmdUp then
@@ -564,7 +564,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       elseif c.menu == "items" then title = "Choose an item"
       elseif c.menu == "target" then title = "Use it on whom?"
       else title = ("What will %s do?"):format(nm) end
-    elseif ask then title = "Yes or no?"
+    elseif ask then title = r.phase == "leaveq" and "Leave the den?" or "Yes or no?"
     elseif catchUp then
       title = c.menu == "ballbox" and "Choose a Pok\195\169 Ball" or "Will you catch it?"
     else title = "Max Raid Battle" end

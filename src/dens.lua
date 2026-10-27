@@ -173,7 +173,10 @@ return function(mod, deps)
     return R and R.getSession and R.getSession() or nil
   end
 
-  -- the day number: the cart's clock on Ruby / Sapphire / Emerald, the device's date elsewhere
+  -- the day number, turning over at 12am: the cart's clock on Ruby / Sapphire / Emerald (the
+  -- device's time plus what the player set in the game - the clock National Dex Gen 3's
+  -- time-of-day rules read too), the device's local date on FireRed / LeafGreen (Rtc.hostInfo, as
+  -- National Dex's device clock). A map's dens roll again for a new day when it is next entered.
   function Dn.today()
     local Rtc = engine("src.core.game3.rtc")
     local s = session()
@@ -185,7 +188,9 @@ return function(mod, deps)
     if type(info) == "table" and info.year then
       return floor(os.time({ year = 2000 + info.year, month = info.month, day = info.day, hour = 12 }) / 86400)
     end
-    return floor(os.time() / 86400)
+    -- (no host clock: the local date too - os.time() / 86400 would turn over at UTC's midnight)
+    local d = os.date("*t")
+    return floor(os.time({ year = d.year, month = d.month, day = d.day, hour = 12 }) / 86400)
   end
 
   -- gym badges held (the version's badge flags)

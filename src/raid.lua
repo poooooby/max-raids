@@ -445,6 +445,54 @@ return function(mod, deps)
 
   function Rd.flee() return Rd.close() end
 
+  -- Run: asked first (Yes / No as the pad's own pills, No to start); Yes and the team is blown out
+  -- of the den - a gust, the words, white - and the den is spent for the day (deps.onEnd "fled");
+  -- No and the commands are back as they were
+  Rd.BLOWN = { S = 1.8, SHAKE = 0.35 }
+  function Rd.askLeave()
+    if not (r and r.phase == "command") then return false end
+    local back = r.cmd
+    r.phase = "leaveq"
+    Rd.ask({ kind = "yesno", text = "Leave the den? It will be spent for the day.", cb = function(yes)
+      if not (r and r.phase == "leaveq") then return end
+      if yes then return Rd.blowOut() end
+      r.phase, r.cmd, r.say = "command", back, nil
+    end })
+    r.cmd.cursor = 2
+    return true
+  end
+  function Rd.blowOut()
+    if not r then return false end
+    r.phase, r.blownT = "blown", r.t
+    Rd.say("You were blown out of the den!")
+    if Scene then
+      Scene.shake(Rd.BLOWN.SHAKE, Rd.BLOWN.S)
+      if Scene.kick then Scene.kick(6, 0.6) end
+    end
+    if Sounds then Rd.se(Sounds.SHAPE.wind) end
+    if deps.onEnd then pcall(deps.onEnd, r.den, "fled", r) end
+    return true
+  end
+  -- the gust: white streaks racing across, the den going white behind the words
+  local gustPts = {}
+  function Rd.drawGust(G, w, h)
+    local u = min(1, (r.t - (r.blownT or r.t)) / Rd.BLOWN.S)
+    G.setBlendMode("add")
+    for i = 1, 26 do
+      local seed = (i * 0.6180339887) % 1
+      local y = h * ((seed * 0.9 + 0.05))
+      local len = w * (0.25 + 0.35 * ((i * 0.37) % 1))
+      local x = ((r.t * (1.6 + seed) * w * 0.9 + i * w * 0.31) % (w + len)) - len
+      G.setColor(1, 1, 1, (0.15 + 0.35 * u) * (0.5 + 0.5 * seed))
+      G.setLineWidth(max(1, h * (0.004 + 0.006 * seed)))
+      gustPts[1], gustPts[2], gustPts[3], gustPts[4] = x, y, x + len, y - len * 0.08
+      G.line(gustPts)
+    end
+    G.setBlendMode("alpha")
+    G.setColor(1, 1, 1, u * u * 0.92)
+    G.rectangle("fill", 0, 0, w, h)
+  end
+
   -- ------- the intro (Sword / Shield's raid opening, with the party where the trainers stand):
   -- close on the party, then the camera pulls back and down to the ground and tilts up the boss's
   -- whole height; it roars (its cry, a burst of energy, a shake), "X appeared!", the HUD comes in,
@@ -500,6 +548,10 @@ return function(mod, deps)
       end
     end
     if r.phase == "battle" then Rd.playEvents() end
+    if r.phase == "blown" and r.t - (r.blownT or r.t) >= Rd.BLOWN.S then
+      Rd.close()
+      return
+    end
     if r.phase == "outro" then
       local O = Rd.OUTRO
       if r.t >= r.outroT + O.HOLD + O.CLOSE + O.BLACK then
@@ -645,7 +697,7 @@ return function(mod, deps)
   -- pouch, then whom to use it on. In a list menu "moveN" is its N-th row.
   function Rd.choose(id)
     if not (r and r.phase == "command" and r.cmd.actor) or r.summary then return false end
-    if id == "run" then return Rd.flee() end
+    if id == "run" then return Rd.askLeave() end
     if id == "pokemon" then return Rd.summary() end
     local c = r.cmd
     if id == "fight" then
@@ -920,6 +972,8 @@ return function(mod, deps)
     add(Sounds.HIT.plain); add(Sounds.HIT.super); add(Sounds.HIT.weak)
     local E = Sounds.EVENT
     for _, k in ipairs({ "shieldUp", "shieldHit", "shieldBreak", "faint", "back", "up", "down", "cheer" }) do add(E[k]) end
+    -- (Run's gust out of the den)
+    add(Sounds.SHAPE.wind)
     -- the four: the battlers' moves once they fight; on the den screen the whole party's (the four
     -- can still change)
     local mons = {}
@@ -2006,7 +2060,7 @@ return function(mod, deps)
       elseif input:wasPressed("a") then
         if onNext or not r.rw then Rd.endRewards() else Rd.cardMove(1) end
       elseif input:wasPressed("b") then Rd.cardMove(99) end
-    elseif r.phase == "after" and r.ask then
+    elseif (r.phase == "after" or r.phase == "leaveq") and r.ask then
       if r.ask.kind == "yesno" then
         -- (Yes / No side by side on the second screen: left / right there)
         local across = deps.padOnSecond() and (input:wasPressed("left") or input:wasPressed("right"))
@@ -2049,8 +2103,8 @@ return function(mod, deps)
       end
       return true
     end
-    if r and r.phase == "outro" then return true end
-    if r and r.phase == "after" then
+    if r and (r.phase == "outro" or r.phase == "blown") then return true end
+    if r and (r.phase == "after" or r.phase == "leaveq") then
       if r.summary or r.aside then return false end
       if r.ask and r.ask.kind == "yesno" and Pad then
         local hit = Pad.hit(ev.x, ev.y, "yesno")
@@ -2095,7 +2149,7 @@ return function(mod, deps)
         for i, item in ipairs(Pad.ITEMS) do if item.id == id then r.cmd.cursor = i end end
       end
       if released then Rd.choose(id) end
-    elseif r.phase == "after" and r.ask and r.ask.kind == "yesno" and slot then
+    elseif (r.phase == "after" or r.phase == "leaveq") and r.ask and r.ask.kind == "yesno" and slot then
       r.cmd.cursor = slot
       if released then Rd.answer(slot == 1) end
     elseif r.phase == "catch" and r.cmd and not r.say then
@@ -2338,6 +2392,8 @@ return function(mod, deps)
     elseif r.phase == "after" and r.irisDone then
       G.setColor(0, 0, 0, 1)
       G.rectangle("fill", 0, 0, w, h)
+    elseif r.phase == "blown" then
+      Rd.drawGust(G, w, h)
     end
     drawHud(G, w, h)
     -- the commands: the order down the top left, the one choosing in the lower left, the pad (only
@@ -2355,7 +2411,7 @@ return function(mod, deps)
       if not r.say and not deps.padOnSecond() then Rd.drawCatch(G, w, h) end
     elseif r.phase == "rewards" then
       Rd.drawRewards(G, w, h)
-    elseif r.phase == "after" then
+    elseif r.phase == "after" or r.phase == "leaveq" then
       if r.ask and r.ask.kind == "yesno" and Pad and not deps.padOnSecond() then Pad.draw(G, w, h, r) end
     end
   end

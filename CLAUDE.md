@@ -226,6 +226,13 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
     grass cover (`collectActors` section 2) over the den's own cell's bottom 8 rows, which at
     anchorY 31 sits below the den.
   - **Done.** `Dn.finish(den)` marks a den done (the spent look).
+  - **The day** (`Dn.today`, checked 2026-10-27): turns over at 12am - the cart's clock on Ruby /
+    Sapphire / Emerald (`Rtc.calcLocalTime(s).days`: the device's time plus what the player set,
+    the clock National Dex Gen 3's time-of-day rules read), the device's local date on FireRed /
+    LeafGreen (`Rtc.hostInfo`, as National Dex's device clock), the local date without either (it
+    was UTC's). A map's dens roll again for a new day when it is next entered (`map.entered`), not
+    while the player stands on it (Wooble: fine). Driver `tests/drivers/day_probe.lua` (run with
+    `POKEPORT_RTC=2026-10-27T23:59:00`: the engine's clock stepped over 12am, a warp out and back).
   - **Badges.** `Flags.forVersion(Profile.forSession(nil).id).BADGES` flags, read with
     `Flags.getFlag(store)`.
   - **The awakening** (2026-10-27, Wooble: dens gated behind the first gym): `Dn.ensure` places and
@@ -711,6 +718,13 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   picks (`uiKey` before / after `Rd.input` / `Rd.pointer`). raid_probe and catch_probe log every SE.
   A `Sounds` entry may be a list: the first name the version has (`seName`; FireRed's SE_BALL_CLICK is
   Emerald's SE_RG_BALL_CLICK - the click was silent on Emerald, as it is in the engine's own catch).
+- **Run** (2026-10-27, Wooble): `Rd.choose("run")` -> `Rd.askLeave`: phase "leaveq", `Rd.ask` yesno
+  "Leave the den? It will be spent for the day." (the after-raid question's input, taps, second
+  screen - its header "Leave the den?" - and pills; No selected); No puts `r.cmd` back as it was;
+  Yes -> `Rd.blowOut`: phase "blown", "You were blown out of the den!", a shake and kick,
+  SE_M_GUST, `deps.onEnd(den, "fled")` (main: the den finished, spent for the day, as a win),
+  `Rd.drawGust` (white streaks racing across, the den going white under the words over
+  `Rd.BLOWN.S` 1.8 s), then `Rd.close`. Driver `tests/drivers/run_probe.lua`.
 - **Sounds baked ahead and kept** (2026-10-27, Wooble: a hitch after the big moves): the engine bakes an
   SE on its first play (its synth, 2-20 ms) and the samples (~1 MB of Lua heap a second of sound) set off
   its full collection - 53 ms at Wildfire's Heat Wave, 109 ms at the slab's Earthquake + hit. Its own

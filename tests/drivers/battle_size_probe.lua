@@ -32,6 +32,20 @@ local function body(game, log)
   Party.giveMon(s0, C:require("species", "SPECIES_TORCHIC"), 20)
   local X = game.mods and game.mods.exports and game.mods.exports.max_raids
   log("max_raids loaded:", tostring(X ~= nil))
+  -- PROBE_SUMMARY=1: first a raid with the game's summary opened in it and closed (Wooble
+  -- 2026-10-27: after that, ordinary battles drew their Pokemon twice too large)
+  if X and os.getenv("PROBE_SUMMARY") == "1" then
+    Party.giveMon(s0, C:require("species", "SPECIES_GARDEVOIR"), 40)
+    X.open("CHARIZARD_4")
+    waitFor(function() return X.state().phase == "command" and not X.raid.current().say end, 20000)
+    log("raid up; the summary:", tostring(X.raid.summary()))
+    U.wait(120)
+    log("shot", U.shot(game, dir .. "/n_0_summary.png") and "ok" or "MISSING")
+    for _ = 1, 6 do U.tap(game, "b"); U.wait(20) end
+    log("summary closed:", tostring(not X.raid.summaryUp()))
+    X.close()
+    U.wait(60)
+  end
   for _, name in ipairs({ os.getenv("PROBE_SPECIES") or "ZIGZAGOON", "WAILORD" }) do
     local sp = C.species.byName["SPECIES_" .. name]
     local ok, why = BattleBridge.startWild(Runtime._mod, game, { species = sp, level = 10 }, {})

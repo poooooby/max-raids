@@ -26,3 +26,5 @@ tools/raid_pack.py
 .modkitignore
 .claude/skills/lua-developer/SKILL.md
 tests/drivers/battle_size_probe.lua
+tests/drivers/run_probe.lua
+tests/drivers/day_probe.lua

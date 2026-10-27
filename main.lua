@@ -177,7 +177,8 @@ return function(mod)
     makeDen = makeDen, Pick = Pick,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome)
-      if outcome == "win" and den and Dens and Dens.finish then pcall(Dens.finish, den) end
+      -- (won, or left by Run: spent for the day)
+      if (outcome == "win" or outcome == "fled") and den and Dens and Dens.finish then pcall(Dens.finish, den) end
     end,
     padOnSecond = padOnSecond,
     onOpen = function()
