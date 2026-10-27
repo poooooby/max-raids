@@ -4,7 +4,8 @@
 -- it from the left. With BATTLE PAD on the second screen it is drawn into that display's frame
 -- instead (Pad.drawFull). Pokemon shows the summary (no switching in a Max Raid).
 --   Pad.draw(G, w, h, r) -> the stack's rect (window pixels) ; Pad.drawFull(G, w, h, r)
---   Pad.hit(x, y) -> "fight" | "pokemon" | "bag" | "run" | "panel" | nil (against the last draw)
+--   Pad.hit(x, y) -> "fight" | "bag" | "run" | "panel" | nil (against the last draw)
+--   Pad.secondMove(menu, cursor, n, dir) -> the cursor after a D-pad press on the second screen
 --   Pad.ITEMS (the order) ; Pad.live(id)
 
 return function(mod, deps)
@@ -12,9 +13,9 @@ return function(mod, deps)
   local max, min, cos, sin, pi = math.max, math.min, math.cos, math.sin, math.pi
 
   -- the commands, top to bottom: id, words, the emblem's colour
+  -- (no Pokemon button: Wooble 2026-10-27 - Fight, Bag, Run)
   Pad.ITEMS = {
     { id = "fight", word = "Fight", rgb = { 0.93, 0.18, 0.42 } },
-    { id = "pokemon", word = "Pok\195\169mon", rgb = { 0.33, 0.8, 0.52 } },
     { id = "bag", word = "Bag", rgb = { 0.96, 0.66, 0.33 } },
     { id = "run", word = "Run", rgb = { 0.74, 0.48, 0.96 } },
   }
@@ -478,12 +479,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.setBlendMode("alpha")
   end
 
-  -- a large button: rounded, a light face lit from above with a soft shadow; pressed, it sits lower
-  -- with no shadow and a dark edge inside its top; sel turns it black with a rim in its colour
+  -- a large button: rounded, a light face lit from above with a soft shadow; pressed (only while a
+  -- finger or button holds it), it sits lower with no shadow and a dark edge inside its top; sel (the
+  -- cursor on it) turns it black with a rim in its colour, standing up
   local function quadButton(G, t, rgb, sel, pressed, live, drawIcon, word, sub, iconY)
     local rad = min(t.w, t.h) * 0.16
     local depth = t.h * 0.045
-    local down = (pressed or sel) and depth or 0
+    local down = pressed and depth or 0
     local x, y, w, h = t.x, t.y + down, t.w, t.h
     if down == 0 then
       G.setColor(0, 0, 0, 0.35)
@@ -491,7 +493,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
     -- the face (textured; pressed, its bevel turned over and a shadow inside its top)
     local c = rgb or { 0.6, 0.6, 0.6 }
-    Pad.face(G, x, y, w, h, rad, Pad.faceOpts(sel, pressed or sel, c, true, sel and 0.2 or 0.06))
+    Pad.face(G, x, y, w, h, rad, Pad.faceOpts(sel, pressed, c, true, sel and 0.2 or 0.06))
     G.setColor(c[1], c[2], c[3], sel and 1 or 0.9)
     G.setLineWidth(max(2, h * 0.025))
     G.rectangle("line", x + h * 0.012, y + h * 0.012, w - h * 0.024, h - h * 0.024, rad, rad)
@@ -644,10 +646,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       sWhere.cells[#sWhere.cells + 1] = t
       quadButton(G, t, { 0.93, 0.18, 0.42 }, true, held == "use", bl ~= nil, nil, "Use")
     elseif cmdUp and c.menu == "main" then
-      -- Fight, Pokemon / Bag, Run
+      -- Fight large across the top; Bag and Run side by side under it
       for i, item in ipairs(Pad.ITEMS) do
-        local x, y = cell(i)
-        local t = { x = x, y = y, w = cw, h = ch, id = item.id }
+        local x, y, ww = gx, gy, gw
+        if i > 1 then x, y = cell(i + 1); ww = cw end
+        local t = { x = x, y = y, w = ww, h = ch, id = item.id }
         sWhere.cells[i] = t
         local live = LIVE[item.id] and not (item.id == "bag" and c.bagEmpty)
         quadButton(G, t, item.rgb, c.cursor == i, held == item.id, live, EMBLEM[item.id], item.word)
@@ -672,7 +675,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         quadButton(G, t, mv.rgb, c.cursor == i, held == t.id, live, icon, mv.name, subIn, icon and 0.24 or nil)
         if icon then
           -- a move: its PP, and how it does on the boss, under its name
-          local down = (c.cursor == i or held == t.id) and ch * 0.045 or 0
+          local down = held == t.id and ch * 0.045 or 0
           local fs = font(ch * 0.12)
           G.setFont(fs)
           if c.cursor == i then G.setColor(0.8, 0.8, 0.85, 1) else G.setColor(0.3, 0.3, 0.35, 1) end
@@ -722,6 +725,28 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       end
     end
     G.pop()
+  end
+
+  -- the D-pad on the second screen moves by where the buttons are, not down a list: the commands
+  -- are Fight across the top (1) over Bag (2) and Run (3); a list (moves, the pouch, whom, Yes / No)
+  -- fills a 2 x 2 grid in reading order (1 2 / 3 4). A press toward no button stays.
+  function Pad.secondMove(menu, cursor, n, dir)
+    cursor = cursor or 1
+    if menu == "main" then
+      if dir == "up" then return 1
+      elseif dir == "down" then return cursor == 1 and 2 or cursor
+      elseif dir == "left" then return cursor == 3 and 2 or cursor
+      elseif dir == "right" then return cursor == 2 and 3 or cursor end
+      return cursor
+    end
+    local col, row = (cursor - 1) % 2, math.floor((cursor - 1) / 2)
+    local to = cursor
+    if dir == "left" and col == 1 then to = cursor - 1
+    elseif dir == "right" and col == 0 then to = cursor + 1
+    elseif dir == "up" and row == 1 then to = cursor - 2
+    elseif dir == "down" and row == 0 then to = cursor + 2 end
+    if to < 1 or to > (n or 4) then return cursor end
+    return to
   end
 
   function Pad.hitSecond(x, y)

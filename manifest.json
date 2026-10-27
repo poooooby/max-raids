@@ -25,5 +25,6 @@
   "description": "Max Raid Battles on the Gen 3 games: dens on the routes, a giant Gigantamax boss against four of your party in a 3D den, shields, Max moves and a catch at the end.",
   "dependency_sources": {
     "national_dex_gen3": "https://github.com/poooooby/national_dex_gen3"
-  }
+  },
+  "github": "poooooby/max-raids"
 }

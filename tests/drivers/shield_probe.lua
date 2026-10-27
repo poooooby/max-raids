@@ -62,7 +62,9 @@ local function body(game, log)
     table.concat(boss.shields or {}, " / "), boss.segments or 0))
   check(#(boss.shields or {}) == 2 and (boss.segments or 0) >= 2, "a 4★ boss has two barriers, segments from its defences")
   -- just above 70%
-  boss.mon.hp = math.floor(boss.mon.maxHp * 0.72)
+  -- (PROBE_START: the share of its HP it starts at, 0.72 by default; PROBE_TRACE=1: every event as
+  -- it plays, the boss's HP and the bar as drawn)
+  boss.mon.hp = math.floor(boss.mon.maxHp * (tonumber(os.getenv("PROBE_START")) or 0.72))
   boss.dispHp, boss.dispTarget = boss.mon.hp, boss.mon.hp
 
   local seen = { up = 0, hit = 0, ["break"] = 0 }
@@ -104,6 +106,16 @@ local function body(game, log)
       if sh and not shots.up then shots.up = true; U.wait(20); shot("b01_barrier_up") end
     end
     lastPhase = cur.phase
+    if os.getenv("PROBE_TRACE") == "1" and cur.events and cur.evI and cur.evI ~= cur._traced then
+      cur._traced = cur.evI
+      local e = cur.events[cur.evI]
+      if e then
+        local b2 = cur.boss
+        log(("    ev %d %s%s%s  boss HP %d%% (bar %d%%)%s"):format(cur.evI, e.kind, e.step and (" " .. e.step) or "",
+          e.who and (" by " .. tostring(e.who.name)) or "", math.floor(100 * b2.mon.hp / b2.mon.maxHp),
+          math.floor(100 * (b2.dispHp or 0) / b2.mon.maxHp), e.hp and e.target == b2 and (" -> " .. math.floor(100 * e.hp / b2.mon.maxHp) .. "%") or ""))
+      end
+    end
     -- the moment a hit lands on it, and the break
     if cur.phase == "battle" and cur.boss.shieldShown and cur.boss.shield and cur.boss.shield.left < cur.boss.shield.max
       and not shots.hit then

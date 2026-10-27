@@ -1249,13 +1249,16 @@ return function(mod, deps)
     -- another (not while a move's look is still playing: it is left to finish)
     -- the boss acting on itself or the field - its aura flaring and its stats rising, wiping the
     -- team's stat changes, its veil - pulled back as for its spread attacks
-    if Scene and (e.kind == "residual" or e.kind == "status" or e.kind == "stage" or e.kind == "field") then
+    -- (and its barrier rising or breaking: Wooble 2026-10-27, it went by unseen behind a member's
+    -- shoulder while the round's other blows chipped on through it)
+    local barrier = e.kind == "shield" and (e.step == "up" or e.step == "break")
+    if Scene and (e.kind == "residual" or e.kind == "status" or e.kind == "stage" or e.kind == "field" or barrier) then
       local who = e.target or e.who
       local a = r.anim
       local looking = a and a.started and r.t < a.at + (a.impact or a.len or 0)
       if not looking and not (a and not a.started) then
         if who and who.boss then
-          if (e.kind == "field" or e.kind == "stage") and Scene.shotName() ~= "spread" then Scene.shot("spread", E.CAM_S) end
+          if (e.kind == "field" or e.kind == "stage" or barrier) and Scene.shotName() ~= "spread" then Scene.shot("spread", E.CAM_S) end
         else
           local i = who and memberIndex(who)
           if i then Scene.shot("target", E.CAM_S, i) end
@@ -1976,8 +1979,13 @@ return function(mod, deps)
     if r.phase == "command" and Pad then
       local moves = r.cmd.menu ~= "main"
       local n = moves and max(1, #(r.cmd.moveList or {})) or #Pad.ITEMS
-      if input:wasPressed("up") then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
-      elseif input:wasPressed("down") then r.cmd.cursor = r.cmd.cursor % n + 1
+      -- (on the second screen the D-pad moves by where the buttons are: Pad.secondMove)
+      local spatial = deps.padOnSecond() and Pad.secondMove
+      local dir = (input:wasPressed("up") and "up") or (input:wasPressed("down") and "down")
+        or (input:wasPressed("left") and "left") or (input:wasPressed("right") and "right") or nil
+      if dir and spatial then r.cmd.cursor = Pad.secondMove(r.cmd.menu, r.cmd.cursor, n, dir)
+      elseif dir == "up" then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
+      elseif dir == "down" then r.cmd.cursor = r.cmd.cursor % n + 1
       elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
       elseif input:wasPressed("b") then Rd.back() end
     elseif r.phase == "catch" then
@@ -2000,7 +2008,9 @@ return function(mod, deps)
       elseif input:wasPressed("b") then Rd.cardMove(99) end
     elseif r.phase == "after" and r.ask then
       if r.ask.kind == "yesno" then
-        if input:wasPressed("up") or input:wasPressed("down") then r.cmd.cursor = 3 - r.cmd.cursor
+        -- (Yes / No side by side on the second screen: left / right there)
+        local across = deps.padOnSecond() and (input:wasPressed("left") or input:wasPressed("right"))
+        if input:wasPressed("up") or input:wasPressed("down") or across then r.cmd.cursor = 3 - r.cmd.cursor
         elseif input:wasPressed("a") then Rd.answer(r.cmd.cursor == 1)
         elseif input:wasPressed("b") then Rd.answer(false) end
       elseif input:wasPressed("a") or input:wasPressed("b") then

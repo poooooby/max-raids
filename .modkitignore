@@ -25,3 +25,4 @@ tests/raid_sim_test.lua
 tools/raid_pack.py
 .modkitignore
 .claude/skills/lua-developer/SKILL.md
+tests/drivers/battle_size_probe.lua

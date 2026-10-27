@@ -11,6 +11,29 @@ of the party in a 3D den, on a layer of the mod's own over the field, drawn at w
 out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the plan is
 `~\.claude\plans\id-like-to-see-iterative-hummingbird.md`.
 
+GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod updater finds releases).
+
+## README and releases (Wooble's rules)
+
+- **The README is the current state, for players.** Not a history (the release notes hold that),
+  not a list of fixes, not technical: no internals, file names or numbers a player doesn't need.
+  Before every release, and whenever a feature changes, re-read README.md against the code
+  (features, options, controls, requirements, credits), rewrite it to what the mod does now, drop
+  anything no longer true, and write new behaviour in the present tense. Its layout follows
+  PlayNav's and Wilds of Hoenn's (a tagline, sections with an emoji each, an options table,
+  Controls, Install, Credits).
+- **A release:** manifest `version` X.Y.Z, tag `vX.Y.Z`, title `Max Raids vX.Y.Z`, the package
+  `max_raids-X.Y.Z.zip` from `python tools/modkit.py pack mods/max_raids --base imported -o ...`
+  (run in the engine checkout) attached to it; notes say what changed for players.
+- **A test build** that players must not auto-update to: version `X.Y.Z-beta.N`, tag `vX.Y.Z-beta.N`,
+  published with `--prerelease --latest=false`, its zip `max_raids-X.Y.Z-beta.N.zip`. The engine's
+  updater (`ModUpdate.pickBest`) offers the newest non-prerelease release and only falls back to a
+  prerelease when there is none, so a full release must exist before any test build.
+- **No stage word** ("alpha", "beta") in the README, manifest description or release titles until
+  Wooble names one; a version with a stage word in its title is a full release, not a prerelease.
+- **The package** leaves out what `.modkitignore` lists (exact paths only, never folders): every new
+  file under `tests/` or `tools/` goes in it.
+
 ## Decisions (Wooble)
 
 - **One screen.** Everything is on the main window; the battle pad may go to the device's second
@@ -297,7 +320,7 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
 - `src/render3d.lua` + `src/g3d/` (copied from PlayNav; g3d is MIT). A colour+depth canvas per size,
   `prepare(scene, setup)` in update, `draw` places the picture.
 - `src/pad.lua`, the battle pad (Wooble 2026-10-26, from a Sword / Shield capture): `Pad.ITEMS` Fight /
-  Pokemon / Bag / Run as pills down the lower right (`Pad.LOOK`, sizes in the window's height: 0.326 x
+  Bag / Run (the Pokemon button removed 2026-10-27, Wooble; `Rd.summary` remains unused) as pills down the lower right (`Pad.LOOK`, sizes in the window's height: 0.326 x
   0.092 on a 0.108 pitch, 0.012 from the edge and foot). White with black words, each emblem drawn in
   lines in its colour at the right end (Fight a burst round a ball, Pokemon a ball, Bag a backpack, Run
   a runner); the selected one black with white words, a thin rim in its colour (ours: it vanished
@@ -343,7 +366,7 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
   The camera on what resolves (raid.lua `startEvent`, 2026-10-27, Wooble): an effect landing on a
   member (a residual - a G-Max field, a burn -, a status, a stat change) cuts to that member
   ("target"), one after another; the boss's own (its aura and stat rises, the wipe, its veil, a
-  field it sets: "field" / "stage" on the boss) pulls back to "spread" as its spread attacks do;
+  field it sets: "field" / "stage" on the boss; its barrier rising or breaking - on a 1★ the round's other blows chipped on through it unseen) pulls back to "spread" as its spread attacks do;
   neither while a move's look is still before its impact. Driver `tests/drivers/field_probe.lua`
   (the camera at each such event over five turns, shots g2*);
   the pouch (`RAID.POUCH`, `ITEM_PRIORITY` first: Potion half the HP, Full Heal, Revive back at once
@@ -647,10 +670,14 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   `padOnSecond()` (main) = the option AND the display detected, so without one the pad stays on the
   main screen. `Pad.drawSecond`: a navy-to-magenta background (a gradient mesh, the band's ring, a
   hexagon grid fading upward, drifting light streaks), a header (who is choosing / what to choose,
-  Back at its right), a 2 x 2 grid: Fight / Pokemon / Bag / Run (emblem over words), the moves (type
-  chip, name, PP, how it does on the boss), the pouch, the targets, Yes / No; between commands the four
-  with their HP. `quadButton`: a light face lit from above with a drop shadow; selected or held it sits
-  lower, no shadow, a dark lip inside its top (selected also black with a rim in its colour).
+  Back at its right), the commands as Fight large across the top over Bag and Run side by side
+  (emblem over words), a 2 x 2 grid for the moves (type chip, name, PP, how it does on the boss), the
+  pouch, the targets, Yes / No; between commands the four with their HP. `quadButton`: a light face lit
+  from above with a drop shadow; held (pressed) it sits lower, no shadow, a dark lip inside its top;
+  selected it stays up, black with a rim in its colour (2026-10-27, Wooble: pressed in only while
+  pressed). The D-pad moves by the layout while the pad is there (`Pad.secondMove(menu, cursor, n,
+  dir)`: Fight 1 over Bag 2 / Run 3; the lists 1 2 / 3 4; a press toward nothing stays; Yes / No
+  left / right as well), not down a list as on the main screen.
   `Pad.hitSecond`, `Pad.sWhere`. Driver `tests/drivers/screen2_probe.lua` (the display stood in for:
   frames saved as PNGs, taps queued; `_test.padSecond(on)` forces the option, `_test.screen2.bridge`).
   The catch is there too when the pad is (2026-10-26): Catch / Don't Catch as two wide buttons, then the
