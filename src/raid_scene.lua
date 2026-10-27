@@ -35,6 +35,7 @@ return function(mod, deps)
   Sc.CAVE = { cx = 0, cz = -9, r = 25, y0 = -4.5, y1 = 19 }
   Sc.EYE = { 0, 1.15, 6.6 }    -- the battle's eye (fog is measured from here)
   Sc.ASPECT = 1.5
+  Sc.PORTRAIT_CY = 0.42
   Sc.NEAR, Sc.FAR = 0.05, 200
   Sc.CLEAR = { 0.03, 0.035, 0.04 }
   -- where the light comes from: the shaft (upper left, behind), the pad's glow
@@ -116,14 +117,53 @@ return function(mod, deps)
   Sc.TARGET = { SIDE = 0.3, UP = 0.65, BACK = 3.6, LOOK_X = 0.7, LOOK_Y = 3.5, FOV = 56 }
   Sc.CHOOSE = { SIDE = 0.3, UP = 0.65, BACK = 3.4, LOOK_X = 0.7, LOOK_Y = 4.4, FOV = 54 }
   local targetPose = { eye = { 0, 0, 0 }, look = { 0, 0, 0 }, fov = 60 }
+  -- a Dynamaxed member: drawn GIANT times its size (Sc.giant[i] 0..1, eased by the raid), and its
+  -- shots pulled back and up by GIANT_SHOT x that so the giant stays in frame
+  Sc.GIANT = 2.6
+  Sc.GIANT_SHOT = { BACK = 5.0, UP = 1.8, LOOK_Y = 1.4 }
+  Sc.giant = {}
+
+  -- a member's place now: Sc.MEMBERS, until one grows giant - then the line is laid out again by width
+  -- (each its SLOT_W, a giant's times its size; centred on the pad), so no two overlap whoever it is.
+  -- A giant also stands GIANT_BACK further back. Eased with Sc.giant, so the others slide aside as it
+  -- grows.
+  Sc.SLOT_W, Sc.GIANT_BACK, Sc.SLOT_GAP = 2.05, 0.9, 0.35
+  -- each member's picture's width in metres at its own size (its opaque box against MEMBER_PIC_H; set
+  -- by its draw), so a wide one gets the room it takes
+  Sc.memberWidth = {}
+  local placed = { { x = 0, z = 0 }, { x = 0, z = 0 }, { x = 0, z = 0 }, { x = 0, z = 0 } }
+  function Sc.memberPos(i)
+    local n = #Sc.MEMBERS
+    local any = false
+    for k = 1, n do if (Sc.giant[k] or 0) > 0 then any = true end end
+    local base = Sc.MEMBERS[i] or Sc.MEMBERS[1]
+    if not any then return base end
+    local widths, total = {}, 0
+    for k = 1, n do
+      local scale = 1 + ((Sc.GIANT or 1) - 1) * (Sc.giant[k] or 0)
+      local own = Sc.memberWidth[k] or Sc.SLOT_W * 0.7
+      widths[k] = math.max(Sc.SLOT_W, own * scale + Sc.SLOT_GAP)
+      total = total + widths[k]
+    end
+    local x = -total / 2 + (Sc.MEMBERS[1].x + Sc.MEMBERS[n].x) / 2
+    for k = 1, n do
+      local p = placed[k]
+      p.x = x + widths[k] / 2
+      p.z = (Sc.MEMBERS[k].z or 0) - Sc.GIANT_BACK * (Sc.giant[k] or 0)
+      x = x + widths[k]
+    end
+    return placed[i] or base
+  end
+
   function Sc.targetShot(i, T)
-    local m = Sc.MEMBERS[i] or Sc.MEMBERS[1]
+    local m = Sc.memberPos(i)
     local P = Sc.PAD
     T = T or Sc.TARGET
+    local g, GS = Sc.giant[i] or 0, Sc.GIANT_SHOT
     -- (a touch off its middle, toward the outside)
     local side = m.x <= 0 and -1 or 1
-    targetPose.eye[1], targetPose.eye[2], targetPose.eye[3] = m.x + side * T.SIDE, T.UP, m.z + T.BACK
-    targetPose.look[1], targetPose.look[2], targetPose.look[3] = m.x * T.LOOK_X, T.LOOK_Y, P.z
+    targetPose.eye[1], targetPose.eye[2], targetPose.eye[3] = m.x + side * T.SIDE, T.UP + GS.UP * g, m.z + T.BACK + GS.BACK * g
+    targetPose.look[1], targetPose.look[2], targetPose.look[3] = m.x * T.LOOK_X, T.LOOK_Y + GS.LOOK_Y * g, P.z
     targetPose.fov = T.FOV
     return targetPose
   end
@@ -242,6 +282,8 @@ return function(mod, deps)
     local tv = tan(rad(max(10, cur.fov - kf)) / 2)
     if ew / eh > Sc.ASPECT then cam.F = (eh / 2) / tv else cam.F = (ew / 2) / (tv * Sc.ASPECT) end
     cam.CX, cam.CY = rect[1] + ew / 2, rect[2] + eh / 2
+    -- (a portrait screen: the 3:2 view a little above the middle, clear of the UI at the foot)
+    if ew / eh < 1 then cam.CY = rect[2] + eh * Sc.PORTRAIT_CY end
   end
   Sc.place = place
   function Sc.setRect(ex, ey, ew, eh) rect[1], rect[2], rect[3], rect[4] = ex, ey, ew, eh end
@@ -906,9 +948,69 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
+  -- a Dynamaxed member's aura, as the boss's (a wide dark-red glow, the bright outline, wisps, swirling
+  -- streaks, rising sparks) at strength g; a Gigantamax one's red clouds crowning it (pic.gmax)
+  function Sc.memberAura(G2, pic, x, y, k, fx, t, g)
+    local box = pic.box
+    local bw, bh = box[3] - box[1], box[4] - box[2]
+    local ox, oy = (box[1] + box[3]) / 2, box[4]
+    local s = sil()
+    if s then
+      G2.setShader(s)
+      local o1 = max(1.5, k * 2.2)
+      local pulse = 0.7 + 0.3 * sin(t * 4)
+      G2.setColor(0.45, 0.0, 0.02, 0.45 * pulse * g)
+      for _, dd in ipairs(OUT) do
+        if pic.quad then G2.draw(pic.image, pic.quad, x + dd[1] * o1 * 1.8, y + dd[2] * o1 * 1.8, 0, k * fx, k, ox, oy)
+        else G2.draw(pic.image, x + dd[1] * o1 * 1.8, y + dd[2] * o1 * 1.8, 0, k * fx, k, ox, oy) end
+      end
+      G2.setColor(1, 0.12, 0.12, 0.95 * g)
+      for _, dd in ipairs(OUT) do
+        if pic.quad then G2.draw(pic.image, pic.quad, x + dd[1] * o1 * 0.6, y + dd[2] * o1 * 0.6, 0, k * fx, k, ox, oy)
+        else G2.draw(pic.image, x + dd[1] * o1 * 0.6, y + dd[2] * o1 * 0.6, 0, k * fx, k, ox, oy) end
+      end
+      G2.setShader()
+    end
+    -- streaks swirling round its body
+    G2.setLineWidth(max(1, k * 1.2))
+    local cx, cy = x, y - bh * k * 0.5
+    local rx, ry = bw * k * 0.62, bh * k * 0.18
+    for j = 0, 2 do
+      local a0 = t * (1.4 + 0.3 * j) + j * 2.1
+      for sgm = 0, 9 do
+        local a1, a2 = a0 - sgm * 0.09, a0 - (sgm + 1) * 0.09
+        G2.setColor(1, 0.1, 0.12, (1 - sgm / 10) * (sin(a1) > 0 and 0.9 or 0.35) * g)
+        G2.line(cx + rx * cos(a1), cy + ry * sin(a1) + (j - 1) * bh * k * 0.18,
+          cx + rx * cos(a2), cy + ry * sin(a2) + (j - 1) * bh * k * 0.18)
+      end
+    end
+    G2.setLineWidth(1)
+    -- sparks rising off it
+    for i = 1, 14 do
+      local u = (hash(i, 61) + t * (0.25 + 0.3 * hash(i, 62))) % 1
+      G2.setColor(1, 0.25 + 0.3 * hash(i, 64), 0.1, (1 - u) * 0.9 * g)
+      G2.rectangle("fill", x + (hash(i, 63) - 0.5) * bw * k * 1.1, y - u * bh * k * 1.15, max(1, k * 1.2), max(1, k * 1.2))
+    end
+    -- Gigantamax: a crown of small dark-red cloud puffs over its head, lit red underneath, drifting
+    if pic.gmax then
+      local hx, hy = x, y - bh * k * 1.0
+      local span = min(bw, bh) * k
+      for c = 0, 10 do
+        local u = c / 10 - 0.5
+        local px = hx + u * span * 0.75 + sin(t * 0.9 + c) * span * 0.02
+        local py = hy - span * (0.03 + 0.05 * (1 - math.abs(u) * 2)) + cos(t * 1.3 + c) * span * 0.008
+        local rr = span * (0.045 + 0.02 * hash(c, 71))
+        G2.setColor(0.32, 0.02, 0.06, 0.75 * g)
+        G2.circle("fill", px, py, rr, 14)
+        G2.setColor(1, 0.22, 0.28, 0.5 * g)
+        G2.arc("line", "open", px, py, rr, 0.2, math.pi - 0.2, 10)
+      end
+    end
+  end
+
   -- a member's feet on screen and its height in px
   function Sc.memberAt(i)
-    local m = Sc.MEMBERS[i]
+    local m = Sc.MEMBERS[i] and Sc.memberPos(i)
     if not m then return nil end
     local x, y, d = project(m.x, 0, m.z)
     if not x then return nil end
@@ -916,6 +1018,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   end
   local function drawMember(G2, i, pic, t)
     if not (pic and pic.image) then return end
+    -- (its width at its own size, for the line's spacing: Sc.memberPos)
+    if pic.box then Sc.memberWidth[i] = (pic.box[3] - pic.box[1]) / (pic.cell or 64) * Sc.MEMBER_PIC_H end
     local x, y, hpx = Sc.memberAt(i)
     if not x then return end
     local box = pic.box
@@ -951,8 +1055,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G2.setColor(1, 1, 1, 1)
       return
     end
+    -- Dynamaxed: giant (pic.giant 0..1), its red aura round it, G-Max clouds over a Gigantamax one
+    local g = pic.giant or 0
+    if g > 0 then k = k * (1 + (Sc.GIANT - 1) * g) end
     G2.setColor(0, 0, 0, 0.5)
     G2.ellipse("fill", x, y, bw * k * 0.42, bw * k * 0.1, 24)
+    if g > 0 then Sc.memberAura(G2, pic, x, y, k, fx, t, g) end
     -- a slow breath
     local b = 1 + 0.015 * sin(t * 2.4 + i * 1.3)
     -- struck: thrown back toward the camera (larger, lower, a jolt aside), flashing white

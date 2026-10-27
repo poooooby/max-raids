@@ -29,13 +29,14 @@ return function(mod, deps)
     return (s:gsub("(%a)([%w']*)", function(a, b) return a:upper() .. b end))
   end
 
-  function Dy.key(id, stars) return ("%s%s:%d"):format(Dy.PREFIX, id, stars) end
+  -- (a legendary Pokemon's raid, by a Dynamax Crystal: ":L" after the stars)
+  function Dy.key(id, stars, legend) return ("%s%s:%d%s"):format(Dy.PREFIX, id, stars, legend and ":L" or "") end
   function Dy.is(key) return type(key) == "string" and key:sub(1, #Dy.PREFIX) == Dy.PREFIX end
-  -- -> the species id ("RATICATE", "RATICATE_ALOLA"), stars
+  -- -> the species id ("RATICATE", "RATICATE_ALOLA"), stars, legendary
   function Dy.parse(key)
     if not Dy.is(key) then return nil end
-    local id, s = key:match("^DYNA:([%w_]+):(%d)$")
-    return id, tonumber(s)
+    local id, s, l = key:match("^DYNA:([%w_]+):(%d)(:?L?)$")
+    return id, tonumber(s), l == ":L"
   end
 
   -- ------- species facts (the engine's; the National Dex's #387+ and its forms registered into the
@@ -232,12 +233,63 @@ return function(mod, deps)
     return id and Dy.key(id, stars) or nil
   end
 
+  -- ------- legendary Pokemon (a Dynamax Crystal's raid, as the Max Lair's)
+
+  -- the cart's legendary and mythical Pokemon, by National Dex number; the National Dex's own come from
+  -- its listSpecies (legendary or mythical)
+  Dy.CART_LEGENDS = { 144, 145, 146, 150, 151, 243, 244, 245, 249, 250, 251, 377, 378, 379, 380, 381, 382, 383,
+    384, 385, 386 }
+  Dy.LEGEND_STARS = 5
+  -- every legendary and mythical Pokemon that can Dynamax: { slot, ... }
+  function Dy.legends()
+    local out, seen = {}, {}
+    local d = dex()
+    local dx = d and d.dynamax
+    local function add(slot)
+      slot = tonumber(slot)
+      if not slot or seen[slot] then return end
+      if dx and dx.canDynamax and select(2, pcall(dx.canDynamax, slot)) == false then return end
+      seen[slot] = true
+      out[#out + 1] = slot
+    end
+    -- (the cart's own species of a number: the National Dex's forms report their base's number - the
+    -- engine's speciesFromNational(144) answers Galarian Articuno)
+    local Pk = P()
+    local want = {}
+    for _, n in ipairs(Dy.CART_LEGENDS) do want[n] = true end
+    for s = 1, Dy.CART_SCAN do
+      local okN, n = pcall(Pk and Pk.national or error, s)
+      if okN and want[tonumber(n) or -1] then
+        local own = d and d.idOfSlot and select(2, pcall(d.idOfSlot, s))
+        if type(own) ~= "string" then
+          want[n] = nil
+          add(s)
+        end
+      end
+    end
+    if d and d.listSpecies then
+      local ok, list = pcall(d.listSpecies)
+      for _, r in ipairs(ok and type(list) == "table" and list or {}) do
+        if r.legendary or r.mythical then add(r.slot) end
+      end
+    end
+    table.sort(out)
+    return out
+  end
+  -- a legendary Pokemon's raid key, one at random (rnd(lo, hi))
+  function Dy.pickLegend(rnd)
+    local list = Dy.legends()
+    if #list == 0 then return nil end
+    local id = Dy.idOf(list[rnd(1, #list)])
+    return id and Dy.key(id, Dy.LEGEND_STARS, true) or nil
+  end
+
   -- ------- boss records for DYNA keys
 
   local records, sprites = {}, {}
   local function record(key)
     if records[key] ~= nil then return records[key] or nil end
-    local id, stars = Dy.parse(key)
+    local id, stars, legend = Dy.parse(key)
     local slot = id and Dy.slotOfId(id)
     local nat = slot and Dy.nationalOf(slot)
     local Pk = P()
@@ -249,7 +301,7 @@ return function(mod, deps)
     local names = { tn(types[1]) }
     if types[2] and types[2] ~= types[1] then names[2] = tn(types[2]) end
     local rec = { national = nat, slot = slot, name = titled(okN and name or "?"), types = names, stars = stars,
-      script = stars >= 5 and "strong" or "basic", dyna = true }
+      script = legend and "fierce" or (stars >= 5 and "strong" or "basic"), dyna = true, legend = legend or nil }
     records[key] = rec
     return rec
   end

@@ -37,8 +37,16 @@ return function(mod, deps)
   end
 
   -- an HP bar: a dark track with a thin edge, the fill green / yellow / red by the share left
-  local function hpBar(G, x, y, w, hh, share)
+  local function hpBar(G, x, y, w, hh, share, dmax)
     share = max(0, min(1, share or 1))
+    if dmax then
+      -- (Dynamaxed: a red frame round it, glowing)
+      local pulse = 0.6 + 0.4 * sin((love.timer and love.timer.getTime() or 0) * 5)
+      G.setColor(1, 0.12, 0.32, 0.45 * pulse)
+      G.rectangle("fill", x - 1 - hh * 0.6, y - 1 - hh * 0.6, w + 2 + hh * 1.2, hh + 2 + hh * 1.2)
+      G.setColor(0.95, 0.12, 0.3, 1)
+      G.rectangle("fill", x - 1 - hh * 0.3, y - 1 - hh * 0.3, w + 2 + hh * 0.6, hh + 2 + hh * 0.6)
+    end
     G.setColor(0.18, 0.18, 0.2, 1)
     G.rectangle("fill", x - 1, y - 1, w + 2, hh + 2)
     G.setColor(0.42, 0.42, 0.45, 1)
@@ -145,8 +153,21 @@ return function(mod, deps)
     if mark == "done" then tick(G, cx, cy, h * 0.022)
     elseif mark == "fight" or mark == "status" or mark == "item" then actionIcon(G, mark, cx, cy, h * 0.026)
     else bubble(G, cx, cy, h * 0.03, mark == "now", t or 0) end
+    -- the Dynamax Energy: this one may Dynamax this turn (the band's ring, glowing)
+    if info.energy then
+      local ex, ey, es = cx - h * 0.06, cy, h * 0.014
+      local pulse = 0.6 + 0.4 * sin((t or 0) * 6)
+      G.setColor(1, 0.15, 0.4, 0.45 * pulse)
+      G.circle("fill", ex, ey, es * 1.6, 20)
+      G.setColor(0.95, 0.12, 0.32, 1)
+      G.setLineWidth(max(1.5, es * 0.45))
+      G.circle("line", ex, ey, es, 20)
+      G.setColor(1, 0.85, 0.9, 1)
+      G.circle("fill", ex, ey, es * 0.38, 12)
+      G.setLineWidth(1)
+    end
     hpBar(G, bw - h * 0.108, by + bh * 0.8, h * 0.1, h * 0.009,
-      info.maxHp and info.maxHp > 0 and info.hp / info.maxHp or 1)
+      info.maxHp and info.maxHp > 0 and info.hp / info.maxHp or 1, info.dmax ~= nil)
   end
 
   -- during the turn: only the members the words are about, from the top (each with its action)
@@ -224,7 +245,18 @@ return function(mod, deps)
     G.print("Lv.", x1 - nw - fLv:getWidth("Lv.") - h * 0.002, py + h * 0.006 + fNum:getHeight() - fLv:getHeight() - h * 0.004)
     -- the HP bar and numbers
     local hp, mhp = tonumber(info.hp) or 0, tonumber(info.maxHp) or 0
-    hpBar(G, x0, py + h * 0.052, x1 - x0, h * 0.011, mhp > 0 and hp / mhp or 1)
+    hpBar(G, x0, py + h * 0.052, x1 - x0, h * 0.011, mhp > 0 and hp / mhp or 1, info.dmax ~= nil)
+    -- Dynamaxed: a red tab over the panel, its turns left
+    if info.dmax then
+      local fT = font(h * 0.022)
+      local word = ("DYNAMAX  %d"):format(info.dmax)
+      local tw, th = fT:getWidth(word) + h * 0.03, h * 0.032
+      G.setColor(0.95, 0.12, 0.3, 1)
+      G.rectangle("fill", x0, py - th - h * 0.004, tw, th, th / 2, th / 2)
+      G.setFont(fT)
+      G.setColor(1, 1, 1, 1)
+      G.print(word, x0 + h * 0.015, py - th - h * 0.004 + (th - fT:getHeight()) / 2)
+    end
     G.setFont(fNum)
     G.setColor(0.1, 0.1, 0.12, 1)
     G.print(("%d/%d"):format(hp, mhp), x0, py + h * 0.07)

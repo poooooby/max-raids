@@ -327,6 +327,53 @@ return function(mod, deps)
     end
   end
 
+  -- a Gigantamaxed member's own form: the pack's back sheet for its G-Max Move's species
+  -- (assets/bosses/backs/<KEY>.png, data/raid_sprites.lua `back`), loaded at its Gigantamax (the update
+  -- step) - { image, quads, cell, box (frame 1's opaque box), speed } or false
+  Rd.GMAX_BACK_K = 1.0    -- its form this much taller than its own picture, before the giant's scale
+  function Rd.gmaxBackFor(m)
+    local b = m.b
+    if not (b and b.gmaxId) then return false end
+    local nat = Pokemon and Pokemon.national and select(2, pcall(Pokemon.national, b.species)) or nil
+    local pick
+    for _, key in ipairs(Bosses.ORDER or {}) do
+      local rec, sp = Bosses[key], Sprites[key]
+      if rec and sp and sp.back and rec.gmax == b.gmaxId and (not pick or rec.national == nat) then pick = key end
+    end
+    if not pick then return false end
+    local sp, B = Sprites[pick], Sprites[pick].back
+    local shiny = Pokemon and Pokemon.isShiny and select(2, pcall(Pokemon.isShiny, m.orig or m.mon)) == true
+    local path = "assets/bosses/backs/" .. pick .. ((shiny and sp.shiny) and "_shiny" or "") .. ".png"
+    local img, data = imageOf(path, true)
+    if not img then return false end
+    local box = data and boxOf(data, 0, 0, B.cell, B.cell) or { 0, 0, B.cell, B.cell }
+    if data then pcall(data.release, data) end
+    local quads = {}
+    local sw, sh = img:getDimensions()
+    for i = 1, B.frames do
+      local c, r0 = (i - 1) % B.cols, floor((i - 1) / B.cols)
+      quads[i] = love.graphics.newQuad(c * B.cell, r0 * B.cell, B.cell, B.cell, sw, sh)
+    end
+    return { image = img, quads = quads, cell = B.cell, box = box, speed = sp.speed and sp.speed[1] or 2, key = pick }
+  end
+
+  -- what a member is drawn as: its own picture, or - Gigantamaxed, grown past halfway - its form's
+  -- animated back sheet, sized against its own picture (Rd.GMAX_BACK_K)
+  function Rd.memberPicNow(m, now)
+    local d = m.draw
+    local G = m.gmaxSheet
+    if not (d and G and (m.giant or 0) > 0.5 and d.box) then return d end
+    local gd = m.gdraw or {}
+    m.gdraw = gd
+    local unit = G.speed * Rd.ANIM_UNIT_S
+    gd.image, gd.quad, gd.box = G.image, G.quads[floor((now or 0) / unit) % #G.quads + 1], G.box
+    local ownH = max(1, d.box[4] - d.box[2])
+    local formH = max(1, G.box[4] - G.box[2])
+    gd.cell = d.cell * formH / (ownH * Rd.GMAX_BACK_K)
+    gd.hd, gd.shrink, gd.giant, gd.gmax = false, d.shrink, d.giant, false
+    return gd
+  end
+
   -- a Dynamax boss's picture now (the update step, and once at its load): its front picture, whole
   -- (gen3-hd-sprites' full frame, a provider's own crop), its opaque box measured when the frame's
   -- size changes; frameAt then hands it out as the pack's sheets are
@@ -400,7 +447,7 @@ return function(mod, deps)
     r.boss.dispHp, r.boss.dispTarget = r.boss.mon.hp, r.boss.mon.hp
     r.adapter = Battle.adapter(rng)
     r.sim = Sim.new{ boss = r.boss, members = list, adapter = r.adapter, rng = rng, rules = R,
-      words = deps.Gmax and deps.Gmax.WORDS or nil }
+      words = deps.Gmax and deps.Gmax.WORDS or nil, teamWords = deps.TeamMoves }
   end
 
   -- the raid itself begins: the intro from the close-up on the party
@@ -446,6 +493,8 @@ return function(mod, deps)
     r = { phase = "den", den = den, key = den.active and not den.done and den.boss or nil, t = 0, cues = {}, hud = 0 }
     Den.open(r)
     if r.key and not Rd.load(r.key) then r.key = nil end
+    -- (what the den holds of itself, for putting a Dynamax Crystal away again)
+    r.denKey = r.key
     if deps.onOpen then deps.onOpen(r) end
     return true
   end
@@ -454,10 +503,51 @@ return function(mod, deps)
   -- black (OUT), holds (BLACK), the raid begins and fades in (IN) with its intro held until it has,
   -- so the camera's pull-back starts on a clear screen
   Rd.DEN_FADE = { OUT = 0.45, BLACK = 0.25, IN = 0.7 }
+  -- ------- the Dynamax Crystal (National Dex's item): at any den, a legendary Pokemon's raid instead
+  -- (the den itself left as it is); spent only when the raid starts
+  local function crystalId()
+    local dx = Rewards and Rewards.dynamax and Rewards.dynamax()
+    return dx and dx.ids and dx.ids.DYNAMAX_CRYSTAL or nil
+  end
+  function Rd.crystals()
+    local id = crystalId()
+    local s = Runtime and Runtime.getSession and Runtime.getSession()
+    local Bag = engine("src.core.game3.bag")
+    if not (id and s and Bag and Bag.get) then return 0 end
+    local ok, n = pcall(Bag.get, s.bag, id)
+    return ok and tonumber(n) or 0
+  end
+  function Rd.useCrystal()
+    if not (r and r.phase == "den" and Den) or r.starting or r.legend or Rd.crystals() < 1 then return false end
+    local Dy = deps.Dyna
+    local key = Dy and Dy.pickLegend(function(lo, hi) return love.math.random(lo, hi) end)
+    if not (key and Rd.load(key)) then
+      if r.key then Rd.load(r.key) end
+      return false
+    end
+    r.key, r.legend, r.warm = key, true, nil
+    r.cursor = 5
+    if Sounds then Rd.se(Sounds.EVENT.dmaxOn) end
+    return true
+  end
+  function Rd.putCrystalAway()
+    if not (r and r.phase == "den" and r.legend) or r.starting then return false end
+    r.key, r.legend, r.warm = r.denKey, nil, nil
+    if r.key and not Rd.load(r.key) then r.key = nil end
+    r.cursor = r.key and 7 or 6
+    return true
+  end
+
   function Rd.denStart()
     if not (r and r.phase == "den" and r.key and Den) or r.starting then return false end
     local members = Den.members(r)
     if #members == 0 then return false end
+    -- (a legendary Pokemon's raid spends its Dynamax Crystal)
+    if r.legend then
+      local id, s = crystalId(), Runtime and Runtime.getSession and Runtime.getSession()
+      local Bag = engine("src.core.game3.bag")
+      if not (id and s and Bag and Rd.crystals() > 0 and pcall(Bag.remove, s.bag, id, 1)) then return false end
+    end
     r.starting = { t0 = r.t, members = members }
     r.denMenu, r.denParty = nil, nil
     return true
@@ -628,6 +718,21 @@ return function(mod, deps)
     end
     -- the members' pictures and the den's render: here, outside any draw
     memberPics(r)
+    -- a Dynamaxed member's size, eased (Rd.DMAX.GROW_S), and the camera's room for it
+    for i, m in ipairs(r.members) do
+      if m.giantT then
+        local u = min(1, max(0, (r.t - m.giantT - (m.giantDelay or 0)) / Rd.DMAX.GROW_S))
+        u = u * u * (3 - 2 * u)
+        m.giant = (m.giantFrom or 0) + ((m.giantTo or 0) - (m.giantFrom or 0)) * u
+      end
+      if Scene and Scene.giant then Scene.giant[i] = m.giant or 0 end
+      if m.draw then m.draw.giant, m.draw.gmax = m.giant or 0, m.gmaxLook end
+      -- (the HUD: Dynamaxed and its turns left; holding the Dynamax Energy while choosing)
+      if m.info then
+        m.info.dmax = m.b and m.b.dmax and m.b.dmax.turns or nil
+        m.info.energy = r.phase == "command" and r.sim ~= nil and r.sim:canDynamax(i) or nil
+      end
+    end
     if Scene and Scene.prepare then Scene.prepare(r.t) end
   end
 
@@ -658,6 +763,8 @@ return function(mod, deps)
     r.phase = "command"
     r.cmd = { chosen = {}, cursor = 1, menu = "main" }
     if r.sim and not r.sim.field then r.fieldShown = nil end
+    -- (the turn's guards and protections are down: the turn is over)
+    r.turnFx, r.protectFx = {}, {}
     if r.boss then
       local sh = r.boss.shield
       r.boss.shieldShown = sh and sh.left > 0 and { left = sh.left, max = sh.max } or nil
@@ -728,7 +835,7 @@ return function(mod, deps)
   local function nextOrFight()
     local c = r.cmd
     local nxt = nextActor(c.actor + 1)
-    c.cursor, c.menu, c.item = 1, "main", nil
+    c.cursor, c.menu, c.item, c.dmax, c.moveSlot = 1, "main", nil, nil, nil
     if nxt then
       c.actor = nxt
       toMember(nxt)
@@ -757,6 +864,14 @@ return function(mod, deps)
       return true
     end
     if id == "back" then return Rd.back() end
+    -- DYNAMAX on the move list: toggled while this member holds the Dynamax Energy
+    if id == "dynamax" then
+      if c.menu ~= "moves" or not (r.sim and r.sim:canDynamax(c.actor)) then return false end
+      c.dmax = not c.dmax or nil
+      Rd.moveList()
+      if Sounds and c.dmax then Rd.se(Sounds.EVENT.dmaxOn) end
+      return true
+    end
     local slot = type(id) == "string" and tonumber(id:match("^move(%d)$"))
     if not slot then return false end
     local row = c.moveList and c.moveList[slot]
@@ -766,16 +881,38 @@ return function(mod, deps)
       Rd.moveList()
       return true
     elseif c.menu == "target" then
-      c.chosen[c.actor] = { item = c.item, target = row.member }
+      if c.moveSlot then
+        -- (an ally move's pick: a member, or Pollen Puff's boss)
+        c.chosen[c.actor] = { move = c.moveSlot, target = row.boss and "boss" or row.member }
+      else
+        c.chosen[c.actor] = { item = c.item, target = row.member }
+      end
       nextOrFight()
       return true
     end
     local b = r.members[c.actor] and r.members[c.actor].b
     local mv = b and b.moves[slot]
     if not mv or (mv.pp or 0) <= 0 then return false end
-    c.chosen[c.actor] = { move = slot }
+    -- an ally move (Helping Hand, Heal Pulse, Decorate, Pollen Puff ...): whom it goes to first
+    -- (Dynamaxed it is Max Guard)
+    if mv.team and mv.team.ally and not Rd.maxShown() then
+      c.moveSlot, c.menu, c.cursor = slot, "target", 1
+      Rd.moveList()
+      for i, row2 in ipairs(c.moveList) do
+        if row2.live ~= false then c.cursor = i; break end
+      end
+      return true
+    end
+    c.chosen[c.actor] = { move = slot, dmax = c.dmax or nil }
     nextOrFight()
     return true
+  end
+
+  -- whether the member choosing shows its moves' Max forms: Dynamaxed, or about to
+  function Rd.maxShown()
+    local c = r and r.cmd
+    local m = c and c.actor and r.members[c.actor]
+    return m ~= nil and m.b ~= nil and (m.b.dmax ~= nil or c.dmax == true)
   end
 
   -- the list menu's rows for the member choosing (the update step: effectiveness asks the engine):
@@ -793,6 +930,11 @@ return function(mod, deps)
     local b = c and c.actor and r.members[c.actor] and r.members[c.actor].b
     if not b then return end
     c.bagEmpty = bagEmpty()
+    -- (the DYNAMAX button: shown while this member holds the Energy, lit while toggled on)
+    c.canDmax = c.menu == "moves" and r.sim ~= nil and r.sim:canDynamax(c.actor) or false
+    if not c.canDmax then c.dmax = nil end
+    local maxForms = b.dmax ~= nil or c.dmax == true
+    c.maxShown = maxForms
     c.moveList = c.moveList or {}
     local list = c.moveList
     for i = 1, 4 do
@@ -805,6 +947,22 @@ return function(mod, deps)
           local n = pouchFree(id)
           row.id, row.name, row.chip, row.right = id, Sim and Sim.ITEM_NAME[id] or id, "Item", "x" .. n
           row.rgb, row.live = { 0.35, 0.6, 0.85 }, n > 0
+        else
+          list[i] = nil
+        end
+      elseif c.menu == "target" and c.moveSlot then
+        -- (an ally move: the others on the field; Pollen Puff's own row is the boss)
+        local m = r.members[i]
+        local T = b.moves[c.moveSlot] and b.moves[c.moveSlot].team or {}
+        if i == c.actor and T.orFoe and r.boss then
+          local hp, mhp = tonumber(r.boss.mon.hp) or 0, max(1, tonumber(r.boss.mon.maxHp) or 1)
+          row.boss, row.name, row.chip, row.right = true, r.boss.name, "Foe", ("%d%%"):format(math.ceil(100 * hp / mhp))
+          row.rgb, row.live = { 0.85, 0.25, 0.35 }, true
+        elseif m and m.b then
+          local hp, mhp = tonumber(m.b.mon.hp) or 0, max(1, tonumber(m.b.mon.maxHp) or 1)
+          row.member, row.name = i, m.b.name
+          row.chip, row.right = (m.b.down or 0) > 0 and "Out" or "HP", ("%d/%d"):format(hp, mhp)
+          row.rgb, row.live = hpRgb(hp / mhp), i ~= c.actor and r.sim ~= nil and r.sim:present(i)
         else
           list[i] = nil
         end
@@ -821,9 +979,12 @@ return function(mod, deps)
       else
         local mv = b.moves[i]
         if mv then
-          row.name, row.typeName, row.pp, row.maxPp = mv.name, mv.typeName, mv.pp, mv.maxPp
-          row.rgb = Battle and Battle.TYPE_RGB[mv.typeName] or nil
-          if not mv.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(mv.type, r.boss)) end
+          -- (the Max form's name and type, the base move's PP)
+          local shown = maxForms and b.maxMoves and b.maxMoves[i] or mv
+          row.name, row.typeName, row.pp, row.maxPp = shown.name, shown.typeName, mv.pp, mv.maxPp
+          row.max = maxForms or nil
+          row.rgb = Battle and Battle.TYPE_RGB[shown.typeName] or nil
+          if not shown.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(shown.type, r.boss)) end
         else
           list[i] = nil
         end
@@ -891,6 +1052,9 @@ return function(mod, deps)
 
   Rd.GMAX_CHARGE_S = 1.5
   local LUNGE = { slam = true, multi = true, slash = true }
+  -- Dynamax on the team: the red energy gathering (CHARGE_S), then the member growing (GROW_S); back to
+  -- its size over GROW_S too
+  Rd.DMAX = { CHARGE_S = 0.9, GROW_S = 0.8 }
 
   -- a battler's place in the den (src/fx.lua's anchor): its middle, height and ground, in metres
   local function placeOf(b)
@@ -901,11 +1065,58 @@ return function(mod, deps)
       return { X = P.x, Y = P.h + h * 0.5, Z = P.z, h = h, foot = P.h, boss = true }
     end
     local i = memberIndex(b)
-    local m = i and Scene.MEMBERS[i]
+    local m = i and Scene.MEMBERS[i] and (Scene.memberPos and Scene.memberPos(i) or Scene.MEMBERS[i])
     if not m then return nil end
-    return { X = m.x, Y = Scene.MEMBER_H * 0.5, Z = m.z, h = Scene.MEMBER_H, foot = 0, i = i }
+    -- (a Dynamaxed member is that much taller)
+    local g = r.members[i] and r.members[i].giant or 0
+    local h = Scene.MEMBER_H * (1 + ((Scene.GIANT or 1) - 1) * g)
+    return { X = m.x, Y = h * 0.5, Z = m.z, h = h, foot = 0, i = i }
   end
   Rd.placeOf = placeOf
+
+  -- what the team moves leave on the field now (Fx.setTeam): the members on it and the boss where they
+  -- stand, each side's lasting effects, the turn's guards, Protect's bubbles, waiting wishes; nil in
+  -- the catch and the rewards
+  local teamState = { team = {}, sides = nil, turn = {}, protect = {}, wishes = {} }
+  local turnRows = {}
+  function Rd.teamState()
+    if not r or r.phase == "rewards" or r.phase == "catch" or r.phase == "throw" or r.phase == "after" or r.throw then return nil end
+    local T = teamState
+    for k = #T.team, 1, -1 do T.team[k] = nil end
+    for k = #T.protect, 1, -1 do T.protect[k] = nil end
+    for k = #T.wishes, 1, -1 do T.wishes[k] = nil end
+    for i, m in ipairs(r.members or {}) do
+      if m.b and not (m.faintT and not m.backT) then
+        local A = placeOf(m.b)
+        if A then T.team[#T.team + 1] = A end
+      end
+    end
+    T.boss = r.boss and not r.bossGone and placeOf(r.boss) or nil
+    r.sideFx = r.sideFx or { team = {}, boss = {} }
+    T.sides = r.sideFx
+    -- (the turn's guards; Follow Me's where its user stands)
+    T.turn = T.turn or {}
+    for k = #T.turn, 1, -1 do T.turn[k] = nil end
+    for k, g in ipairs(r.turnFx or {}) do
+      local row = turnRows[k] or {}
+      turnRows[k] = row
+      row.what, row.side, row.t0 = g.what, g.side, g.t0
+      row.A = g.who and placeOf(g.who) or nil
+      T.turn[#T.turn + 1] = row
+    end
+    for who, p in pairs(r.protectFx or {}) do
+      local A = placeOf(who)
+      if A and (who.boss or memberIndex(who)) then
+        T.protect[#T.protect + 1] = { A = A, t0 = p.t0, max = p.max, hitT = p.hitT }
+      end
+    end
+    for i, t0 in pairs(r.wishFx or {}) do
+      local m = r.members[i]
+      local A = m and m.b and placeOf(m.b)
+      if A then T.wishes[#T.wishes + 1] = { A = A, t0 = t0 } end
+    end
+    return T
+  end
 
   -- a sound's SE name as this game has it: a list (data/raid_sounds.lua) gives the first the game
   -- has (FireRed's SE_BALL_CLICK is SE_RG_BALL_CLICK in Emerald)
@@ -1016,7 +1227,9 @@ return function(mod, deps)
     end
     add(Sounds.HIT.plain); add(Sounds.HIT.super); add(Sounds.HIT.weak)
     local E = Sounds.EVENT
-    for _, k in ipairs({ "shieldUp", "shieldHit", "shieldBreak", "faint", "back", "up", "down", "cheer" }) do add(E[k]) end
+    for _, k in ipairs({ "shieldUp", "shieldHit", "shieldBreak", "faint", "back", "up", "down", "cheer",
+      "dmaxOn", "dmaxGrow", "dmaxEnd", "guard" }) do add(E[k]) end
+    for _, se in pairs(Sounds.SIDE or {}) do add(se) end
     -- (Run's gust out of the den)
     add(Sounds.SHAPE.wind)
     -- the four: the battlers' moves once they fight; on the den screen the whole party's (the four
@@ -1032,6 +1245,8 @@ return function(mod, deps)
     for _, m in ipairs(mons) do
       if m.b and m.b.moves then
         for _, mv in ipairs(m.b.moves) do moveSounds(mv) end
+        -- (and their Max forms, for a Dynamax)
+        for _, mv in ipairs(m.b.maxMoves or {}) do moveSounds(mv) end
       elseif m.mon and Battle and Battle.move then
         for i = 1, 4 do
           local ref = m.mon.moves and m.mon.moves[i]
@@ -1150,8 +1365,11 @@ return function(mod, deps)
     Scene.onMid = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "mid", r.t) end end
   end
 
-  function Rd.specOf(mv)
+  function Rd.specOf(mv, asTeam)
     if not (MoveFx and mv) then return { "slam" } end
+    if mv.guard then return { "self", shape = "light" } end
+    -- (a team move - a screen, a guard, a heal: its own look is drawn by its event)
+    if mv.team and (mv.status or asTeam) then return { "self", shape = "light" } end
     if mv.isGmax then
       -- (a plain Max Move: the look of the move it comes from)
       if mv.isMax then return MoveFx.MOVES[mv.baseKey or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "wave", shape = "light" } end
@@ -1164,7 +1382,17 @@ return function(mod, deps)
   function Rd.scheduleMove(e)
     if not Fx then return end
     local mv = e.move
-    local spec = Rd.specOf(mv)
+    -- (Pollen Puff on an ally: no hit follows, it heals)
+    local asTeam = false
+    if mv and mv.team and not mv.status then
+      asTeam = true
+      for j = r.evI + 1, #(r.events or {}) do
+        local x = r.events[j]
+        if x.kind == "use" or x.kind == "over" then break end
+        if x.kind == "damage" or x.kind == "miss" or x.kind == "guard" then asTeam = false; break end
+      end
+    end
+    local spec = Rd.specOf(mv, asTeam)
     local targets = {}
     if spec[1] ~= "self" then
       local list = r.events or {}
@@ -1186,7 +1414,7 @@ return function(mod, deps)
       end
     end
     local words = #(e.text or "") / Rd.MSG.CPS + 0.25
-    local gmax = mv and mv.isGmax
+    local gmax = mv and mv.isGmax and not mv.guard
     local at = r.t + words + (gmax and Rd.GMAX_CHARGE_S or 0)
     local K = Fx.KIND[(spec[1] == "drop" and spec.shape == "slab") and "slab" or spec[1]] or Fx.KIND.slam
     local len = K[1] * (gmax and Fx.GMAX_K or 1)
@@ -1203,20 +1431,27 @@ return function(mod, deps)
     if a.chargeAt and not a.charged and r.t >= a.chargeAt then
       a.charged = true
       r.say = nil
-      local LB = Scene and Scene.lastBoss
-      if Scene then Scene.shot("boss", 0.5); Scene.burst(); Scene.shake(0.2, 1.0) end
-      Rd.cry(r.key)
+      if a.user.boss then
+        if Scene then Scene.shot("boss", 0.5); Scene.burst(); Scene.shake(0.2, 1.0) end
+        Rd.cry(r.key)
+      else
+        -- (one of the team's Max Moves: the giant gathering itself, its own cry)
+        local i = memberIndex(a.user)
+        if Scene and i then Scene.shot("member", 0.5, i); Scene.shake(0.12, 0.8) end
+        local sp = a.user.species or (a.user.mon and a.user.mon.species)
+        if sp and Audio and Audio.playCry then pcall(Audio.playCry, sp) end
+      end
       if Sounds then Rd.se(Sounds.GMAX_CHARGE) end
-      local _ = LB
       Fx.charge(placeOf(a.user), r.t, Rd.GMAX_CHARGE_S)
     end
     if not a.started and r.t >= a.at then
       a.started = true
       r.say = nil
-      -- (a G-Max move: back to whom it falls on for the blow)
+      -- (a G-Max move: back to whom it falls on for the blow - the boss, pulled back, for the team's)
       if a.gmax and Scene then
         if #a.targets > 1 then Scene.shot("spread", 0.3)
-        elseif a.targets[1] and memberIndex(a.targets[1].b) then Scene.shot("target", 0.3, memberIndex(a.targets[1].b)) end
+        elseif a.targets[1] and memberIndex(a.targets[1].b) then Scene.shot("target", 0.3, memberIndex(a.targets[1].b))
+        elseif not a.user.boss then Scene.shot("spread", 0.3) end
       end
       local from = placeOf(a.user)
       local tg = {}
@@ -1279,6 +1514,56 @@ return function(mod, deps)
     return out
   end
 
+  -- ------- the team moves' looks (src/raid_sim.lua `side` events): what lasts on a side - its screens,
+  -- Safeguard, mist, Tailwind - is kept from the event that raised it to the one that ends it (the sim
+  -- has run the whole turn already, so its own state is the turn's end); a turn's guards, Follow Me
+  -- and Protect last until the next turn's commands; a wish waits over its place until it comes true
+  Rd.SIDE_LASTING = { reflect = true, light = true, veil = true, safeguard = true, mist = true, tailwind = true }
+  Rd.SIDE_TURN = { wide = true, quick = true, mat = true, crafty = true, redirect = true }
+  local function sideFx()
+    r.sideFx = r.sideFx or { team = {}, boss = {} }
+    return r.sideFx
+  end
+  function Rd.sideEvent(e)
+    local sf = sideFx()[e.side or "team"]
+    local what = e.what
+    local i = e.who and memberIndex(e.who)
+    if what == "blown" then
+      for k in pairs(Rd.SIDE_LASTING) do
+        if k ~= "tailwind" and sf[k] then sf[k] = nil; sf[k .. "Off"] = r.t end
+      end
+    elseif Rd.SIDE_LASTING[what] then
+      if e.up then sf[what], sf[what .. "Off"] = r.t, nil
+      elseif sf[what] then sf[what] = nil; sf[what .. "Off"] = r.t end
+    elseif Rd.SIDE_TURN[what] then
+      r.turnFx = r.turnFx or {}
+      r.turnFx[#r.turnFx + 1] = { what = what, side = e.side or "team", t0 = r.t, who = e.who }
+    elseif what == "wish" and i then
+      r.wishFx = r.wishFx or {}
+      r.wishFx[i] = r.t
+    end
+    if Sounds and Sounds.SIDE and e.up ~= false then Rd.se(Sounds.SIDE[what]) end
+    -- the camera: the whole team for what covers it; the one it is about
+    if Scene then
+      if (Rd.SIDE_LASTING[what] or Rd.SIDE_TURN[what] or what == "cure" or what == "blown") and what ~= "redirect" then
+        if e.up ~= false and Scene.shotName() ~= "spread" then Scene.shot("spread", Rd.EVENT.CAM_S) end
+      elseif e.target and memberIndex(e.target) then Scene.shot("target", Rd.EVENT.CAM_S, memberIndex(e.target))
+      elseif i then Scene.shot("target", Rd.EVENT.CAM_S, i) end
+    end
+    if Fx and Fx.teamCast and e.up ~= false then
+      Fx.teamCast(what, e.side or "team", e.who and placeOf(e.who) or nil, e.target and placeOf(e.target) or nil, r.t)
+    end
+  end
+  -- a heal: green sparkles rising round whoever it reaches (a wish come true: its star falls first)
+  function Rd.healSparkle(who, wish)
+    if wish and r.wishFx then
+      local i = who and memberIndex(who)
+      if i then r.wishFx[i] = nil end
+    end
+    local A = who and placeOf(who)
+    if Fx and Fx.healSparkle and A then Fx.healSparkle(A, wish, r.t) end
+  end
+
   local function startEvent(e)
     local E = Rd.EVENT
     r.evT = r.t
@@ -1307,7 +1592,7 @@ return function(mod, deps)
       elseif e.kind == "cheer" then Rd.se(E2.cheer)
       elseif e.kind == "stage" then Rd.se((e.n or 0) >= 0 and E2.up or E2.down)
       elseif e.kind == "status" and e.status then Rd.se(Sounds.STATUS[e.status])
-      elseif e.kind == "field" and e.fieldType then Rd.se(Sounds.FIELD[e.fieldType])
+      elseif e.kind == "field" and (e.fieldType or e.foeField) then Rd.se(Sounds.FIELD[e.fieldType or e.foeField])
       elseif e.kind == "shield" then
         Rd.se(e.step == "up" and E2.shieldUp or e.step == "break" and E2.shieldBreak or E2.shieldHit)
       elseif (e.kind == "damage" or e.kind == "residual") and not e.looked then
@@ -1330,6 +1615,71 @@ return function(mod, deps)
           end
         end
       end
+    end
+    -- Dynamax on the team: the camera back on the member, red energy gathering into it, a flash, and
+    -- it grows giant with its cry; back to its size, the energy bursting off it as it shrinks
+    if e.kind == "dynamax" or e.kind == "dynamaxEnd" then
+      local i = memberIndex(e.who)
+      local m = i and r.members[i]
+      if m then
+        local up = e.kind == "dynamax"
+        m.giantFrom, m.giantTo, m.giantT = m.giant or (up and 0 or 1), up and 1 or 0, r.t
+        m.giantDelay = up and Rd.DMAX.CHARGE_S or 0
+        if up then
+          m.gmaxLook = e.gmax or nil
+          -- (its Gigantamax form's back sheet, loaded once a raid)
+          if e.gmax and m.gmaxSheet == nil then m.gmaxSheet = Rd.gmaxBackFor(m) end
+        end
+        local A = placeOf(e.who)
+        if Scene then
+          Scene.giant[i] = up and 1 or 0
+          -- (pulled back: the whole giant beside the boss)
+          Scene.shot("spread", E.CAM_S)
+          Scene.shake(up and 0.18 or 0.1, up and 1.2 or 0.5)
+        end
+        if Fx and A then
+          if up then
+            Fx.charge(A, r.t, Rd.DMAX.CHARGE_S)
+            Fx.emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.6, A.h * 3, 1, 0.2, 0.35, 0.6)
+          else
+            Fx.emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.5, A.h * 2, 1, 0.3, 0.4, 0.5)
+          end
+        end
+        if Sounds then Rd.se(up and Sounds.EVENT.dmaxGrow or Sounds.EVENT.dmaxEnd) end
+        if up and Audio and Audio.playCry then
+          local sp = e.who.species or (e.who.mon and e.who.mon.species)
+          if sp then pcall(Audio.playCry, sp) end
+        end
+        if e.hp then e.who.dispTarget = e.hp end
+        if e.text then
+          Rd.say(e.text)
+          r.evDur = max(#e.text / Rd.MSG.CPS + E.HOLD_S, (up and Rd.DMAX.CHARGE_S or 0) + Rd.DMAX.GROW_S + 0.3)
+        else
+          r.say = nil
+          r.evDur = Rd.DMAX.GROW_S
+        end
+        return
+      end
+    end
+    if e.kind == "side" then Rd.sideEvent(e) end
+    if e.kind == "heal" then Rd.healSparkle(e.who, e.wish) end
+    if e.kind == "guard" and (e.protect or e.max) and not (e.blocked or e.pierced) then
+      -- (Protect / Max Guard up: its bubble stays round it for the turn)
+      r.protectFx = r.protectFx or {}
+      r.protectFx[e.who] = { t0 = r.t, max = e.max or nil }
+    end
+    if e.kind == "guard" and (e.blocked or e.pierced) then
+      r.protectFx = r.protectFx or {}
+      local p = r.protectFx[e.who]
+      if p then p.hitT = r.t end
+      if Fx and Fx.teamHit then Fx.teamHit(e.what or "protect", r.t) end
+    end
+    if e.kind == "guard" then
+      local i = memberIndex(e.who)
+      local A = placeOf(e.who)
+      if Fx and A then Fx.emit("light", A.X, A.Y, A.Z + 0.4, 0, 0, 0, 0.5, A.h * 1.6, 0.4, 0.9, 1, 0.55) end
+      if Sounds then Rd.se(Sounds.EVENT.guard) end
+      if Scene and i and not e.blocked then Scene.shot("member", E.CAM_S, i) end
     end
     if (e.kind == "use" or e.kind == "over") and Fx and Fx.settle then Fx.settle(r.t) end
     if e.kind == "use" then Rd.scheduleMove(e) end
@@ -2033,12 +2383,16 @@ return function(mod, deps)
   function Rd.back()
     if not (r and r.phase == "command" and r.cmd.actor) then return false end
     if r.cmd.menu == "target" then
-      r.cmd.menu, r.cmd.cursor, r.cmd.item = "items", 1, nil
+      if r.cmd.moveSlot then
+        r.cmd.menu, r.cmd.cursor, r.cmd.moveSlot = "moves", r.cmd.moveSlot, nil
+      else
+        r.cmd.menu, r.cmd.cursor, r.cmd.item = "items", 1, nil
+      end
       Rd.moveList()
       return true
     end
     if r.cmd.menu == "moves" or r.cmd.menu == "items" then
-      r.cmd.menu, r.cmd.cursor = "main", 1
+      r.cmd.menu, r.cmd.cursor, r.cmd.dmax = "main", 1, nil
       return true
     end
     for i = r.cmd.actor - 1, 1, -1 do
@@ -2058,7 +2412,7 @@ return function(mod, deps)
     if not r then return "" end
     local c = r.cmd or {}
     return table.concat({ r.phase or "", tostring(c.menu), tostring(c.cursor), tostring(c.ball), tostring(c.actor),
-      tostring(r.rw and r.rw.cursor), tostring(r.cursor), tostring(r.ask) }, "|")
+      tostring(r.rw and r.rw.cursor), tostring(r.cursor), tostring(r.ask), tostring(c.dmax) }, "|")
   end
   local function uiTick(before)
     if Sounds and r and uiKey() ~= before then Rd.se(Sounds.UI.move) end
@@ -2089,6 +2443,8 @@ return function(mod, deps)
       if dir and spatial then r.cmd.cursor = Pad.secondMove(r.cmd.menu, r.cmd.cursor, n, dir)
       elseif dir == "up" then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
       elseif dir == "down" then r.cmd.cursor = r.cmd.cursor % n + 1
+      -- (SELECT or R on the move list: DYNAMAX)
+      elseif moves and (input:wasPressed("select") or input:wasPressed("r")) then Rd.choose("dynamax")
       elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
       elseif input:wasPressed("b") then Rd.back() end
     elseif r.phase == "catch" then
@@ -2126,6 +2482,11 @@ return function(mod, deps)
   end
 
   local function inRect(x, y, t) return t and t.w and x >= t.x and x <= t.x + t.w and y >= t.y and y <= t.y + t.h end
+  -- a pointer event moved into a UI piece's own space (dy down: a portrait screen's, Rd.uiBox)
+  local function evAt(ev, dy)
+    if not dy or dy == 0 then return ev end
+    return { x = ev.x, y = ev.y - dy, phase = ev.phase, id = ev.id, source = ev.source }
+  end
 
   -- a pointer on the window (input.pointer): true when the den screen or the pad took it
   local pointerInner
@@ -2136,10 +2497,14 @@ return function(mod, deps)
     return res
   end
   function pointerInner(ev)
+    -- (on a portrait screen the UI's pieces are shifted down: the event moved back into their space)
+    local foot = r and evAt(ev, r.uiBand) or ev
+    local mid = r and evAt(ev, r.uiCard) or ev
     if r and r.phase == "den" then
-      if r.t >= Rd.DEN_ARM_S and Den and not r.starting then Den.pointer(r, ev) end
+      if r.t >= Rd.DEN_ARM_S and Den and not r.starting then Den.pointer(r, mid) end
       return true
     end
+    ev = (r and r.phase == "rewards") and mid or foot
     if r and r.phase == "rewards" then
       local W = Rd.cardWhere
       if inRect(ev.x, ev.y, W.next) then
@@ -2271,10 +2636,12 @@ return function(mod, deps)
     SLP = { "ASLEEP", { 0.55, 0.55, 0.6 } }, FRZ = { "FROZEN", { 0.35, 0.75, 0.9 } },
   }
   local glowOff = { { -2, 0 }, { 2, 0 }, { 0, -2 }, { 0, 2 }, { -1.5, -1.5 }, { 1.5, -1.5 }, { -1.5, 1.5 }, { 1.5, 1.5 } }
-  local function drawHud(G, w, h)
+  -- part: "top" (the boss's name and bar) or "say" (the words' band at the foot); nil both
+  local function drawHud(G, w, h, part)
     local b = Bosses[r.key]
     if not b then return end
     local a = (r.hud or 0) * (r.bossA or 1)
+    if part == "say" then a = 0 end
     -- (no boss block once it is in the ball or gone, nor over the rewards and what follows)
     if r.phase == "rewards" or r.phase == "after" or r.phase == "throw" or r.phase == "outro" then a = 0 end
     if a > 0.01 then
@@ -2352,7 +2719,7 @@ return function(mod, deps)
         end
       end
     end
-    if r.say then
+    if r.say and part ~= "top" then
       local M = Rd.MSG
       local bh = h * M.BAND_H
       local by = h - bh - h * M.GAP
@@ -2390,10 +2757,40 @@ return function(mod, deps)
     return 1
   end
 
+  -- ------- a portrait screen (a phone held upright): the UI is laid out for a landscape box, w wide
+  -- and w / UI_ASPECT tall (square: the UI sized as large as the width allows) - the boss's block and
+  -- the order at the screen's top, the words, the panel, the pad and the catch at its foot (translated
+  -- `band` down), the den screen and the rewards card centred (`card` down) with their ground filling
+  -- the rest. Taps are moved back by the same. A landscape screen keeps its whole height.
+  -- (the den screen and the rewards card, laid out wide, keep a CARD_ASPECT box)
+  Rd.UI_ASPECT, Rd.CARD_ASPECT = 1.0, 1.5
+  -- -> the battle UI's height, its foot's shift; the cards' height, their shift
+  function Rd.uiBox(w, h)
+    local uh, ch = h, h
+    if h > 0 and w / h < Rd.UI_ASPECT then uh = floor(w / Rd.UI_ASPECT) end
+    if h > 0 and w / h < Rd.CARD_ASPECT then ch = floor(w / Rd.CARD_ASPECT) end
+    return uh, h - uh, ch, floor((h - ch) / 2)
+  end
+  local function shifted(G, dy, fn)
+    if dy and dy ~= 0 then
+      G.push()
+      G.translate(0, dy)
+      fn()
+      G.pop()
+    else
+      fn()
+    end
+  end
   function Rd.draw(G, w, h)
     if not r or r.summary or r.aside then return end
+    local _, band, ch, card = Rd.uiBox(w, h)
+    r.uiBand, r.uiCard = band, card
     if r.phase == "den" then
-      if Den then Den.draw(G, w, h, r) end
+      if Den then
+        -- (the screen's ground past the den screen's box)
+        if card > 0 and Den.ground then Den.ground(G, w, h, card, ch) end
+        shifted(G, card, function() Den.draw(G, w, ch, r) end)
+      end
       -- START: the screen fading to black
       if r.starting then
         G.setColor(0, 0, 0, min(1, (r.t - r.starting.t0) / Rd.DEN_FADE.OUT))
@@ -2419,13 +2816,14 @@ return function(mod, deps)
     end
     for i = 1, 4 do
       local m = r.members[i]
-      memberPicsShown[i] = m and m.draw or nil
-      if m and m.draw then m.draw.shrink = Rd.memberShrink(m) end
+      if m and m.draw then m.draw.shrink, m.draw.giant, m.draw.gmax = Rd.memberShrink(m), m.giant or 0, m.gmaxLook end
+      memberPicsShown[i] = m and Rd.memberPicNow(m, r.t) or nil
     end
     if Fx then
       local b = r.boss
       Fx.setLasting(r.phase ~= "rewards" and r.fieldShown or nil, b and placeOf(b) or nil,
         b and (b.veil or 0) > 0 and not r.throw, b and not r.throw and b.shieldShown or nil, r.t)
+      if Fx.setTeam then Fx.setTeam(Rd.teamState(), r.t) end
     end
     if Scene then Scene.draw(G, 0, 0, w, h, r.t, img and not r.bossGone and bossPic or nil, memberPicsShown) end
     if Fx and r.phase ~= "rewards" then
@@ -2444,24 +2842,38 @@ return function(mod, deps)
     elseif r.phase == "blown" then
       Rd.drawGust(G, w, h)
     end
-    drawHud(G, w, h)
+    -- (the UI in its landscape box: the top's at the top, the foot's at the foot - Rd.uiBox)
+    local uh, band, ch, card = Rd.uiBox(w, h)
+    r.uiBand, r.uiCard = band, card
+    drawHud(G, w, uh, "top")
+    shifted(G, band, function() drawHud(G, w, uh, "say") end)
     -- the commands: the order down the top left, the one choosing in the lower left, the pad (only
     -- once a message has gone, as the game)
     if r.phase == "command" and not r.say then
       if BattlerHud then
-        BattlerHud.drawOrder(G, w, h, r.members, r.cmd, r.t)
-        BattlerHud.drawPanel(G, w, h, r.cmd.actor and r.members[r.cmd.actor])
+        BattlerHud.drawOrder(G, w, uh, r.members, r.cmd, r.t)
+        shifted(G, band, function() BattlerHud.drawPanel(G, w, uh, r.cmd.actor and r.members[r.cmd.actor]) end)
       end
-      if Pad and not deps.padOnSecond() then Pad.draw(G, w, h, r) end
+      if Pad and not deps.padOnSecond() then shifted(G, band, function() Pad.draw(G, w, uh, r) end) end
     elseif r.phase == "battle" and BattlerHud and r.rows and #r.rows > 0 then
-      BattlerHud.drawRows(G, w, h, r.rows, r.t)
+      BattlerHud.drawRows(G, w, uh, r.rows, r.t)
     elseif r.phase == "catch" then
       -- (on the second screen when the pad is there)
-      if not r.say and not deps.padOnSecond() then Rd.drawCatch(G, w, h) end
+      if not r.say and not deps.padOnSecond() then shifted(G, band, function() Rd.drawCatch(G, w, uh) end) end
     elseif r.phase == "rewards" then
-      Rd.drawRewards(G, w, h)
+      if card > 0 then
+        -- (the card's amber past its box, its purple foot carried down; fading in with it)
+        local a = min(1, (r.t - (r.rewardsT or r.t)) / Rd.CARD.IN_S)
+        G.setColor(0.97, 0.66, 0.1, a)
+        G.rectangle("fill", 0, 0, w, card)
+        G.setColor(0.6, 0.26, 0.62, a)
+        G.rectangle("fill", 0, card + ch, w, h - card - ch)
+      end
+      shifted(G, card, function() Rd.drawRewards(G, w, ch) end)
     elseif r.phase == "after" or r.phase == "leaveq" then
-      if r.ask and r.ask.kind == "yesno" and Pad and not deps.padOnSecond() then Pad.draw(G, w, h, r) end
+      if r.ask and r.ask.kind == "yesno" and Pad and not deps.padOnSecond() then
+        shifted(G, band, function() Pad.draw(G, w, uh, r) end)
+      end
     end
   end
 
@@ -2655,12 +3067,23 @@ return function(mod, deps)
         G.rectangle("fill", lx, cy - rh * 0.36, lw, rh * 0.72, rh * 0.36, rh * 0.36)
         chevron(G, lx - rh * 0.3, cy, rh * 0.4)
       end
-      itemIcon(G, it.id, lx + rh * 0.35, cy - rh * 0.3, rh * 0.6)
-      G.setColor(sel and 1 or 1, sel and 1 or 1, sel and 1 or 1, a)
-      if not sel then G.setColor(1, 1, 1, a) end
+      if it.money then
+        -- (Gold Rush's coins: a coin, the amount)
+        local cx, r0 = lx + rh * 0.65, rh * 0.24
+        G.setColor(0.55, 0.38, 0.05, a)
+        G.circle("fill", cx, cy, r0 * 1.12, 20)
+        G.setColor(1, 0.82, 0.2, a)
+        G.circle("fill", cx, cy, r0, 20)
+        G.setColor(1, 0.95, 0.6, a)
+        G.circle("fill", cx - r0 * 0.3, cy - r0 * 0.3, r0 * 0.3, 12)
+      else
+        itemIcon(G, it.id, lx + rh * 0.35, cy - rh * 0.3, rh * 0.6)
+      end
+      G.setColor(1, 1, 1, a)
       G.print(it.name or "?", lx + rh * 1.05, cy - fR:getHeight() / 2)
-      G.print("\195\151", lx + lw * 0.78, cy - fR:getHeight() / 2)
-      G.printf(tostring(it.n or 1), lx + lw * 0.8, cy - fR:getHeight() / 2, lw * 0.16, "right")
+      if not it.money then G.print("\195\151", lx + lw * 0.78, cy - fR:getHeight() / 2) end
+      G.printf(tostring(it.n or 1), lx + lw * (it.money and 0.6 or 0.8), cy - fR:getHeight() / 2,
+        lw * (it.money and 0.36 or 0.16), "right")
       cardWhere.rows[j + 1] = { x = lx, y = ry, w = lw, h = rh, i = i }
     end
     -- the scroll bar

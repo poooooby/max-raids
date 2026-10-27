@@ -27,15 +27,19 @@
 -- confusion and infatuation moves plain) are ours.
 local G = {}
 
--- the Max Move power from the base move's: { up to this power, max power }; Fighting and Poison
--- moves take the lower column (Serebii)
+-- the Max Move power from the base move's: { below this power, max power }; Fighting and Poison
+-- moves take the lower column (the games' bands, as Pokemon Showdown's sim/dex-moves.ts has them:
+-- under 45 -> 90, 45-54 -> 100, 55-64 -> 110, 65-74 -> 120, 75-109 -> 130, 110-149 -> 140, 150+ -> 150);
+-- a move with no power of its own 100; the moves off the bands in data/raid_maxpower.lua
 G.POWER_BANDS = {
-  { 40, 90, 70 }, { 50, 100, 75 }, { 60, 110, 80 }, { 70, 120, 85 }, { 100, 130, 90 },
-  { 140, 140, 95 }, { 9999, 150, 100 },
+  { 45, 90, 70 }, { 55, 100, 75 }, { 65, 110, 80 }, { 75, 120, 85 }, { 110, 130, 90 },
+  { 150, 140, 95 }, { math.huge, 150, 100 },
 }
 
 G.MOVES = {
-  GOLD_RUSH = { type = "NORMAL" },
+  -- (coins: the user's level x 100 a use, x2 the second, x3 the third and after, picked up after the
+  -- win; its confusion is not run)
+  GOLD_RUSH = { type = "NORMAL", effect = { kind = "coins" } },
   VOLT_CRASH = { type = "ELECTRIC", effect = { kind = "status", list = { "PAR" } } },
   CUDDLE = { type = "NORMAL" },
   BEFUDDLE = { type = "BUG", effect = { kind = "status", list = { "SLP", "PSN", "PAR" } } },
@@ -65,9 +69,11 @@ G.MOVES = {
   RESONANCE = { type = "ICE", effect = { kind = "veil", turns = 5 } },
   DEPLETION = { type = "DRAGON", effect = { kind = "pp", n = 2 } },
   REPLENISH = { type = "NORMAL" },
-  WIND_RAGE = { type = "FLYING" },
-  ONE_BLOW = { type = "DARK" },
-  RAPID_FLOW = { type = "WATER" },
+  -- (clears the target side's screens: the veil)
+  WIND_RAGE = { type = "FLYING", effect = { kind = "defog" } },
+  -- (both strike through Max Guard)
+  ONE_BLOW = { type = "DARK", pierce = true },
+  RAPID_FLOW = { type = "WATER", pierce = true },
   -- Eternatus' own (its Eternamax form's signature, not a G-Max move): Dragon 160
   ETERNABEAM = { type = "DRAGON", power = 160, name = "Eternabeam" },
 }
@@ -110,6 +116,25 @@ G.WORDS = {
     GRASS = "{MON} is hurt by G-Max Vine Lash's ferocious beating!",
     ROCK = "{MON} is hurt by the rocks thrown out by G-Max Volcalith!",
   },
+  -- the same moves used by one of the team, on the boss
+  fieldFoe = {
+    FIRE = "{BOSS} was surrounded by fire!", WATER = "{BOSS} got caught in a vortex of water!",
+    GRASS = "{BOSS} got trapped with vines!", ROCK = "{BOSS} was surrounded by rocks!",
+  },
+  fieldFoeHurt = {
+    FIRE = "{BOSS} is burning up within G-Max Wildfire's flames!",
+    WATER = "{BOSS} is hurt by G-Max Cannonade's vortex!",
+    GRASS = "{BOSS} is hurt by G-Max Vine Lash's ferocious beating!",
+    ROCK = "{BOSS} is hurt by the rocks thrown out by G-Max Volcalith!",
+  },
+  teamVeil = "The team is protected by a shimmering veil!",
+  teamVeilEnd = "The team's veil wore off!",
+  teamHeal = "The team's HP was restored!",
+  teamCure = "The team's status returned to normal!",
+  teamCrit = "The team is getting pumped!",
+  defog = "The veil around the target was blown away!",
+  coins = "Coins were scattered everywhere!",
+  guard = "{MON} protected itself!",
   trap = "{MON} became trapped!",
   trapHurt = "{MON} is hurt by the trap!",
   veil = "{BOSS} is protected by a shimmering veil!",

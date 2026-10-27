@@ -69,6 +69,13 @@ N.RAID = {
     CAP = { CHANCE = { 0, 0, 1, 2, 3 }, ITEM = "ITEM_PP_MAX" },
     -- (without National Dex's candies: Rare Candies, this many by tier)
     CANDY_STAND_IN = { 1, 1, 2, 3, 4 },
+    -- National Dex's Dynamax items: Dynamax Candy every raid, this many by tier; Max Mushrooms and
+    -- Max Honey now and then ({ chance % by tier, how many })
+    DYNAMAX_CANDY = { 1, 1, 1, 1, 2 },
+    MAX_MUSHROOMS = { CHANCE = { 0, 0, 10, 10, 15 }, N = 1 },
+    MAX_HONEY = { CHANCE = { 0, 0, 0, 0, 5 }, N = 1 },
+    -- a Dynamax Crystal (a legendary Pokemon's raid at a den) now and then from the hardest
+    DYNAMAX_CRYSTAL = { CHANCE = { 0, 0, 0, 2, 8 }, N = 1 },
   },
   -- the catch after a win: a chance by the tier, times the ball's (the engine's catch multipliers:
   -- Great 1.5, Ultra 2; Master never misses); the balls offered in BALLS' order, those the bag holds
@@ -127,6 +134,9 @@ N.EVIDENCE = {
   ["RAID.ITEM_PRIORITY"] = { class = "ours", source = "items before moves, as the main games run the bag; raids have no bag", confidence = "high" },
   ["RAID.STARS"] = { class = "inferred", source = "levels by tier: Serebii (15-20 .. 55-60); HP x1.4 / 1.6 / 1.9 / 2.5 / 3.0 for 1-5★: Bulbapedia Max Raid Battle (5★ x3 also a solo-clear guide, note.com pagepoteto); perfect IVs 1 / 2 / 3 / 4 / 4: Bulbapedia, GameWith; the thresholds, EVs, bags and medal turns are ours; shields: none at 1-2★ in the games (one here, to teach it), one at 3-4★, two at 5★ (Bulbapedia, Pokemon.com)", confidence = "medium" },
   ["RAID.REWARD"] = { class = "inferred", source = "Serebii, Sword / Shield Max Raid den listings (den18): Exp. Candy XS x5 + S x1 (1★), S x5 + M x1 (2★), M x5 + L x1 (3★), M x2 + L x3 (4★), L x2 + XL x1 (5★); Dynamax Candy 1-2; TRs 1 / 1 / 2 / 3 / 3 at 100%; two berries at 80%; Big Nugget / Nugget / Rare Bone 20-50% each by tier; Rare Candy 25%; Bottle Cap 1-3% from 3★. Gen 3 stand-ins ours (TMs for TRs; Big Pearl / Star Piece for Big Nugget / Rare Bone; PP Max for the Bottle Cap; no Dynamax Candy)", confidence = "medium" },
+  ["RAID.REWARD.DYNAMAX_CANDY"] = { class = "verified", source = "Serebii, Sword / Shield den listings (den18): Dynamax Candy 1 at 1-4★, 2 at 5★", confidence = "high" },
+  ["RAID.REWARD.DYNAMAX_CRYSTAL"] = { class = "ours", source = "Sword / Shield's Dynamax Crystals open the Max Lair's legendary Pokemon (Crown Tundra); here one opens a legendary's raid at a den, a rare 4-5★ drop (Wooble 2026-10-27: 'legendary raid key')", confidence = "high" },
+  ["RAID.REWARD.MAX_MUSHROOMS"] = { class = "ours", source = "Sword / Shield's Max Mushrooms and Max Honey came from the Isle of Armor's wilds and Max Lair, not dens; these rare drops (and National Dex's shop) are ours", confidence = "high" },
   ["RAID.SEGMENTS"] = { class = "ours", source = "the games: 2 to 8 segments, by the boss's defensive stats (Bulbapedia, Serebii); this formula is ours", confidence = "medium" },
   ["RAID.CHEER"] = { class = "verified", source = "Serebii: cheer heals, raises a stat, sets a screen or breaks the barrier, about 16% each, nothing 20%; the screens are a Defense / Sp. Def raise here", confidence = "medium" },
   ["RAID.POUCH"] = { class = "ours", source = "raids in the games have no bag; ITEM is ours", confidence = "high" },

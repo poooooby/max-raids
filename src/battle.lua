@@ -11,6 +11,7 @@
 
 return function(mod, deps)
   local N, Bosses, Sprites, Gmax = deps.N, deps.Bosses, deps.Sprites, deps.Gmax or { MOVES = {}, POWER_BANDS = {} }
+  local TeamMoves = deps.TeamMoves or { MOVES = {} }
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
   local Bt = {}
@@ -28,6 +29,7 @@ return function(mod, deps)
   local EffectIds = engine("src.core.game3.battle.effect_ids")
   local Pokemon = engine("src.core.game3.pokemon")
   local Progression = engine("src.core.game3.progression")
+  local HeldItems = engine("src.core.game3.battle.held_items")
 
   -- ------- types
 
@@ -153,9 +155,11 @@ return function(mod, deps)
       if okN and type(n) == "string" and not n:find("^%-+$") then name = n end
     end
     local power = tonumber(m.power) or 0
+    local key = type(ref) == "string" and ref:upper() or (type(m.id) == "string" and m.id:upper():gsub(" ", "_") or nil)
     return {
       ref = m, num = m.numId, name = titled(name), type = tonumber(m.type) or 0,
-      key = type(ref) == "string" and ref:upper() or (type(m.id) == "string" and m.id:upper():gsub(" ", "_") or nil),
+      key = key, team = key and TeamMoves.MOVES[Bt.squash(key)] or nil,
+      contact = bitlib and bitlib.band(tonumber(m.flags) or 0, 1) ~= 0 or false,
       typeName = Bt.typeName(m.type), power = power, accuracy = tonumber(m.accuracy) or 0,
       priority = tonumber(m.priority) or 0, status = power == 0,
       spread = bitlib and (bitlib.band(tonumber(m.target) or 0, SPREAD) ~= 0) or false,
@@ -215,7 +219,34 @@ return function(mod, deps)
         if mv then b.moves[#b.moves + 1] = mv end
       end
     end
+    -- Dynamax (the National Dex's marks on the Pokemon): whether it can, its Dynamax Level, its
+    -- G-Max Move when it has the factor and the form; each move's Max form for when it does
+    local dx = Bt.dynamax()
+    b.canDmax = true
+    b.dmaxLevel = 0
+    if dx then
+      local okC, can = pcall(dx.canDynamax, copy)
+      b.canDmax = not okC or can ~= false
+      local okL, lv = pcall(dx.level, copy)
+      b.dmaxLevel = okL and tonumber(lv) or 0
+      local okG, gm = pcall(dx.canGigantamax, copy)
+      if okG and gm then
+        local okM, id = pcall(dx.gmaxMoveOf, copy)
+        b.gmaxId = okM and id or nil
+      end
+      local okH, mult = pcall(dx.hpMult, b.dmaxLevel)
+      b.dmaxMult = okH and tonumber(mult) or nil
+    end
+    b.dmaxMult = b.dmaxMult or (1.5 + 0.05 * b.dmaxLevel)
+    b.maxMoves = {}
+    for i, mv in ipairs(b.moves) do b.maxMoves[i] = Bt.maxOf(mv, b.gmaxId) end
     return b
+  end
+
+  -- the National Dex's Dynamax (exports.dynamax), or nil on an older one
+  function Bt.dynamax()
+    local dex = deps.dex and deps.dex()
+    return dex and type(dex.dynamax) == "table" and dex.dynamax or nil
   end
 
   -- a stat at a level (Gen 3's formula; HP its own), from a base, an IV, no EVs, neutral nature
@@ -297,10 +328,19 @@ return function(mod, deps)
     return boss
   end
 
-  -- a Max Move's power from its base move's (Gmax.POWER_BANDS; Fighting and Poison the lower column)
-  function Bt.maxPower(power, typeName)
+  -- a Max Move's power from its base move's: the move's own (data/raid_maxpower.lua), 100 for a move
+  -- with no power of its own, else its power's band (Gmax.POWER_BANDS; Fighting and Poison the lower
+  -- column)
+  local MaxPower = deps.MaxPower or {}
+  local function squash(key) return type(key) == "string" and key:lower():gsub("[^%w]", "") or nil end
+  Bt.squash = squash
+  function Bt.maxPower(power, typeName, key)
+    local own = key and MaxPower[squash(key)]
+    if own then return own end
+    power = tonumber(power) or 0
+    if power <= 1 then return 100 end
     for _, row in ipairs(Gmax.POWER_BANDS or {}) do
-      if power <= row[1] then return (typeName == "FIGHTING" or typeName == "POISON") and row[3] or row[2] end
+      if power < row[1] then return (typeName == "FIGHTING" or typeName == "POISON") and row[3] or row[2] end
     end
     return 130
   end
@@ -312,11 +352,11 @@ return function(mod, deps)
     if not g then return nil end
     local power = g.power
     if not power then
-      local best = 0
+      local best, bestMv = 0, nil
       for _, mv in ipairs(boss.moves or {}) do
-        if mv.typeName == g.type and not mv.status and mv.power > best then best = mv.power end
+        if mv.typeName == g.type and not mv.status and mv.power > best then best, bestMv = mv.power, mv end
       end
-      power = best > 0 and Bt.maxPower(best, g.type) or 130
+      power = bestMv and Bt.maxPower(best, g.type, bestMv.key) or 130
     end
     local t = Bt.typeNum(g.type)
     local effect = nil
@@ -327,7 +367,7 @@ return function(mod, deps)
     end
     return {
       name = g.name or ("G-Max " .. titled(id)), type = t, typeName = g.type, power = power, accuracy = 0, key = id,
-      priority = 0, status = false, spread = true, isGmax = true, gmaxEffect = effect, pp = 99, maxPp = 99,
+      priority = 0, status = false, spread = true, isGmax = true, gmaxEffect = effect, pierce = g.pierce, pp = 99, maxPp = 99,
       ref = { id = "MAX_RAIDS_GMAX_" .. id, numId = 0, power = power, type = t, accuracy = 0, pp = 1, effect = 0,
         priority = 0, target = 8, flags = 0, secondaryChance = 0 },
     }
@@ -346,14 +386,45 @@ return function(mod, deps)
       end
     end
     if not best then return nil end
-    local row = Gmax.MAX and Gmax.MAX[best.typeName] or {}
-    local power = Bt.maxPower(best.power, best.typeName)
-    local t = best.type
+    local mv = Bt.maxOf(best)
+    mv.spread = true
+    return mv
+  end
+
+  -- the Max form of one move (a Dynamaxed Pokemon's): a damaging move the Max Move of its type
+  -- (Gmax.MAX: name, effect) at its Max power, or the G-Max Move when gmaxId's type is the move's
+  -- (its fixed power, else the move's Max power); a status move Max Guard (+4, protects). Never
+  -- misses; spends the base move's PP (`base`); one target
+  function Bt.maxOf(mv, gmaxId)
+    if mv.status then
+      return {
+        name = "Max Guard", type = 0, typeName = "NORMAL", power = 0, accuracy = 0, key = "MAX_GUARD",
+        priority = 4, status = true, guard = true, spread = false, isGmax = true, isMax = true, base = mv,
+        pp = mv.pp, maxPp = mv.maxPp,
+        ref = { id = "MAX_RAIDS_MAX_GUARD", numId = 0, power = 0, type = 0, accuracy = 0, pp = 1, effect = 0,
+          priority = 4, target = 16, flags = 0, secondaryChance = 0 },
+      }
+    end
+    local g = gmaxId and Gmax.MOVES and Gmax.MOVES[gmaxId]
+    if g and g.type == mv.typeName then
+      local gm = Bt.gmaxMove(gmaxId, { moves = { mv } })
+      if gm then
+        gm.spread, gm.base, gm.baseKey, gm.pp, gm.maxPp = false, mv, mv.key, mv.pp, mv.maxPp
+        if not g.power then
+          gm.power = Bt.maxPower(mv.power, mv.typeName, mv.key)
+          gm.ref.power = gm.power
+        end
+        return gm
+      end
+    end
+    local row = Gmax.MAX and Gmax.MAX[mv.typeName] or {}
+    local power = Bt.maxPower(mv.power, mv.typeName, mv.key)
+    local t = mv.type
     return {
-      name = row.name or ("Max " .. titled(best.typeName)), type = t, typeName = best.typeName, power = power,
-      accuracy = 0, key = "MAX_" .. best.typeName, baseKey = best.key, priority = 0, status = false, spread = true,
-      isGmax = true, isMax = true, gmaxEffect = row.effect, pp = 99, maxPp = 99,
-      ref = { id = "MAX_RAIDS_MAX_" .. best.typeName, numId = 0, power = power, type = t, accuracy = 0, pp = 1,
+      name = row.name or ("Max " .. titled(mv.typeName)), type = t, typeName = mv.typeName, power = power,
+      accuracy = 0, key = "MAX_" .. mv.typeName, baseKey = mv.key, priority = 0, status = false, spread = false,
+      isGmax = true, isMax = true, gmaxEffect = row.effect, base = mv, pp = mv.pp, maxPp = mv.maxPp,
+      ref = { id = "MAX_RAIDS_MAX_" .. mv.typeName, numId = 0, power = power, type = t, accuracy = 0, pp = 1,
         effect = 0, priority = 0, target = 8, flags = 0, secondaryChance = 0 },
     }
   end
@@ -390,14 +461,27 @@ return function(mod, deps)
     end
 
     -- the damage of att's move on def: dmg, info (effectiveness, critical); 0 for an immunity
-    function A.damage(att, def, mv, spread)
+    function A.damage(att, def, mv, spread, o)
+      o = o or {}
       local ab = abilityName(def)
       if ab and IMMUNE[ab] == mv.type then return 0, { effectiveness = 0, immuneBy = ab } end
       if ab == "WONDER_GUARD" and A.effectiveness(mv.type, def) <= 1 then return 0, { effectiveness = 0, immuneBy = ab } end
       if not Damage then return 1, { effectiveness = 1 } end
       st.player, st.enemy = att.side == "player" and att or def, att.side == "player" and def or att
+      -- (a Dynamaxed Pokemon's Choice item does nothing)
+      local heldBack = nil
+      if att.dmax and HeldItems and HeldItems.of then
+        local okH, he = pcall(HeldItems.of, att, "damage", st)
+        if okH and HeldItems.HOLD and he == HeldItems.HOLD.CHOICE_BAND then heldBack, att.item = att.item, 0 end
+      end
+      -- (the target side's screens; Helping Hand: the engine's own x1.5)
+      local helpedWas = att.expHelpingHand
+      if o.helped then att.expHelpingHand = true end
       local ok, dmg, info = pcall(Damage.calc, att, def, mv.ref, { adapter = engineAdapter, st = st, rng = rng,
-        weather = st.weather, spread = spread or nil, highCrit = (att.critUp or 0) > 0 or nil })
+        weather = st.weather, spread = spread or nil, highCrit = (att.critUp or 0) > 0 or nil,
+        reflect = o.reflect or nil, lightScreen = o.lightScreen or nil, doubleScreens = o.doubleScreens or nil })
+      att.expHelpingHand = helpedWas
+      if heldBack ~= nil then att.item = heldBack end
       if not ok then
         mod.log:warn("raid damage failed (%s): %s", tostring(mv.name), tostring(dmg))
         return 1, { effectiveness = 1 }

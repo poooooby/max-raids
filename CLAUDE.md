@@ -50,6 +50,108 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
 - **Dens in the overworld,** generated on routes: 1–2 per outdoor route, seeded per save, saved once
   chosen, refreshing daily. Star tiers by badges are Sword / Shield's (2026-10-27, Wooble: "keep it how
   SWSH has it"): `RAID.BADGE_STARS` 0: 1★, 1-2: 1-2, 3: 1-3, 4: 2-3, 5-6: 3-4, 7-8: 3-5, an even pick.
+- **The team's Dynamax** (2026-10-27, Wooble: "SwSh exact"; any Pokemon but Zacian / Zamazenta /
+  Eternatus; segmented to raids). National Dex Gen 3 holds the marks (its `exports.dynamax`, src/dynamax.lua
+  there: `mon.extra.national_dex_gen3 = { dynamaxLevel, gmaxFactor }`, the items, the summary marks);
+  without it every member Dynamaxes at Level 0, no Gigantamax.
+  - **Energy** (`raid_sim.lua` `giveEnergy`, `canDynamax`): turn 1 slot 1, then the next each turn,
+    skipping one used / `canDmax == false` / out; none while one is Dynamaxed; each once a raid.
+  - **Dynamax** (choice `{ move, dmax = true }`, before anyone moves): HP and max x `m.dmaxMult`
+    (1.5 + 0.05 x Level), 3 turns (countdown in `endTurn`), revert keeping the share (`undynamax`; quiet
+    at a faint). Moves -> `m.maxMoves` (`Bt.maxOf`: the Max Move of its type, the G-Max Move when the
+    factor's move has that type, Max Guard (+4) for a status move; never misses, the base move's PP).
+  - **Max power** (`Bt.maxPower`): `data/raid_maxpower.lua` (Showdown's 50 explicit), else 100 for no
+    power, else Showdown's bands (`Gmax.POWER_BANDS`: < 45 .. 150+; they had been off at 41-44 / 101-109
+    / 141-149).
+  - **Max Guard**: blocks the boss's move (`guard` event, `blocked`) unless `pierce` (One Blow, Rapid
+    Flow); in a row 1 in 3^n.
+  - **Rules vs a Dynamaxed target** (the boss always): `Sim.WEIGHT` / `NO_DMAX` fail, `ANTI_DMAX` x2;
+    a Dynamaxed attacker's Choice Band does nothing (adapter). No flinch / switching exist in the sim.
+  - **The team's Max / G-Max effects** (`gmaxEffect`, `att` not the boss): `boost` on the whole team,
+    foe `stages` / status / drowsy / trap on the boss, `field` -> `sim.bossField` (the boss hurt 1/frac a
+    turn, `foeField` on the event, no team flames), veil -> Aurora Veil on the team's side
+    (`sim.sides.team.veil`, a screen), heal / cure / crit on the team, `defog` (Wind Rage) blows the other
+    side's screens, Safeguard and mist away (`Sim:blowAway`), `coins` (Gold Rush:
+    level x 100 x uses, to 3) -> `sim.money`, paid by `Rw.give` (Prize.apply) as a "Coins" card row.
+  - **Presentation**: the DYNAMAX button (`Pad.drawDynamaxButton`; main screen left of Back, second screen
+    in the header - the moves' title is gone) while `c.canDmax`; SELECT / R toggles; rows `max` (red rim,
+    the Max names); the event: spread shot, `Fx.charge`, then `m.giant` eases to 1 over `Rd.DMAX.GROW_S`
+    (after `CHARGE_S`), the cry; `Scene.GIANT` 2.6x, `Sc.memberAura` (the boss's aura; G-Max cloud crown),
+    `Sc.GIANT_SHOT` pulls the member / target shots back; a Gigantamaxed member is drawn as its form's
+    animated back sheet once grown past halfway (`Rd.gmaxBackFor`: the pack key whose `gmax` is its
+    G-Max Move and its species, `assets/bosses/backs/`, baked by tools/raid_pack.py as `back` in
+    data/raid_sprites.lua; `Rd.memberPicNow` sizes it to its own picture x `GMAX_BACK_K`, no cloud
+    crown then); the member's own Max Move charges on it
+    (`Rd.stepMove` by user); HUD red HP frames, the "DYNAMAX n" tab, the Energy ring in the order rows.
+  - **Catches** (`Rw.throw`): `raidStartLevel(stars)` (PKHeX: 1-2 .. 6-8) and the factor from a Giga
+    Megas boss whose species has a G-Max form. Drops: Dynamax Candy 1 (2 at 5★, Serebii), Max
+    Mushrooms 10-15% from 3★, Max Honey 5% at 5★ (ours).
+  - Tests: raid_sim_test (Energy, HP, revert, faint, Max Guard, pierce, team boosts, Wildfire, Gold
+    Rush, Low Kick / Roar / Behemoth Blade / Heavy Slam); driver `tests/drivers/dynamax_probe.lua`
+    (m01-m07 shots, catch marks, drops).
+- **Team moves** (2026-10-27, Wooble: "protective moves can guard the entire team, or heal team members";
+  a raid is a multi battle, the four one side). `data/raid_team_moves.lua` (`T.MOVES` by squashed id ->
+  kind; `T.WORDS`; main loads it as `TeamMoves`, `Bt.move` puts the row on the move as `team`, and
+  `contact` from flag bit 0); `raid_sim.lua` `self.sides = { team, boss }` (`Sim.newSide`):
+  - screens reflect / light / veil (Aurora Veil fails: no hail) 5 turns: the adapter's `opts`
+    (reflect, lightScreen, doubleScreens = a member's side, helped) go to the engine's Damage.calc,
+    which cuts 2 / 3 (doubles) or 1 / 2 and not on a crit; Helping Hand is the engine's
+    `expHelpingHand` x1.5. G-Max Resonance = Aurora Veil; the boss's veil `b.veil` mirrors
+    `sides.boss.veil` (`syncVeil`) for the drawing.
+  - safeguard (Sim:status `by` from the other side), mist (Sim:stage `by`, a drop from the other side;
+    `mistSaid` once a move), tailwind (Speed x2 in the order) - 5 / 5 / 4 turns, `side` events up / down.
+  - the turn's guards (`sides.X.guards`): wide (spread), quick (priority > 0), mat (damaging; only
+    on `outSince == turnNo`, the first turn out), crafty (status). `Sim:stopped` -> "block" or, for a
+    Max / G-Max move (isGmax, not status), "pierce": a quarter, the `guard` event `pierced` after the
+    damage. Max Guard (`guard == "max"`) stops Max moves; `pierce` moves (One Blow, Rapid Flow) go
+    through everything.
+  - protect kin (`guard == "protect"`, `protectRow`: King's Shield / Obstruct `damagingOnly`; contact
+    costs `Sim:contactCost`), Endure (`endure`, keeps 1 HP), Max Guard: one run `guardRoll` (1 in 3^n).
+  - redirect (Follow Me / Rage Powder: `sides.team.redirect`, the boss's single-target moves; the boss's
+    fails), help, heal (team / ally / Pollen Puff `orFoe`: an ally heals, the boss is an attack -
+    `asTeamMove`), cure (Heal Bell / Aromatherapy), wish (`sides.X.wish`, the end of the next turn,
+    on the slot; heal event `wish = true`), sacrifice (Healing Wish / Lunar Dance: the user faints,
+    counted), boost (team / allies / ally / grass; `ability` Plus / Minus through `A.abilityName`).
+    The boss's team moves work on its side (screens, protect, heals itself); its ally moves fail.
+  - Ally moves ask whom: choice `{ move, target = j | "boss" }`; raid.lua `c.moveSlot` + menu "target"
+    (the user's row not live; Pollen Puff's own row is the boss, "Foe"); Back returns to the moves;
+    pad title "Use X on whom?". Dynamaxed, a team status move is Max Guard (no target).
+  - Looks (`fx.lua` Fx.setTeam(Rd.teamState()) each frame; the sim's state is the turn's END, so
+    raid.lua keeps what shows from the events: `r.sideFx[side][what] = t0` / `whatOff` (fading),
+    `r.turnFx` (guards, Follow Me) and `r.protectFx` cleared at the commands, `r.wishFx` until the
+    `wish` heal): panes of glass in front of the side (`drawPane`: bowed, tinted, a glint sweeping,
+    bright edges, ribs; Light Screen gold, Reflect blue, Aurora Veil rainbow; `Fx.TEAM.STEP` apart;
+    the boss's in front of it), Safeguard a mint dome + ground ring (half in "mid", half "front") with
+    twinkles, mist a ground haze + smoke, Tailwind streaks toward the boss, Wide / Quick / Crafty a
+    turn's pane (flaring on a block: `Fx.teamHit`), Mat Block a mat flipping up, Follow Me a spotlight,
+    Protect / Max Guard a bubble (green / red; a ripple when struck), a wish's star; `Fx.teamCast`
+    flashes, `Fx.healSparkle` on every heal. Sounds `Sounds.SIDE` by what (Gen 3's own: SE_M_REFLECT,
+    SE_M_MIST, SE_M_GUST, SE_M_HEAL_BELL ...).
+  - Not in Sword / Shield, left out: Lucky Chant, Lunar Blessing, Silk Trap, Burning Bulwark, Dragon
+    Cheer. Ally Switch does nothing (no places).
+  - Tests: raid_sim_test (screens, Wind Rage, Safeguard, Mist, Tailwind, every guard, Protect / pierce /
+    Spiky Shield, Endure, Follow Me, Helping Hand, heals, Wish, Healing Wish, boosts); driver
+    `tests/drivers/team_moves_probe.lua` (t01-t13 shots, the target menu).
+- **The Dynamax Crystal** (National Dex item 958; 2026-10-27, Wooble: "legendary raid key"): the den
+  screen's cursor 7, a pill over START (over EXIT on a quiet den) while `Rd.crystals()` > 0 or one is in
+  use (`r.legend`). `Rd.useCrystal` picks `Dy.pickLegend` (every legendary and mythical that can Dynamax:
+  the cart's own `Dy.CART_LEGENDS` - found by scanning, as speciesFromNational answers a National Dex form -
+  and the National Dex's `listSpecies` legendary or mythical; 91 with National Dex 1.4) as `DYNA:<id>:5:L` (record `legend`, script
+  fierce); "PUT IT AWAY" goes back to `r.denKey`. `Rd.denStart` spends the crystal; `onEnd` leaves the den
+  alone for a legend raid; `Rw.throw` always catches a `legend` boss (the Max Lair's). Drop
+  `RAID.REWARD.DYNAMAX_CRYSTAL` 2% at 4★, 8% at 5★. Driver `tests/drivers/crystal_probe.lua`.
+- **The four spaced round a giant** (`Sc.memberPos(i)`, used by `memberAt`, the target / member shots and
+  raid.lua's `placeOf`): with any `Sc.giant[i]` > 0 the line is laid out again, each slot
+  max(`SLOT_W`, its picture's own width (`Sc.memberWidth`, from its opaque box at MEMBER_PIC_H, set by
+  its draw) x its size + `SLOT_GAP`), centred; a giant `GIANT_BACK` further back. Eased with the
+  growing, so the others slide aside and back.
+- **Portrait screens** (`Rd.uiBox(w, h)`): narrower than `UI_ASPECT` 1.0 the battle UI is drawn in a
+  w x w box - the boss's block and the order at the top, the words / panel / pad / catch translated to
+  the foot (`r.uiBand`); narrower than `CARD_ASPECT` 1.5 the den screen and rewards card in a w x w/1.5
+  box centred (`r.uiCard`), their ground carried past it (`Den.ground`, the card's amber and purple).
+  `pointerInner` moves taps back (`evAt`). The scene centres its 3:2 view at `Sc.PORTRAIT_CY` 0.42 of
+  the height. Landscape is unchanged (band 0). Driver `tests/drivers/portrait_probe.lua` (540 x 1170:
+  shots, a tap on Fight at its drawn place).
 - **Boss IVs and HP are Sword / Shield's** (2026-10-27, Wooble): `STARS[n].perfect` 1 / 2 / 3 / 4 / 4
   IVs at 31, the stats chosen at random, the rest 0-31 (`Bt.rollIvs`; a preview without a roll: the
   first ones, the rest 15); the caught Pokemon keeps them (`Rw.throw(..., ivs)` sets `mon.ivs`,

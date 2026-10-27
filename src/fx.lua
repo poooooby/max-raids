@@ -1973,7 +1973,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
-  local drawLasting, stepField   -- (below: what lasts)
+  local drawLasting, stepField, stepTeam   -- (below: what lasts)
 
   -- ------- the clock
 
@@ -1984,6 +1984,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if dt > 0 then
       stepCharge(now, dt)
       stepField(now, dt)
+      stepTeam(now, dt)
       for i = 1, #moves do
         local m = moves[i]
         stepMove(m, now, dt)
@@ -2354,12 +2355,421 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G2.setLineWidth(1)
   end
 
+  -- ------- the team moves: what they leave on the field (src/raid.lua Rd.teamState each frame, by
+  -- Fx.setTeam): Light Screen / Reflect / Aurora Veil as panes of glass standing in front of their
+  -- side (gold, blue, the aurora's colours), Safeguard a mint dome over the team, mist a haze on the
+  -- ground, Tailwind streaks of wind blowing past toward the boss; the turn's guards (Wide Guard a
+  -- broad green wall, Quick Guard a quick blue one, Crafty Shield a pink sparkling one, Mat Block a
+  -- mat flipped up), Follow Me's spotlight, Protect's and Max Guard's bubbles, a wish's star.
+  local team = nil
+  local teamHits = {}
+  local function ease1(x) x = min(1, max(0, x)); return x * x * (3 - 2 * x) end
+  function Fx.setTeam(state, now) team = state end
+  function Fx.teamHit(what, now) teamHits[what or "protect"] = now end
+
+  Fx.TEAM = {
+    -- a pane's colours (r, g, b) and how strongly it shows
+    PANE = { light = { 1, 0.82, 0.32, 1 }, reflect = { 0.45, 0.66, 1, 1 }, veil = { 0.6, 0.95, 0.9, 1 },
+      wide = { 0.5, 1, 0.68, 0.9 }, quick = { 0.55, 0.88, 1, 0.9 }, crafty = { 1, 0.55, 0.85, 0.9 } },
+    -- each pane's place in front of its side (metres toward the boss), so two stand apart
+    STEP = { reflect = 0, light = 0.3, veil = 0.6, wide = 0.9, quick = 0.9, crafty = 1.05 },
+    RISE_S = 0.45, FADE_S = 0.6,
+    SAFEGUARD = { 0.55, 1, 0.75 }, MIST = { 0.92, 0.95, 1 }, WIND = { 0.8, 0.95, 1 },
+    PROTECT = { 0.45, 1, 0.6 }, MAX_GUARD = { 1, 0.32, 0.48 }, MAT = { 0.6, 0.2, 0.17 },
+  }
+
+  -- the team's extent: the members' leftmost / rightmost, the front (toward the boss), their height
+  local ext = { x0 = 0, x1 = 0, z = 0, h = 0, cx = 0, cz = 0 }
+  local function teamExtent()
+    if not (team and team.team and #team.team > 0) then return nil end
+    local x0, x1, zf, h, zs = 1e9, -1e9, 1e9, 0, 0
+    for _, A in ipairs(team.team) do
+      local half = max(0.75, A.h * 0.5)
+      x0, x1 = min(x0, A.X - half), max(x1, A.X + half)
+      zf = min(zf, A.Z)
+      h = max(h, A.h)
+      zs = zs + A.Z
+    end
+    ext.x0, ext.x1, ext.z, ext.h = x0 - 0.4, x1 + 0.4, zf - 1.1, h * 1.2 + 0.5
+    ext.cx, ext.cz = (x0 + x1) / 2, zs / #team.team
+    return ext
+  end
+
+  -- the HSV rainbow for Aurora Veil's pane
+  local function aurora(f)
+    local h = (f % 1) * 6
+    local i, q = floor(h), h - floor(h)
+    local t = { { 1, q, 0 }, { 1 - q, 1, 0 }, { 0, 1, q }, { 0, 1 - q, 1 }, { q, 0, 1 }, { 1, 0, 1 - q } }
+    local c = t[i % 6 + 1]
+    return 0.55 + 0.45 * c[1], 0.55 + 0.45 * c[2], 0.55 + 0.45 * c[3]
+  end
+
+  -- a pane of glass standing from x0 to x1 at Z (bowed `bow` toward the boss in its middle), H tall:
+  -- the glass faintly tinted, a glint sweeping across it, bright edges, faint ribs; rising out of the
+  -- ground as it goes up (t0), fading as it ends (off), flaring when struck (hitT)
+  local paneTop, paneBot = {}, {}
+  local function drawPane(G2, x0, x1, Z, H, key, t0, off, now, bow, hitT)
+    if not stripReady() then return end
+    local C = Fx.TEAM.PANE[key] or Fx.TEAM.PANE.light
+    local rise = t0 and ease1(min(1, max(0, (now - t0) / Fx.TEAM.RISE_S))) or 1
+    local a = C[4] * (off and max(0, 1 - (now - off) / Fx.TEAM.FADE_S) or 1)
+    if a <= 0 or rise <= 0 then return end
+    local hit = hitT and max(0, 1 - (now - hitT) / 0.5) or 0
+    local h = H * rise
+    local N = 20
+    local phase = ((now - (t0 or 0)) * (key == "quick" and 0.9 or 0.32)) % 1.7 - 0.35
+    local n = 0
+    for i = 0, N do
+      local f = i / N
+      local X = x0 + (x1 - x0) * f
+      local Zc = Z - (bow or 0.35) * (1 - (2 * f - 1) ^ 2)
+      local tx, ty = P(X, h, Zc)
+      local bx, by = P(X, 0.02, Zc)
+      if not (tx and bx) then return end
+      paneTop[i * 2 + 1], paneTop[i * 2 + 2] = tx, ty
+      paneBot[i * 2 + 1], paneBot[i * 2 + 2] = bx, by
+      local r, g, b = C[1], C[2], C[3]
+      if key == "veil" then r, g, b = aurora(f * 0.9 + now * 0.08) end
+      local gt = max(0, 1 - abs((f - 0.35) - phase) * 7)
+      local gb = max(0, 1 - abs(f - phase) * 7)
+      n = n + 1; sv(n, tx, ty, f, 0, r, g, b, a * (0.12 + 0.45 * gt + 0.3 * hit))
+      n = n + 1; sv(n, bx, by, f, 1, r, g, b, a * (0.3 + 0.45 * gb + 0.3 * hit))
+    end
+    for q = (N + 1) * 2 + 1, #paneTop do paneTop[q], paneBot[q] = nil, nil end
+    G2.setColor(1, 1, 1, 1)
+    stripDraw(G2, n)
+    -- the edges (added: they glow), the ribs across it
+    local _, _, k = P((x0 + x1) / 2, h, Z)
+    k = k or 20
+    G2.setBlendMode("add")
+    local r, g, b = C[1], C[2], C[3]
+    G2.setLineWidth(max(1, k * 0.03))
+    G2.setColor(r, g, b, a * (0.7 + 0.3 * hit))
+    G2.line(paneTop)
+    G2.setColor(r, g, b, a * 0.35)
+    G2.line(paneBot)
+    G2.setColor(r, g, b, a * (0.55 + 0.3 * hit))
+    G2.line(paneTop[1], paneTop[2], paneBot[1], paneBot[2])
+    G2.line(paneTop[#paneTop - 1], paneTop[#paneTop], paneBot[#paneBot - 1], paneBot[#paneBot])
+    G2.setLineWidth(max(1, k * 0.012))
+    G2.setColor(r, g, b, a * 0.18)
+    for rib = 1, 3 do
+      local f = rib / 4
+      for q = 1, #paneTop, 2 do
+        veilPts[q] = paneBot[q] + (paneTop[q] - paneBot[q]) * f
+        veilPts[q + 1] = paneBot[q + 1] + (paneTop[q + 1] - paneBot[q + 1]) * f
+      end
+      for q = #paneTop + 1, #veilPts do veilPts[q] = nil end
+      G2.line(veilPts)
+    end
+    -- the line it rises from
+    if rise < 1 then
+      G2.setLineWidth(max(1, k * 0.05))
+      G2.setColor(1, 1, 1, a * (1 - rise))
+      G2.line(paneBot)
+    end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+
+  -- Mat Block: a mat flipped up from the ground in front of the team (a slab hinged at its foot)
+  local matPts = {}
+  local function drawMat(G2, E, t0, now, hitT)
+    local u = ease1(min(1, (now - t0) / 0.3))
+    local ang = u * pi / 2
+    local H = min(1.9, E.h * 0.8)
+    local Z = E.z - 0.9
+    local C = Fx.TEAM.MAT
+    local hit = hitT and max(0, 1 - (now - hitT) / 0.4) or 0
+    local function at(X, f)
+      return P(X, sin(ang) * H * f, Z - cos(ang) * H * f)
+    end
+    local ax, ay = at(E.x0 + 0.3, 0)
+    local bx, by = at(E.x1 - 0.3, 0)
+    local cx, cy = at(E.x1 - 0.3, 1)
+    local dx, dy = at(E.x0 + 0.3, 1)
+    if not (ax and bx and cx and dx) then return end
+    matPts[1], matPts[2], matPts[3], matPts[4], matPts[5], matPts[6], matPts[7], matPts[8] = ax, ay, bx, by, cx, cy, dx, dy
+    G2.setColor(C[1] + 0.3 * hit, C[2] + 0.2 * hit, C[3] + 0.1 * hit, 0.92)
+    G2.polygon("fill", matPts)
+    G2.setColor(C[1] * 0.55, C[2] * 0.55, C[3] * 0.55, 0.95)
+    G2.setLineWidth(3)
+    G2.polygon("line", matPts)
+    -- its woven bands
+    G2.setLineWidth(1)
+    G2.setColor(0.85, 0.55, 0.35, 0.5)
+    for j = 1, 5 do
+      local f = j / 6
+      local x1, y1 = at(E.x0 + 0.3, f)
+      local x2, y2 = at(E.x1 - 0.3, f)
+      if x1 and x2 then G2.line(x1, y1, x2, y2) end
+    end
+  end
+
+  -- Safeguard: a mint dome over the team, its foot a glowing ring on the ground (half drawn behind the
+  -- team, half in front, as the G-Max fields)
+  local function drawDome(G2, E, back, t0, off, now)
+    if not stripReady() then return end
+    local rise = ease1(min(1, (now - (t0 or 0)) / 0.6))
+    local a = (off and max(0, 1 - (now - off) / Fx.TEAM.FADE_S) or 1) * rise
+    if a <= 0 then return end
+    local C = Fx.TEAM.SAFEGUARD
+    local RX, RZ = (E.x1 - E.x0) / 2 + 0.6, 2.0
+    local H = E.h * 1.15 * rise
+    local a0 = back and pi or 0
+    local n = 0
+    local N = 24
+    for i = 0, N do
+      local th = a0 + pi * i / N
+      local X, Z = E.cx + cos(th) * RX, E.cz + sin(th) * RZ
+      local tx, ty = P(X, H, Z)
+      local bx, by = P(X, 0.02, Z)
+      if not (tx and bx) then return end
+      local shimmer = 0.5 + 0.5 * sin(th * 6 - now * 2.4)
+      n = n + 1; sv(n, tx, ty, 0, 0, C[1], C[2], C[3], 0)
+      n = n + 1; sv(n, bx, by, 0, 1, C[1], C[2], C[3], a * (0.16 + 0.12 * shimmer))
+    end
+    G2.setColor(1, 1, 1, 1)
+    G2.setBlendMode("add")
+    stripDraw(G2, n)
+    groundRing(G2, E.cx, 0.02, E.cz, RX, 0.18, C[1], C[2], C[3], a * 0.55)
+    G2.setBlendMode("alpha")
+  end
+
+  -- the mist: a white haze lying on the ground round the team, drifting
+  local function drawHaze(G2, E, t0, off, now)
+    local a = (off and max(0, 1 - (now - off) / Fx.TEAM.FADE_S) or 1) * min(1, (now - (t0 or 0)) / 0.8)
+    if a <= 0 then return end
+    local C = Fx.TEAM.MIST
+    for j = 1, 14 do
+      local X = E.x0 - 0.8 + (E.x1 - E.x0 + 1.6) * ((rnd(51, j) + now * 0.02 * (rnd(53, j) - 0.5)) % 1)
+      local Z = E.cz - 2.2 + 3.6 * rnd(57, j)
+      local x, y, k = P(X, 0.25, Z)
+      if x then
+        glowAt(G2, x, y, k * (1.6 + rnd(59, j)), C[1], C[2], C[3], a * (0.26 + 0.08 * sin(now * 0.7 + j)))
+      end
+    end
+  end
+
+  -- Tailwind: streaks of wind blowing from behind the team toward the boss (those at Z in this layer)
+  local function drawWind(G2, E, layer, t0, off, now)
+    local a = (off and max(0, 1 - (now - off) / Fx.TEAM.FADE_S) or 1) * min(1, (now - (t0 or 0)) / 0.4)
+    if a <= 0 then return end
+    local C = Fx.TEAM.WIND
+    G2.setBlendMode("add")
+    for j = 1, 22 do
+      local per = 0.9 + 0.5 * rnd(31, j)
+      local u = ((now + rnd(37, j) * per) / per) % 1
+      local X = E.x0 - 0.5 + (E.x1 - E.x0 + 1) * rnd(41, j)
+      local Y = 0.25 + E.h * 1.1 * rnd(43, j) + 0.15 * sin(now * 3 + j)
+      local Z = 2.5 - 11 * u
+      if layerOf(Z) == layer then
+        local x1, y1, k = P(X, Y, Z)
+        local x2, y2 = P(X + 0.1 * sin(j), Y + 0.05, Z + 1.6)
+        if x1 and x2 then
+          G2.setLineWidth(max(1, k * 0.035))
+          G2.setColor(C[1], C[2], C[3], a * 0.45 * sin(u * pi))
+          G2.line(x1, y1, x2, y2)
+        end
+      end
+    end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+
+  -- Protect / Max Guard: a bubble round the battler, a ripple when it stops a blow
+  local function drawBubble(G2, p, now)
+    local A = p.A
+    local x, y, k = P(A.X, A.Y, A.Z + 0.2)
+    if not x then return end
+    local C = p.max and Fx.TEAM.MAX_GUARD or Fx.TEAM.PROTECT
+    local up = ease1(min(1, (now - p.t0) / 0.3))
+    local R = A.h * (p.max and 0.66 or 0.6) * k * up
+    local hit = p.hitT and max(0, 1 - (now - p.hitT) / 0.5) or 0
+    G2.setBlendMode("add")
+    glowAt(G2, x, y, R * 2.2, C[1], C[2], C[3], 0.3 + 0.3 * hit)
+    screenRing(G2, x, y, R, R * 1.04, R * 0.3, C[1], C[2], C[3], 0.6 + 0.12 * sin(now * 3) + 0.4 * hit)
+    screenRing(G2, x, y, R * 0.99, R * 1.03, max(1.5, R * 0.04), 0.9, 1, 0.95, 0.9)
+    -- its hexagon facets, faint
+    G2.setLineWidth(max(1, R * 0.015))
+    G2.setColor(C[1], C[2], C[3], 0.35)
+    for q = 0, 5 do
+      local an = q * pi / 3 + now * 0.2
+      G2.line(x + cos(an) * R * 0.45, y + sin(an) * R * 0.45, x + cos(an) * R * 0.95, y + sin(an) * R * 0.95)
+    end
+    screenRing(G2, x, y, R * 0.45, R * 0.47, max(1, R * 0.02), C[1], C[2], C[3], 0.35)
+    -- a highlight turning round it
+    G2.setLineWidth(max(1, R * 0.05))
+    G2.setColor(1, 1, 1, 0.55)
+    G2.arc("line", "open", x, y, R * 0.86, -2.4 + now * 0.6, -1.6 + now * 0.6, 12)
+    if hit > 0 then
+      local rr = R * (1 + 0.4 * (1 - hit))
+      screenRing(G2, x, y, rr, rr * 1.04, max(1, R * 0.08), 1, 1, 1, hit * 0.8)
+    end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+
+  -- Follow Me / Rage Powder: a spotlight on the one drawing the attacks
+  local function drawSpotlight(G2, A, t0, now)
+    local a = min(1, (now - t0) / 0.3)
+    G2.setBlendMode("add")
+    groundRing(G2, A.X, 0.02, A.Z, A.h * 0.75, 0.35, 1, 0.9, 0.5, a * (0.9 + 0.1 * sin(now * 5)))
+    local tx, ty, k = P(A.X, A.h * 4, A.Z)
+    local bx, by, kb = P(A.X, 0, A.Z)
+    if tx and bx then
+      band(G2, tx, ty, A.h * 0.25 * k, bx, by, A.h * 1.5 * kb, 1, 0.92, 0.6, a * 0.32)
+      glowAt(G2, bx, by, A.h * 1.6 * kb, 1, 0.9, 0.55, a * 0.35)
+    end
+    G2.setBlendMode("alpha")
+  end
+
+  -- a wish: a star twinkling over the place it will come true on
+  local starPts = {}
+  local function drawWish(G2, w, now)
+    local A = w.A
+    local u = min(1, (now - w.t0) / 0.8)
+    local x, y, k = P(A.X, A.h + 0.6 + 0.6 * ease1(u) + 0.08 * sin(now * 2.5), A.Z)
+    if not x then return end
+    local s = k * 0.2 * (0.85 + 0.15 * sin(now * 7))
+    G2.setBlendMode("add")
+    glowAt(G2, x, y, s * 5, 1, 0.9, 0.4, 0.5)
+    for q = 0, 7 do
+      local an = q * pi / 4 + now * 0.4
+      local rr = (q % 2 == 0) and s or s * 0.35
+      starPts[q * 2 + 1], starPts[q * 2 + 2] = x + cos(an) * rr, y + sin(an) * rr
+    end
+    G2.setColor(1, 0.95, 0.6, 0.95)
+    G2.polygon("fill", starPts)
+    G2.setBlendMode("alpha")
+  end
+
+  -- one side's panes, in order from the side out
+  local PANE_ORDER = { "reflect", "light", "veil" }
+  local TURN_PANES = { wide = true, quick = true, crafty = true }
+  local function drawTeam(G2, layer, now)
+    if not team then return end
+    local E = teamExtent()
+    local sides = team.sides or {}
+    local ts = sides.team or {}
+    if E then
+      if layer == "mid" then
+        drawDome(G2, E, true, ts.safeguard, ts.safeguard == nil and ts.safeguardOff or nil, now)
+        if ts.mist or (ts.mistOff and now - ts.mistOff < Fx.TEAM.FADE_S) then drawHaze(G2, E, ts.mist, not ts.mist and ts.mistOff or nil, now) end
+        for _, k in ipairs(PANE_ORDER) do
+          local t0, off = ts[k], ts[k .. "Off"]
+          if t0 or (off and now - off < Fx.TEAM.FADE_S) then
+            drawPane(G2, E.x0, E.x1, E.z - Fx.TEAM.STEP[k], E.h, k, t0 or off - Fx.TEAM.RISE_S, not t0 and off or nil, now)
+          end
+        end
+        for _, g in ipairs(team.turn or {}) do
+          if g.side == "team" then
+            if TURN_PANES[g.what] then
+              drawPane(G2, E.x0 - 0.3, E.x1 + 0.3, E.z - Fx.TEAM.STEP[g.what], E.h * 0.95, g.what, g.t0, nil, now, 0.7,
+                teamHits[g.what])
+            elseif g.what == "mat" then
+              drawMat(G2, E, g.t0, now, teamHits.mat)
+            end
+          end
+        end
+      elseif layer == "front" then
+        drawDome(G2, E, false, ts.safeguard, ts.safeguard == nil and ts.safeguardOff or nil, now)
+      end
+      if ts.tailwind or (ts.tailwindOff and now - ts.tailwindOff < Fx.TEAM.FADE_S) then
+        drawWind(G2, E, layer, ts.tailwind, not ts.tailwind and ts.tailwindOff or nil, now)
+      end
+    end
+    -- the boss's side: its screens in front of it
+    local B = team.boss
+    local bs = sides.boss or {}
+    if B and layer == "mid" then
+      for _, k in ipairs(PANE_ORDER) do
+        local t0, off = bs[k], bs[k .. "Off"]
+        if t0 or (off and now - off < Fx.TEAM.FADE_S) then
+          local hw = B.h * 0.55
+          drawPane(G2, B.X - hw, B.X + hw, B.Z + B.h * 0.5 + 0.8 + Fx.TEAM.STEP[k], B.h * 1.05, k,
+            t0 or off - Fx.TEAM.RISE_S, not t0 and off or nil, now, 0.6)
+        end
+      end
+      for _, g in ipairs(team.turn or {}) do
+        if g.side == "boss" and TURN_PANES[g.what] then
+          local hw = B.h * 0.6
+          drawPane(G2, B.X - hw, B.X + hw, B.Z + B.h * 0.5 + 1.2, B.h, g.what, g.t0, nil, now, 0.6, teamHits[g.what])
+        end
+      end
+    end
+    -- Follow Me's spotlight (behind the member); the bubbles and wishes (in front)
+    if layer == "mid" then
+      for _, g in ipairs(team.turn or {}) do
+        if g.what == "redirect" and g.A then drawSpotlight(G2, g.A, g.t0, now) end
+      end
+    elseif layer == "front" then
+      for _, p in ipairs(team.protect or {}) do drawBubble(G2, p, now) end
+      for _, w in ipairs(team.wishes or {}) do drawWish(G2, w, now) end
+    end
+  end
+
+  -- the team's lasting looks' particles: Safeguard's motes rising, the mist drifting on the ground
+  local teamAcc = 0
+  function stepTeam(now, dt)
+    if not team then return end
+    local E = teamExtent()
+    local ts = team.sides and team.sides.team or {}
+    if not E then return end
+    teamAcc = teamAcc + dt * 12
+    while teamAcc >= 1 do
+      teamAcc = teamAcc - 1
+      seedN = seedN + 1
+      local X = E.x0 + (E.x1 - E.x0) * rnd(seedN, 1)
+      local Z = E.cz - 1.6 + 3.2 * rnd(seedN, 2)
+      if ts.safeguard and rnd(seedN, 3) > 0.5 then
+        local C = Fx.TEAM.SAFEGUARD
+        emit("twinkle", X, 0.2 + rnd(seedN, 4) * E.h, Z, 0, 0.35, 0, 1.6, 0.05, C[1], C[2], C[3], 0.8)
+      end
+      if ts.mist then
+        local C = Fx.TEAM.MIST
+        emit("smoke", X, 0.2, Z, (rnd(seedN, 5) - 0.5) * 0.4, 0.06, (rnd(seedN, 6) - 0.5) * 0.3, 3, 0.9,
+          C[1], C[2], C[3], 0.4)
+      end
+    end
+  end
+
+  -- a team move as it goes up: a flash in its colour, sparkles where it lands
+  function Fx.teamCast(what, side, A, At, now)
+    local C = Fx.TEAM.PANE[what]
+    if C then flash(C, 0.18, 0.35, now)
+    elseif what == "safeguard" then flash(Fx.TEAM.SAFEGUARD, 0.18, 0.4, now)
+    elseif what == "mist" then flash(Fx.TEAM.MIST, 0.2, 0.5, now)
+    elseif what == "tailwind" then flash(Fx.TEAM.WIND, 0.15, 0.4, now)
+    elseif what == "endure" or what == "endured" then
+      if A then emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.5, A.h * 2, 1, 0.45, 0.25, 0.6) end
+    elseif what == "help" and At then
+      burstOf("twinkle", 12, At.X, At.Y, At.Z + 0.3, 1.2, 0.6, 0.8, 0.06, 1, 0.85, 0.4, 1, At.foot)
+    elseif what == "cure" then
+      flash({ 0.6, 1, 0.7 }, 0.15, 0.4, now)
+    elseif what == "sacrifice" and A then
+      emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.9, A.h * 3, 1, 0.75, 0.9, 0.7)
+      burstOf("twinkle", 20, A.X, A.Y, A.Z, 1.5, 0.8, 1.2, 0.06, 1, 0.8, 0.95, 1, A.foot)
+    elseif what == "wish" and A then
+      burstOf("twinkle", 10, A.X, A.h + 0.6, A.Z, 0.8, 0.4, 0.8, 0.05, 1, 0.92, 0.5, 1, A.foot)
+    end
+  end
+
+  -- a heal: green motes rising round it (a wish's: gold, from above)
+  function Fx.healSparkle(A, wish, now)
+    local r, g, b = 0.45, 1, 0.6
+    if wish then r, g, b = 1, 0.92, 0.5 end
+    burstOf("twinkle", 14, A.X, A.Y * 0.6, A.Z + 0.2, 0.9, 0.9, 1.1, 0.05, r, g, b, 1, A.foot)
+    emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.5, A.h * 1.8, r, g, b, 0.35)
+  end
+
   function drawLasting(G2, layer, now)
     drawField(G2, layer, now)
     if layer == "mid" then
       drawVeil(G2, now)
       drawBarrier(G2, now)
     end
+    drawTeam(G2, layer, now)
   end
 
   -- (the first pass's screen-space drawing; the raid sets what lasts with Fx.setLasting now)

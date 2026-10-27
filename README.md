@@ -9,7 +9,9 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 > [!NOTE]
 > **Requires [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3).** It brings the
 > raid bosses' and your Pokémon's modern moves, the Fairy type, abilities and the Exp. Candies the
-> raids reward (with a National Dex Gen 3 that has no Exp. Candies yet, a Rare Candy takes their place). [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)
+> raids reward (with a National Dex Gen 3 that has no Exp. Candies yet, a Rare Candy takes their place),
+> and the Dynamax Levels, Gigantamax Factor and Dynamax items (with an older one, every Pokémon
+> Dynamaxes at Level 0 and no Gigantamax). [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)
 > is recommended for your Pokémon's animated back sprites.
 
 ## ✨ Features
@@ -62,6 +64,31 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
   stats, or breaking the barrier.
 - ⏳ **Ten turns, four faints:** the raid is lost if your Pokémon faint four times or the battle
   runs past ten turns. A fainted Pokémon is back at full health the turn after next.
+- 🔴 **Dynamax your own:** as in Sword and Shield, each turn one of your four holds the Dynamax
+  Energy (your first Pokémon first, then the next each turn), shown by a glowing ring beside it.
+  The one holding it can press **DYNAMAX** on its move list: it grows giant for three turns, its HP
+  raised by its Dynamax Level (×1.5 up to ×2), and its moves become Max Moves (status moves become
+  Max Guard). A Pokémon with the Gigantamax Factor and a Gigantamax form Gigantamaxes: it takes
+  its Gigantamax form (fully animated, from the pack) and uses its G-Max Move. The factor comes
+  from catching it in a Gigantamax raid, or from a Max Soup (three Max Mushrooms; Urshifu also
+  needs a Max Honey). Each of your four can Dynamax once a raid, one at a time. Zacian, Zamazenta and
+  Eternatus can't.
+- 🧱 **Max Moves as the games have them:** their power from the move they come from, Max Guard
+  blocking every attack but G-Max One Blow and Rapid Flow, the team's Max Airstream, Knuckle, Ooze,
+  Quake and Steelspike raising all four, and G-Max Moves landing on the boss (Wildfire's flames
+  round it, Finale healing your team, Gold Rush's coins after the win). Low Kick, Grass Knot, Heat
+  Crash and Heavy Slam fail on a Dynamax Pokémon; Behemoth Blade, Behemoth Bash and Dynamax Cannon
+  hit it twice as hard.
+- 🤝 **Moves for the team:** your four fight side by side, so the moves that help allies work as they
+  do in Sword and Shield. Light Screen and Reflect raise a pane of glass in front of the whole team,
+  Aurora Veil a shimmering one (it needs hail, which a den doesn't have). Safeguard, Mist and Tailwind
+  cover all four. Wide Guard, Quick Guard, Crafty Shield and Mat Block guard the team for a turn, and
+  Protect, Detect, King's Shield, Spiky Shield, Baneful Bunker, Obstruct and Endure guard the one using
+  them. A Max Move still gets through a guard for a quarter of its damage. Follow Me and Rage Powder
+  draw the boss's attacks. Helping Hand, Heal Pulse, Floral Healing, Pollen Puff, Decorate and
+  Aromatic Mist ask which ally to use them on. Life Dew, Jungle Healing, Heal Bell, Aromatherapy, Wish,
+  Howl, Coaching, Gear Up, Magnetic Flux and Flower Shield work on the team. A boss's own screens and
+  Protect work against your team the same way.
 - 🔒 **Your Pokémon are safe:** your four fight as copies. Nothing in your party or boxes changes
   in a raid, win or lose.
 
@@ -70,13 +97,22 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 - 🔴 **One throw to catch it:** choose one of your Poké Balls. The Pokémon joins your party, or
   your PC when the party is full. The higher its stars, the harder it is to catch, and the better
   its IVs: one perfect IV at 1★, two at 2★, three at 3★, four at 4★ and 5★.
-- 🎁 **Rewards:** Exp. Candies (more and bigger for more stars), TMs of the boss's types,
-  berries, treasures to sell, sometimes a Rare Candy, and on the hardest raids a PP Max.
+- 🌟 **Dynamax marks:** a caught raid Pokémon has a Dynamax Level by the raid's stars (1–2 at 1★
+  up to 6–8 at 5★), and one caught from a Gigantamax raid has the Gigantamax Factor. Both show on
+  its summary.
+- 🎁 **Rewards:** Exp. Candies (more and bigger for more stars), a Dynamax Candy (two at 5★), TMs of
+  the boss's types, berries, treasures to sell, sometimes a Rare Candy, now and then Max Mushrooms
+  (from 3★), Max Honey (5★) or a Dynamax Crystal (4★–5★), and on the hardest raids a PP Max.
+- 💎 **Dynamax Crystals:** at any den, quiet or not, a Dynamax Crystal in your bag lets you call a
+  legendary or mythical Pokémon instead (a 5★ raid; the crystal is spent when you press Start, and the den itself
+  is left as it was). Win, and it's caught for certain.
 
 ### Your Screen
 
 - 🎮 **On one screen or two:** the battle menu sits over the den, or goes to your device's second
   screen (such as the AYN Thor's) as large touch buttons, leaving the whole den on the main screen.
+- 📱 **Phones held upright:** on a portrait screen the den fills the width, the battle's buttons and
+  words sit at the foot at a size made for it, and the den screen and rewards card sit in the middle.
 - 🧭 **Follows Kanto Gear:** with **Kanto Gear**, the battle menu goes where its Display Mode
   says. Its Separate Screens setting puts the menu on the second screen.
 - 🔊 **The game's own sounds:** moves, hits, barriers and the catch use Gen 3's sound effects, and
@@ -93,7 +129,7 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 ## 🎮 Controls
 
 - **A** picks, **B** goes back, the **D-pad** moves the cursor; **START** on the den screen starts
-  the raid.
+  the raid; **SELECT** or **R** on the move list presses DYNAMAX.
 - Every button can be tapped on a touch screen, on the main screen or the second one.
 - On the second screen the D-pad moves between the buttons as they are laid out.
 

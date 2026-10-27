@@ -44,6 +44,18 @@ S.EVENT = {
   faint = "SE_FAINT", back = "SE_BALL_OPEN", item = "SE_USE_ITEM", heal = "SE_M_MILK_DRINK",
   cheer = "SE_M_ENCORE", up = "SE_M_STAT_INCREASE", down = "SE_M_STAT_DECREASE",
   shieldUp = "SE_M_BARRIER", shieldHit = "SE_ICE_CRACK", shieldBreak = "SE_ICE_BREAK",
+  -- Dynamax: the band lit on the move list, the Pokemon recalled into its ball, the giant's arrival,
+  -- its return to size, Max Guard
+  dmaxOn = "SE_M_CHARGE", dmaxRecall = "SE_BALL_OPEN", dmaxGrow = "SE_M_MEGA_KICK", dmaxEnd = "SE_M_MINIMIZE",
+  guard = "SE_M_DETECT",
+}
+-- the team moves (src/raid_sim.lua `side` events by `what`): Gen 3's own sounds for those moves
+S.SIDE = {
+  reflect = "SE_M_REFLECT", light = "SE_M_REFLECT", veil = "SE_M_REFLECT", safeguard = "SE_M_BARRIER",
+  mist = "SE_M_MIST", tailwind = "SE_M_GUST", wide = "SE_M_BARRIER", quick = "SE_M_DETECT", mat = "SE_M_MEGA_KICK",
+  crafty = "SE_M_BARRIER", endure = "SE_M_HARDEN", endured = "SE_M_HARDEN", redirect = "SE_M_ENCORE",
+  help = "SE_M_ENCORE", cure = "SE_M_HEAL_BELL", wish = "SE_M_MORNING_SUN", sacrifice = "SE_M_MORNING_SUN",
+  blown = "SE_M_GUST2",
 }
 S.STATUS = { BRN = "SE_M_EMBER", PSN = "SE_M_TOXIC", TOX = "SE_M_TOXIC", PAR = "SE_M_THUNDER_WAVE",
   SLP = "SE_M_YAWN", FRZ = "SE_M_ICY_WIND" }

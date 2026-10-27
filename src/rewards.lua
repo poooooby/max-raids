@@ -100,7 +100,8 @@ return function(mod, deps)
     if not (s and b and ball) then return false, "no session" end
     if Bag and Bag.remove then pcall(Bag.remove, s.bag, ball.item, 1) end
     local roll = rng and rng(1, 100) or math.random(1, 100)
-    if roll > Rw.chance(b.stars, ball.mult) then return false, "broke free" end
+    -- (a legendary Pokemon's raid, by a Dynamax Crystal: caught for sure, as the Max Lair's)
+    if not b.legend and roll > Rw.chance(b.stars, ball.mult) then return false, "broke free" end
     -- (a Dynamax boss carries its own species, its form among them)
     local species = b.slot or (Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national)))
     species = tonumber(species)
@@ -114,6 +115,15 @@ return function(mod, deps)
       for k, v in pairs(ivs) do mon.ivs[k] = v end
       if Pokemon and Pokemon.applyStats then pcall(Pokemon.applyStats, mon, s) end
       mon.hp = mon.maxHp or mon.hp
+    end
+    -- its Dynamax marks, as Sword / Shield's raid catches: a Dynamax Level by the stars, and the
+    -- G-Max Factor from a Gigantamax boss (National Dex's, when it has them)
+    local dx = Rw.dynamax()
+    if dx then
+      local okL, lv = pcall(dx.raidStartLevel, b.stars, rng)
+      if okL then pcall(dx.setLevel, mon, lv) end
+      local okG, move = pcall(dx.gmaxMoveOf, mon)
+      if not b.dyna and okG and move then pcall(dx.setFactor, mon, true) end
     end
     if Dex and Dex.registerCapture and s.dex then pcall(Dex.registerCapture, s.dex, species, s, mon.personality) end
     local name = b.name
@@ -133,6 +143,15 @@ return function(mod, deps)
     return type(ids) == "table" and ids or nil
   end
   Rw.candyIds = candyIds
+
+  -- National Dex Gen 3's Dynamax (exports.dynamax: a Pokemon's Dynamax Level and G-Max Factor, the
+  -- items' numbers), or nil on an older one
+  function Rw.dynamax()
+    if Rw.dynamaxStub ~= nil then return Rw.dynamaxStub or nil end
+    local ok, d = pcall(mod.find, mod, "national_dex_gen3")
+    local dx = ok and type(d) == "table" and d.exports and d.exports.dynamax
+    return type(dx) == "table" and dx or nil
+  end
 
   -- Gen 3's TMs (items 289..338 in every version) that teach a damaging move: { { id, typeName } }
   local tmList = nil
@@ -206,6 +225,17 @@ return function(mod, deps)
     end
     if rng(1, 100) <= P.RARE_CANDY then add(Rw.itemId("ITEM_RARE_CANDY"), 1) end
     if rng(1, 100) <= (P.CAP.CHANCE[stars] or 0) then add(Rw.itemId(P.CAP.ITEM), 1) end
+    -- National Dex's Dynamax items (none without them)
+    local dx = Rw.dynamax()
+    local ids = dx and dx.ids
+    if ids then
+      add(ids.DYNAMAX_CANDY, P.DYNAMAX_CANDY and P.DYNAMAX_CANDY[stars] or 0)
+      local MM, MH = P.MAX_MUSHROOMS, P.MAX_HONEY
+      if MM and rng(1, 100) <= (MM.CHANCE[stars] or 0) then add(ids.MAX_MUSHROOMS, MM.N or 1) end
+      if MH and rng(1, 100) <= (MH.CHANCE[stars] or 0) then add(ids.MAX_HONEY, MH.N or 1) end
+      local CR = P.DYNAMAX_CRYSTAL
+      if CR and ids.DYNAMAX_CRYSTAL and rng(1, 100) <= (CR.CHANCE[stars] or 0) then add(ids.DYNAMAX_CRYSTAL, CR.N or 1) end
+    end
     return out
   end
 
@@ -230,6 +260,19 @@ return function(mod, deps)
         local ok, placed = pcall(Bag.add, s.bag, it.id, it.n)
         if ok and placed ~= false then out.items[#out.items + 1] = { id = it.id, name = Rw.itemName(it.id), n = it.n } end
       end
+    end
+    -- G-Max Gold Rush's coins, picked up (the game's money cap)
+    local coins = r.sim and tonumber(r.sim.money) or 0
+    if s and coins > 0 then
+      local okP, Prize = pcall(require, "src.core.game3.battle.prize")
+      local gained = coins
+      if okP and Prize and Prize.apply then
+        local okA, g = pcall(Prize.apply, s, coins)
+        gained = okA and tonumber(g) or 0
+      else
+        s.money = (tonumber(s.money) or 0) + coins
+      end
+      if gained > 0 then out.items[#out.items + 1] = { id = "money", money = true, name = "Coins", n = gained } end
     end
     return out
   end

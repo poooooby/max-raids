@@ -28,7 +28,7 @@ return function(mod, deps)
 
   -- the last draw's places (window pixels), filled again each draw; `flee` is `run` (older drivers)
   local where = { panel = {}, fight = {}, pokemon = {}, bag = {}, run = {},
-    move1 = {}, move2 = {}, move3 = {}, move4 = {}, back = {} }
+    move1 = {}, move2 = {}, move3 = {}, move4 = {}, back = {}, dynamax = {} }
   where.flee = where.run
   Pad.where = where
   local function rset(t, x, y, w, h) t.x, t.y, t.w, t.h = x, y, w, h; return t end
@@ -302,6 +302,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G.rectangle("line", t.x, t.y, t.w, t.h, rad, rad)
       G.setLineWidth(1)
     end
+    -- (a Max form: the Dynamax red round it, glowing)
+    if mv.max then
+      local pulse = 0.65 + 0.35 * sin((love.timer and love.timer.getTime() or 0) * 5)
+      G.setColor(0.95, 0.12, 0.3, 0.35 * pulse)
+      G.setLineWidth(max(3, t.h * 0.12))
+      G.rectangle("line", t.x, t.y, t.w, t.h, rad, rad)
+      G.setColor(1, 0.3, 0.45, 0.95)
+      G.setLineWidth(max(1.5, t.h * 0.04))
+      G.rectangle("line", t.x, t.y, t.w, t.h, rad, rad)
+      G.setLineWidth(1)
+    end
     -- (a list row: a move - chip its type, `right` its PP - or the pouch's item / a target: `chip`
     -- its own words, `live` whether it can be picked)
     local live
@@ -347,6 +358,185 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.printf(ppText, t.x, t.y + (t.h - fp:getHeight()) / 2, t.w - t.h * 0.42, "right")
   end
 
+  -- the Dynamax mark (assets/ui/icon_dynamax.png, 34 x 34), loaded once (false: not there, the drawn
+  -- cloud stands in)
+  local markImg = nil
+  local function dynamaxMark()
+    if markImg ~= nil then return markImg or nil end
+    markImg = false
+    local ok, img = pcall(function()
+      local bytes = mod and mod.read and mod:read("assets/ui/icon_dynamax.png")
+      if not bytes then return nil end
+      local i = love.graphics.newImage(love.image.newImageData(love.filesystem.newFileData(bytes, "icon_dynamax.png")))
+      i:setFilter("nearest", "nearest")
+      return i
+    end)
+    if ok and img then markImg = img end
+    return markImg or nil
+  end
+  Pad.dynamaxMark = dynamaxMark
+
+  -- ------- the DYNAMAX button, Sword / Shield's: a hot-pink rim over a dark crimson band round a deep
+  -- magenta face, the Dynamax mark, and the word in slanted heavy letters - pale pink at their top
+  -- to hot pink at their foot, outlined dark crimson. On the main screen a round button (the mark
+  -- above, the word across it, as the game's); on the second screen the same as a pill.
+
+  Pad.DMAX_RGB = {
+    rim = { 1, 0.24, 0.47 }, band = { 0.5, 0.03, 0.16 }, face = { 0.22, 0.02, 0.11 }, faceLit = { 0.36, 0.05, 0.2 },
+    line = { 1, 0.45, 0.65 }, glow = { 1, 0.18, 0.45 }, ink = { 0.3, 0.0, 0.09 },
+    top = { 1, 0.94, 0.96 }, foot = { 1, 0.36, 0.58 },
+  }
+
+  -- the word's gradient down its letters, by their vertices' y (LOVE hands text over transformed: the
+  -- ends are sent in that space)
+  local GRAD = [[
+varying float ly;
+#ifdef VERTEX
+vec4 position(mat4 tp, vec4 vp) { ly = vp.y; return tp * vp; }
+#endif
+#ifdef PIXEL
+extern float y0;
+extern float y1;
+extern vec3 c0;
+extern vec3 c1;
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  float t = clamp((ly - y0) / max(1.0, y1 - y0), 0.0, 1.0);
+  return vec4(mix(c0, c1, t), Texel(tex, tc).a * color.a);
+}
+#endif
+]]
+  local gradShader = nil
+  local function grad()
+    if gradShader == nil then
+      local ok, s = pcall(love.graphics.newShader, GRAD)
+      gradShader = ok and s or false
+    end
+    return gradShader or nil
+  end
+
+  -- "DYNAMAX" centred on (cx, cy), `size` px, at most `maxW` wide: slanted, heavy, outlined, graded
+  function Pad.dynamaxWord(G, cx, cy, size, maxW, alpha)
+    local C = Pad.DMAX_RGB
+    local word = "DYNAMAX"
+    local f = font(size)
+    local slant = 0.2
+    if maxW and f:getWidth(word) * 1.08 > maxW then f = font(size * maxW / (f:getWidth(word) * 1.08)) end
+    G.setFont(f)
+    local w, hh = f:getWidth(word), f:getHeight()
+    local o = max(1, f:getHeight() * 0.07)
+    G.push()
+    G.translate(cx, cy)
+    G.shear(-slant, 0)
+    local x, y = -w / 2, -hh / 2
+    -- the outline: the word all round in the ink, thick
+    G.setColor(C.ink[1], C.ink[2], C.ink[3], alpha or 1)
+    for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 0.7, 0.7 }, { -0.7, 0.7 }, { 0.7, -0.7 }, { -0.7, -0.7 } }) do
+      G.print(word, x + d[1] * o * 1.6, y + d[2] * o * 1.6)
+      G.print(word, x + d[1] * o * 1.6 + o * 0.5, y + d[2] * o * 1.6)
+    end
+    -- the letters, heavy (twice, a hair apart), pale to hot pink down them
+    local s = grad()
+    if s then
+      G.setShader(s)
+      -- (LOVE transforms a text's vertices before the shader sees them: the ends in that space)
+      local _, ya = G.transformPoint(0, y + hh * 0.25)
+      local _, yb = G.transformPoint(0, y + hh * 0.85)
+      s:send("y0", ya)
+      s:send("y1", yb)
+      s:send("c0", C.top)
+      s:send("c1", C.foot)
+      G.setColor(1, 1, 1, alpha or 1)
+    else
+      G.setColor(1, 0.75, 0.85, alpha or 1)
+    end
+    G.print(word, x, y)
+    G.print(word, x + o * 0.5, y)
+    G.setShader()
+    G.pop()
+  end
+
+  -- the mark, `size` px across, centred on (cx, cy) (the drawn cloud without the picture)
+  local function markAt(G, cx, cy, size, alpha)
+    local img = dynamaxMark()
+    if img then
+      local iw = img:getWidth()
+      local k = size / iw
+      G.setColor(1, 1, 1, alpha or 1)
+      G.draw(img, cx, cy, 0, k, k, iw / 2, img:getHeight() / 2)
+    else
+      local s = size * 0.18
+      G.setColor(1, 1, 1, alpha or 1)
+      G.circle("fill", cx - s, cy + s * 0.2, s, 12)
+      G.circle("fill", cx, cy - s * 0.35, s * 1.15, 12)
+      G.circle("fill", cx + s, cy + s * 0.2, s, 12)
+    end
+  end
+
+  -- the second screen's: a pill, w x h at (x, y); lit (toggled on): glowing, brighter
+  function Pad.drawDynamaxPill(G, x, y, w, h, on)
+    local C = Pad.DMAX_RGB
+    local t = love.timer and love.timer.getTime() or 0
+    local rad = h / 2
+    if on then
+      local pulse = 0.55 + 0.45 * sin(t * 6)
+      for k = 3, 1, -1 do
+        local e = h * 0.1 * k
+        G.setColor(C.glow[1], C.glow[2], C.glow[3], 0.16 * pulse)
+        G.rectangle("fill", x - e, y - e, w + e * 2, h + e * 2, rad + e, rad + e)
+      end
+    end
+    local dim = on and 1 or 0.82
+    G.setColor(C.rim[1] * dim, C.rim[2] * dim, C.rim[3] * dim, 1)
+    G.rectangle("fill", x, y, w, h, rad, rad)
+    local b1 = h * 0.08
+    G.setColor(C.band)
+    G.rectangle("fill", x + b1, y + b1, w - b1 * 2, h - b1 * 2, rad - b1, rad - b1)
+    local b2 = h * 0.16
+    G.setColor(C.face)
+    G.rectangle("fill", x + b2, y + b2, w - b2 * 2, h - b2 * 2, rad - b2, rad - b2)
+    -- (a lighter top on the face, and a thin pink line inside the band)
+    G.setColor(C.faceLit[1], C.faceLit[2], C.faceLit[3], 0.7)
+    G.rectangle("fill", x + b2 + h * 0.1, y + b2 + h * 0.04, w - b2 * 2 - h * 0.2, (h - b2 * 2) * 0.38, (h - b2 * 2) * 0.19, (h - b2 * 2) * 0.19)
+    G.setColor(C.line[1], C.line[2], C.line[3], on and 0.9 or 0.55)
+    G.setLineWidth(max(1, h * 0.03))
+    G.rectangle("line", x + b2, y + b2, w - b2 * 2, h - b2 * 2, rad - b2, rad - b2)
+    G.setLineWidth(1)
+    markAt(G, x + h * 0.62, y + h / 2, h * 0.78, on and 1 or 0.85)
+    Pad.dynamaxWord(G, x + h * 1.05 + (w - h * 1.35) / 2, y + h / 2, h * 0.52, w - h * 1.45, on and 1 or 0.9)
+  end
+
+  -- the main screen's: a round button of radius R about (cx, cy) - the mark in its top half, the word
+  -- across its middle and past its sides
+  function Pad.drawDynamaxRound(G, cx, cy, R, on)
+    local C = Pad.DMAX_RGB
+    local t = love.timer and love.timer.getTime() or 0
+    if on then
+      local pulse = 0.55 + 0.45 * sin(t * 6)
+      for k = 3, 1, -1 do
+        G.setColor(C.glow[1], C.glow[2], C.glow[3], 0.15 * pulse)
+        G.circle("fill", cx, cy, R * (1 + 0.1 * k), 48)
+      end
+    end
+    local dim = on and 1 or 0.82
+    G.setColor(C.rim[1] * dim, C.rim[2] * dim, C.rim[3] * dim, 1)
+    G.circle("fill", cx, cy, R, 48)
+    G.setColor(C.band)
+    G.circle("fill", cx, cy, R * 0.9, 48)
+    -- the face: darker at its edge, lit toward its middle
+    for k = 0, 4 do
+      local u = k / 4
+      G.setColor(C.face[1] + (C.faceLit[1] - C.face[1]) * u, C.face[2] + (C.faceLit[2] - C.face[2]) * u,
+        C.face[3] + (C.faceLit[3] - C.face[3]) * u, 1)
+      G.circle("fill", cx, cy, R * (0.8 - 0.42 * u), 48)
+    end
+    G.setColor(C.line[1], C.line[2], C.line[3], on and 0.9 or 0.55)
+    G.setLineWidth(max(1, R * 0.035))
+    G.circle("line", cx, cy, R * 0.8, 48)
+    G.setLineWidth(1)
+    markAt(G, cx, cy - R * 0.4, R * 0.72, on and 1 or 0.9)
+    Pad.dynamaxWord(G, cx, cy + R * 0.18, R * 0.46, R * 2.5, on and 1 or 0.92)
+  end
+
   local function moveStack(G, right, bottom, pw, ph, pitch, r)
     local list = r.cmd.moveList or {}
     local n = max(1, #list)
@@ -359,7 +549,18 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.setFont(font(bh * 0.55))
     G.setColor(1, 1, 1, 1)
     G.printf("Back", b.x, b.y + (bh - font(bh * 0.55):getHeight()) / 2, b.w, "center")
-    rset(where.panel, right - pw - ph * 0.45, b.y, pw + ph * 0.45, bottom - b.y)
+    -- DYNAMAX, a round button left of it, while this member holds the Dynamax Energy (lit once on)
+    local left, ptop = right - pw - ph * 0.45, b.y
+    if r.cmd.canDmax then
+      local R = ph * 0.82
+      local cx, cy = b.x - R * 1.35, b.y + bh - R * 0.9
+      local d = rset(where.dynamax, cx - R * 1.25, cy - R, R * 2.5, R * 2)
+      Pad.drawDynamaxRound(G, cx, cy, R, r.cmd.dmax == true)
+      left, ptop = min(left, d.x), min(ptop, d.y)
+    else
+      rset(where.dynamax, 0, 0, 0, 0)
+    end
+    rset(where.panel, left, ptop, right - left, bottom - ptop)
     local cur = r.cmd.cursor or 1
     local u = ph / 92
     for i = 1, 4 do
@@ -409,6 +610,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if not inRect(x, y, where.panel) then return nil end
     if menu and menu ~= "main" then
       if inRect(x, y, where.back) then return "back" end
+      if inRect(x, y, where.dynamax) then return "dynamax" end
       for i = 1, 4 do if inRect(x, y, where["move" .. i]) then return "move" .. i end end
       return "panel"
     end
@@ -426,7 +628,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- inner edge along its top.
   --   Pad.drawSecond(G, w, h, r, held) ; Pad.hitSecond(x, y) -> an id as Pad.hit's, or nil
 
-  local sWhere = { cells = {}, back = {} }
+  local sWhere = { cells = {}, back = {}, dynamax = {} }
   Pad.sWhere = sWhere
 
   local bgMesh, bgW, bgH = nil, 0, 0
@@ -560,9 +762,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if cmdUp then
       local m = c.actor and r.members and r.members[c.actor]
       local nm = m and m.b and m.b.name or "your Pok\195\169mon"
-      if c.menu == "moves" then title = "Choose a move"
+      -- (the moves need no title: the grid says what it is)
+      if c.menu == "moves" then title = ""
       elseif c.menu == "items" then title = "Choose an item"
-      elseif c.menu == "target" then title = "Use it on whom?"
+      elseif c.menu == "target" then
+        local mv = c.moveSlot and m and m.b and m.b.moves[c.moveSlot]
+        title = mv and ("Use %s on whom?"):format(mv.name) or "Use it on whom?"
       else title = ("What will %s do?"):format(nm) end
     elseif ask then title = r.phase == "leaveq" and "Leave the den?" or "Yes or no?"
     elseif catchUp then
@@ -571,6 +776,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.print(title, h * 0.04, (hh - fh:getHeight()) / 2)
     for i = #sWhere.cells, 1, -1 do sWhere.cells[i] = nil end
     rset(sWhere.back, 0, 0, 0, 0)
+    rset(sWhere.dynamax, 0, 0, 0, 0)
     local pad = h * 0.045
     local gx, gy, gw, gh = pad, hh + pad, w - pad * 2, h - hh - pad * 2
     local cw, ch = (gw - pad) / 2, (gh - pad) / 2
@@ -673,6 +879,19 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         local subIn = nil
         if not icon then subIn = sub end
         quadButton(G, t, mv.rgb, c.cursor == i, held == t.id, live, icon, mv.name, subIn, icon and 0.24 or nil)
+        if mv.max then
+          -- (a Max form: the Dynamax red round it)
+          local down = held == t.id and ch * 0.045 or 0
+          local rad = min(t.w, t.h) * 0.16
+          local pulse = 0.65 + 0.35 * sin((r and r.t or 0) * 5)
+          G.setColor(0.95, 0.12, 0.3, 0.3 * pulse)
+          G.setLineWidth(max(3, ch * 0.06))
+          G.rectangle("line", x, y + down, cw, ch, rad, rad)
+          G.setColor(1, 0.3, 0.45, 1)
+          G.setLineWidth(max(2, ch * 0.02))
+          G.rectangle("line", x, y + down, cw, ch, rad, rad)
+          G.setLineWidth(1)
+        end
         if icon then
           -- a move: its PP, and how it does on the boss, under its name
           local down = held == t.id and ch * 0.045 or 0
@@ -701,6 +920,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         G.setFont(fb)
         G.setColor(0.08, 0.08, 0.1, 1)
         G.printf("Back", b.x, b.y + (bh - fb:getHeight()) / 2 + (held == "back" and bh * 0.06 or 0), b.w, "center")
+        -- DYNAMAX left of it, while this member holds the Dynamax Energy
+        if c and c.menu == "moves" and c.canDmax then
+          -- (in the room between the title and Back)
+          local titleEnd = h * 0.04 + fh:getWidth(title) + h * 0.03
+          local dh = hh * 0.82
+          local dw = min(dh * 4.4, b.x - h * 0.03 - titleEnd)
+          local d = rset(sWhere.dynamax, b.x - dw - h * 0.03, (hh - dh) / 2, dw, dh)
+          Pad.drawDynamaxPill(G, d.x, d.y + (held == "dynamax" and dh * 0.05 or 0), d.w, d.h, c.dmax == true)
+        end
       end
     else
       -- between commands: the four and how they stand
@@ -751,6 +979,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 
   function Pad.hitSecond(x, y)
     if inRect(x, y, sWhere.back) then return "back" end
+    if inRect(x, y, sWhere.dynamax) then return "dynamax" end
     for _, t in ipairs(sWhere.cells) do
       if inRect(x, y, t) then return t.id end
     end

@@ -391,6 +391,470 @@ do
   check(near(seen.ppmax, 0.03, 0.015) and seen.ppmax1 == 0, ("the Bottle Cap's PP Max: 3%% at 5 stars (%.3f), never at 1"):format(seen.ppmax / runs))
 end
 
+-- ------- Dynamax (the team's): the Energy, the HP, Max Moves, Max Guard, the rules against a giant
+local Gmax = assert(loadstring(read("data/raid_gmax.lua"), "@data/raid_gmax.lua"))()
+local MaxPower = assert(loadstring(read("data/raid_maxpower.lua"), "@data/raid_maxpower.lua"))()
+local Ndm = assert(loadstring(read("data/raid_rules.lua"), "@data/raid_rules.lua"))()
+local Btm = assert(loadstring(read("src/battle.lua"), "@src/battle.lua"))()({ log = { warn = function() end } },
+  { N = Ndm, Bosses = {}, Sprites = {}, Gmax = Gmax, MaxPower = MaxPower })
+-- a member ready to Dynamax: its moves' Max forms, its level's HP multiplier
+local function dmaxTeam(n, hp, level, moveList, gmaxId)
+  local t = team(n, hp)
+  for _, m in ipairs(t) do
+    if moveList then m.moves = moveList() end
+    m.dmaxLevel, m.dmaxMult, m.gmaxId = level or 0, 1.5 + 0.05 * (level or 0), gmaxId
+    m.maxMoves = {}
+    for i, x in ipairs(m.moves) do m.maxMoves[i] = Btm.maxOf(x, gmaxId) end
+  end
+  return t
+end
+local function tackle() return { { name = "Tackle", key = "TACKLE", power = 40, type = 0, typeName = "NORMAL", status = false,
+  priority = 0, pp = 35, maxPp = 35, accuracy = 100 } } end
+
+-- Max powers: the bands, the moves off them
+do
+  check(Btm.maxPower(40, "NORMAL", "TACKLE") == 90 and Btm.maxPower(44, "NORMAL") == 90, "under 45: 90")
+  check(Btm.maxPower(45, "FIRE") == 100 and Btm.maxPower(75, "FIRE") == 130 and Btm.maxPower(110, "FIRE") == 140
+    and Btm.maxPower(150, "FIRE") == 150, "the bands' edges")
+  check(Btm.maxPower(90, "FIGHTING") == 90 and Btm.maxPower(40, "POISON") == 70, "Fighting / Poison's column")
+  check(Btm.maxPower(25, "GRASS", "BULLET_SEED") == 130 and Btm.maxPower(0, "NORMAL", "RETURN") == 130
+    and Btm.maxPower(0, "FIGHTING", "SEISMIC_TOSS") == 75, "the moves off the bands")
+  check(Btm.maxPower(0, "NORMAL", "SUPER_FANG") == 100, "no power of its own: 100")
+  local guard = Btm.maxOf({ name = "Growl", key = "GROWL", power = 0, status = true, pp = 40, maxPp = 40 })
+  check(guard.guard and guard.priority == 4 and guard.name == "Max Guard", "a status move: Max Guard, +4")
+  local flare = Btm.maxOf({ name = "Ember", key = "EMBER", power = 40, type = 10, typeName = "FIRE", pp = 25, maxPp = 25 })
+  check(flare.name == "Max Flare" and flare.power == 90 and flare.accuracy == 0 and not flare.spread, "Ember -> Max Flare 90, never misses")
+  local wild = Btm.maxOf({ name = "Flamethrower", key = "FLAMETHROWER", power = 90, type = 10, typeName = "FIRE", pp = 15, maxPp = 15 }, "WILDFIRE")
+  check(wild.name == "G-Max Wildfire" and wild.power == 130 and wild.gmaxEffect.kind == "field", "the factor: Flamethrower -> G-Max Wildfire")
+  local fb = Btm.maxOf({ name = "Ember", key = "EMBER", power = 40, type = 10, typeName = "FIRE", pp = 25, maxPp = 25 }, "FIREBALL")
+  check(fb.power == 160, "G-Max Fireball's own 160")
+  local other = Btm.maxOf({ name = "Air Slash", key = "AIR_SLASH", power = 75, type = 2, typeName = "FLYING", pp = 15, maxPp = 15 }, "WILDFIRE")
+  check(other.name == "Max Airstream", "a move of another type stays a Max Move")
+end
+
+-- the Energy: slot 1 first, then on round the team each turn, never to one used or out
+do
+  local boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true)
+  local m = dmaxTeam(4, 100, 0, tackle)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(7) }
+  local held = {}
+  for t = 1, 5 do held[t] = s.energy; s:turn(all(4)) end
+  check(table.concat(held, " ") == "1 2 3 4 1", "unused, it passes on: " .. table.concat(held, " "))
+  check(s:canDynamax(s.energy) and not s:canDynamax(s.energy % 4 + 1), "only the holder may")
+  -- member 2 out: skipped
+  m[2].mon.hp = 0
+  m[2].down = 1
+  local s2 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), members = m, adapter = adapter(), rng = rngOf(8) }
+  s2:turn(all(4))
+  check(s2.energy == 3, "one out is passed over (" .. tostring(s2.energy) .. ")")
+end
+
+-- Dynamaxing: HP x the level's, the Max forms, three turns, back with its HP's share, once each
+do
+  local boss = battler("Boss", 100000, 1, { mv("Hit", { power = 20 }) }, true)
+  local m = dmaxTeam(4, 100, 10, tackle)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(9) }
+  local c = all(4)
+  c[1].dmax = true
+  local ev = s:turn(c)
+  check(ev[1].kind == "dynamax" and ev[1].who == m[1], "it Dynamaxes before anyone moves")
+  check(m[1].dmax and m[1].mon.maxHp == 200, "HP x2 at Dynamax Level 10 (" .. m[1].mon.maxHp .. ")")
+  local maxUse
+  for _, e in ipairs(ev) do if e.kind == "use" and e.who == m[1] then maxUse = e.move end end
+  check(maxUse and maxUse.name == "Max Strike" and boss.mon.hp < 100000, "its Tackle is Max Strike")
+  check(m[1].moves[1].pp == 34, "the Max Move spends Tackle's PP")
+  check(s.energy == nil, "no Energy while one is Dynamaxed")
+  s:turn(all(4)); s:turn(all(4))
+  check(m[1].dmax == nil and m[1].mon.maxHp == 100, "after three turns: its own size")
+  check(m[1].mon.hp > 0 and m[1].mon.hp <= 100, "its HP back to its share (" .. m[1].mon.hp .. ")")
+  check(s.energy ~= nil and s.energy ~= 1, "the Energy again, never to the one that has used it")
+  -- a share: 150 of 200 -> 75 of 100
+  local m2 = dmaxTeam(1, 100, 10, tackle)
+  local s3 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 50 }) }, true), members = m2, adapter = adapter(), rng = rngOf(1) }
+  local c3 = all(1); c3[1].dmax = true
+  s3:turn(c3)
+  s3:undynamax({}, m2[1])
+  check(m2[1].mon.hp == 75 and m2[1].mon.maxHp == 100, "150 / 200 -> 75 / 100 (" .. m2[1].mon.hp .. ")")
+  -- the Dynamax Level's HP: Lv 0 x1.5
+  local m4 = dmaxTeam(1, 100, 0, tackle)
+  local s4 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), members = m4, adapter = adapter(), rng = rngOf(2) }
+  local c4 = all(1); c4[1].dmax = true
+  s4:turn(c4)
+  check(m4[1].mon.maxHp == 150, "Dynamax Level 0: x1.5")
+end
+
+-- fainting while Dynamaxed: back to its size at once
+do
+  local boss = battler("Boss", 100000, 99, { mv("Smash", { power = 400 }) }, true)
+  local m = dmaxTeam(1, 100, 0, tackle)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(3) }
+  local c = all(1); c[1].dmax = true
+  local ev = s:turn(c)
+  check(m[1].dmax == nil and m[1].mon.maxHp == 100 and (m[1].down or 0) > 0 and s.dmaxActive == nil,
+    "fainted: its own size, sitting out")
+  local quietEnd = false
+  for _, e in ipairs(ev) do if e.kind == "dynamaxEnd" and e.text == nil then quietEnd = true end end
+  check(quietEnd, "a quiet return (the faint says it)")
+end
+
+-- Max Guard: the boss's move is stopped; One Blow strikes through; in a row it may fail
+do
+  local function guardTeam()
+    return dmaxTeam(1, 100, 0, function() return { { name = "Growl", key = "GROWL", power = 0, status = true,
+      priority = 0, pp = 40, maxPp = 40, accuracy = 100, type = 0, typeName = "NORMAL" } } end)
+  end
+  local m = guardTeam()
+  local boss = battler("Boss", 100000, 200, { mv("Hit", { power = 30 }) }, true)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(4) }
+  local c = all(1); c[1].dmax = true
+  local ev = s:turn(c)
+  local blocked = false
+  for _, e in ipairs(ev) do if e.kind == "guard" and e.blocked then blocked = true end end
+  check(blocked and m[1].mon.hp == 150, "Max Guard first (+4) and the boss's hit stopped")
+  local m2 = guardTeam()
+  local pierce = { name = "G-Max One Blow", power = 30, status = false, priority = 0, spread = false, pp = 99, maxPp = 99,
+    type = 17, accuracy = 0, pierce = true }
+  local s2 = Sim.new{ boss = battler("Boss", 100000, 200, { pierce }, true), members = m2, adapter = adapter(), rng = rngOf(5) }
+  local c2 = all(1); c2[1].dmax = true
+  s2:turn(c2)
+  check(m2[1].mon.hp == 120, "G-Max One Blow strikes through Max Guard")
+  -- in a row: some fail
+  local fails = 0
+  for seed = 1, 60 do
+    local m3 = guardTeam()
+    local s3 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), members = m3, adapter = adapter(), rng = rngOf(seed) }
+    local c3 = all(1); c3[1].dmax = true
+    s3:turn(c3)
+    for _, e in ipairs(s3:turn(all(1))) do if e.kind == "fail" then fails = fails + 1 end end
+  end
+  check(fails > 20 and fails < 60, "Max Guard twice in a row: about 2 in 3 fail (" .. fails .. " / 60)")
+end
+
+-- the team's Max Moves: Max Airstream raises the whole team's Speed, Max Strike drops the boss's
+do
+  local function airMoves() return { { name = "Air Slash", key = "AIR_SLASH", power = 75, type = 2, typeName = "FLYING",
+    status = false, priority = 0, pp = 15, maxPp = 15, accuracy = 95 } } end
+  local m = dmaxTeam(4, 100, 0, airMoves)
+  local s = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), members = m, adapter = adapter(), rng = rngOf(6) }
+  local c = all(4); c[1].dmax = true
+  s:turn(c)
+  check(m[1].stages.speed == 1 and m[3].stages.speed == 1, "Max Airstream: the team's Speed +1")
+  local m2 = dmaxTeam(1, 100, 0, tackle)
+  local boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true)
+  local s2 = Sim.new{ boss = boss, members = m2, adapter = adapter(), rng = rngOf(6) }
+  local c2 = all(1); c2[1].dmax = true
+  s2:turn(c2)
+  check(boss.stages.speed == -1, "Max Strike: the boss's Speed -1")
+end
+
+-- the team's G-Max Moves on the boss: Wildfire's flames round it, Finale heals the team, Gold Rush's coins
+do
+  local function fireMoves() return { { name = "Flamethrower", key = "FLAMETHROWER", power = 90, type = 10, typeName = "FIRE",
+    status = false, priority = 0, pp = 15, maxPp = 15, accuracy = 100 } } end
+  local m = dmaxTeam(1, 100, 0, fireMoves, "WILDFIRE")
+  local boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(7) }
+  local c = all(1); c[1].dmax = true
+  local ev = s:turn(c)
+  local burned = false
+  for _, e in ipairs(ev) do if e.kind == "residual" and e.who == boss then burned = true end end
+  check(s.bossField and burned, "G-Max Wildfire: the boss burns at the turn's end")
+  local function normalMoves() return { { name = "Pay Day", key = "PAY_DAY", power = 40, type = 0, typeName = "NORMAL",
+    status = false, priority = 0, pp = 20, maxPp = 20, accuracy = 100 } } end
+  local m2 = dmaxTeam(1, 100, 0, normalMoves, "GOLD_RUSH")
+  m2[1].mon.level = 30
+  local s2 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), members = m2, adapter = adapter(), rng = rngOf(8) }
+  local c2 = all(1); c2[1].dmax = true
+  s2:turn(c2); s2:turn(all(1)); s2:turn(all(1))
+  check(s2.money == 3000 + 6000 + 9000, "Gold Rush: level x 100, x2, x3 (" .. s2.money .. ")")
+end
+
+-- against a Dynamaxed target: weight moves and Roar fail, Behemoth Blade doubles
+do
+  local function oneMove(key, power, status)
+    return function() return { { name = key, key = key, power = power, type = 0, typeName = "NORMAL", status = status or false,
+      priority = 0, pp = 10, maxPp = 10, accuracy = 100 } } end
+  end
+  local m = dmaxTeam(1, 100, 0, oneMove("LOW_KICK", 60))
+  local boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(9) }
+  s:turn(all(1))
+  check(boss.mon.hp == 100000, "Low Kick on the Dynamaxed boss fails")
+  local m2 = dmaxTeam(1, 100, 0, oneMove("BEHEMOTH_BLADE", 100))
+  local boss2 = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true)
+  Sim.new{ boss = boss2, members = m2, adapter = adapter(), rng = rngOf(9) }:turn(all(1))
+  check(boss2.mon.hp == 100000 - 200, "Behemoth Blade: double on a Dynamax Pokemon")
+  local m3 = dmaxTeam(1, 100, 0, oneMove("ROAR", 0, true))
+  local boss3 = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true)
+  local ev3 = Sim.new{ boss = boss3, members = m3, adapter = adapter(), rng = rngOf(9) }:turn(all(1))
+  local failed3 = false
+  for _, e in ipairs(ev3) do if e.kind == "fail" then failed3 = true end end
+  check(failed3, "Roar fails on a Dynamax Pokemon")
+  -- the boss's Heavy Slam on a Dynamaxed member fails too
+  local m4 = dmaxTeam(1, 100, 0, tackle)
+  local slam = mv("Heavy Slam", { power = 80 }); slam.key = "HEAVY_SLAM"
+  local s4 = Sim.new{ boss = battler("Boss", 100000, 1, { slam }, true), members = m4, adapter = adapter(), rng = rngOf(10) }
+  local c4 = all(1); c4[1].dmax = true
+  s4:turn(c4)
+  check(m4[1].mon.hp == 150, "the boss's Heavy Slam fails on a Dynamaxed member")
+end
+
+-- ------- team moves (data/raid_team_moves.lua)
+local TM = assert(loadstring(read("data/raid_team_moves.lua"), "@data/raid_team_moves.lua"))()
+-- a team move as Bt.move makes it: its row on `team`, its priority
+local TM_PRI = { protect = 4, detect = 4, spikyshield = 4, kingsshield = 4, endure = 4, helpinghand = 5,
+  wideguard = 3, quickguard = 3, craftyshield = 3, followme = 2, ragepowder = 2 }
+local function tm(key, o)
+  o = o or {}
+  local k = key:lower():gsub("[^%w]", "")
+  return { name = key, key = key, team = TM.MOVES[k], power = o.power or 0, status = (o.power or 0) == 0,
+    priority = TM_PRI[k] or 0, spread = false, pp = 10, maxPp = 10, type = o.type or 0, accuracy = 0 }
+end
+-- the screen-aware fake: a move's `physical` side cut by reflect, the other by light screen (2732 /
+-- 4096 doubled, else half); Helping Hand x1.5
+local function screenAdapter()
+  local A = adapter()
+  A.damage = function(att, def, m, spread, o)
+    o = o or {}
+    local d = m.power
+    if o.helped then d = math.floor(d * 1.5) end
+    if (m.physical and o.reflect) or (not m.physical and o.lightScreen) then
+      d = o.doubleScreens and math.floor(d * 2732 / 4096) or math.floor(d / 2)
+    end
+    return d, { effectiveness = 1 }
+  end
+  A.abilityName = function(b) return b.ability end
+  return A
+end
+local function newSim(boss, m, seed) return Sim.new{ boss = boss, members = m, adapter = screenAdapter(), rng = rngOf(seed),
+  teamWords = TM, rules = { TURNS = 20, FAINTS = 4 } } end
+local function has(ev, pred) for _, e in ipairs(ev) do if pred(e) then return e end end return nil end
+local function pick(slot, target) return { move = slot, target = target } end
+
+-- the rows: every kind known, the SwSh list
+do
+  local known = { screen = 1, side = 1, guard = 1, protect = 1, endure = 1, redirect = 1, help = 1, heal = 1, cure = 1,
+    wish = 1, sacrifice = 1, boost = 1, none = 1 }
+  local n = 0
+  for k, row in pairs(TM.MOVES) do
+    n = n + 1
+    check(known[row.kind] ~= nil, "team move " .. k .. ": a known kind")
+  end
+  check(n >= 35, "the team moves: " .. n)
+  check(math.abs(TM.SCREEN_K - 0.667) < 0.001, "a screen in a multi battle: 2732 / 4096")
+end
+
+-- screens: Light Screen cuts the boss's special hit to 2732 / 4096 for five turns; Reflect leaves it
+do
+  local m = team(2, 1000, { 50, 50 })
+  m[1].moves = { tm("LIGHT_SCREEN") }
+  local boss = battler("Boss", 100000, 1, { mv("Beam", { power = 90, spread = true }) }, true)
+  local s = newSim(boss, m, 30)
+  local ev = s:turn({ pick(1), { move = 1 } })
+  check(has(ev, function(e) return e.kind == "side" and e.what == "light" and e.up end) ~= nil, "Light Screen goes up")
+  check(m[2].mon.hp == 1000 - 60, "Light Screen: 90 -> 60 on the team (" .. m[2].mon.hp .. ")")
+  for _ = 1, 3 do s:turn({ { move = 1 }, { move = 1 } }) end
+  check(s.sides.team.light == 1, "Light Screen: one turn left after four")
+  local ev5 = s:turn({ { move = 1 }, { move = 1 } })
+  check(s.sides.team.light == 0 and has(ev5, function(e) return e.kind == "side" and e.what == "light" and not e.up end) ~= nil,
+    "Light Screen wears off after five turns")
+  local m2 = team(1, 1000)
+  m2[1].moves = { tm("REFLECT") }
+  local s2 = newSim(battler("Boss", 100000, 1, { mv("Beam", { power = 90 }) }, true), m2, 31)
+  s2:turn({ pick(1) })
+  check(m2[1].mon.hp == 910, "Reflect does nothing for a special hit")
+  local m3 = team(1, 1000)
+  m3[1].moves = { tm("AURORA_VEIL") }
+  local ev3 = newSim(battler("Boss", 100000, 1, { mv("Beam", { power = 90 }) }, true), m3, 32):turn({ pick(1) })
+  check(has(ev3, function(e) return e.kind == "fail" end) ~= nil, "Aurora Veil fails without hail")
+  -- a second Light Screen while one is up fails
+  local m4 = team(1, 1000)
+  m4[1].moves = { tm("LIGHT_SCREEN") }
+  local s4 = newSim(battler("Boss", 100000, 1, { mv("Beam", { power = 1 }) }, true), m4, 33)
+  s4:turn({ pick(1) })
+  check(has(s4:turn({ pick(1) }), function(e) return e.kind == "fail" end) ~= nil, "Light Screen twice: fails")
+  -- the boss's own Light Screen: half (it stands alone)
+  local m5 = team(1, 1000, { 1 })
+  m5[1].moves = { mv("Beam", { power = 100 }) }
+  local boss5 = battler("Boss", 100000, 50, { tm("LIGHT_SCREEN") }, true)
+  newSim(boss5, m5, 34):turn({ pick(1) })
+  check(boss5.mon.hp == 100000 - 50, "the boss's Light Screen: half (" .. (100000 - boss5.mon.hp) .. ")")
+  -- G-Max Wind Rage blows the team's screens away
+  local m6 = team(1, 1000)
+  m6[1].moves = { tm("REFLECT") }
+  local rage = { name = "G-Max Wind Rage", power = 10, spread = true, isGmax = true, status = false, priority = 0, type = 2,
+    accuracy = 0, pp = 99, maxPp = 99, gmaxEffect = { kind = "defog" } }
+  local s6 = newSim(battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), m6, 35)
+  s6:turn({ pick(1) })
+  s6.boss.moves = { rage }
+  s6:turn({ pick(1) })
+  check(s6.sides.team.reflect == 0, "G-Max Wind Rage: the team's Reflect blown away")
+end
+
+-- Safeguard stops the boss's status; Mist its stat drops; Tailwind doubles the team's Speed
+do
+  local m = team(2, 1000)
+  m[1].moves = { tm("SAFEGUARD") }
+  local toxic = mv("Toxic", { status = true, power = 0 }); toxic.side = { status = "TOX" }
+  local s = newSim(battler("Boss", 100000, 1, { toxic }, true), m, 40)
+  s:turn({ pick(1), { move = 1 } }); s:turn({ { move = 1 }, { move = 1 } })
+  check(not m[1].status and not m[2].status, "Safeguard: no Toxic on the team")
+  local m2 = team(2, 1000)
+  m2[1].moves = { tm("MIST") }
+  local growl = mv("Growl", { status = true, power = 0, spread = true }); growl.side = { stages = { attack = -1 } }
+  newSim(battler("Boss", 100000, 1, { growl }, true), m2, 41):turn({ pick(1), { move = 1 } })
+  check(m2[2].stages.attack == 0, "Mist: Growl does nothing")
+  local m3 = team(2, 1000, { 10, 10 })
+  m3[1].moves = { tm("TAILWIND") }
+  local s3 = newSim(battler("Boss", 100000, 15, { mv("Hit", { power = 1 }) }, true), m3, 42)
+  s3:turn({ pick(1), { move = 1 } })
+  local ev = s3:turn({ pick(1), { move = 1 } })
+  local firstUse = has(ev, function(e) return e.kind == "use" end)
+  check(firstUse and firstUse.who ~= s3.boss, "Tailwind: the team (10 x 2) moves before the boss (15)")
+end
+
+-- guards: Wide Guard stops a spread move, a G-Max move strikes through for a quarter; Quick Guard a
+-- priority move; Crafty Shield a status move; Mat Block only on the first turn out
+do
+  local m = team(2, 1000)
+  m[1].moves = { tm("WIDE_GUARD") }
+  local s = newSim(battler("Boss", 100000, 1, { mv("Surf", { power = 80, spread = true }) }, true), m, 50)
+  s:turn({ pick(1), { move = 1 } })
+  check(m[1].mon.hp == 1000 and m[2].mon.hp == 1000, "Wide Guard: the spread move stopped")
+  local gmax = { name = "G-Max Hydrosnipe", power = 80, spread = true, isGmax = true, status = false, priority = 0, type = 11,
+    accuracy = 0, pp = 99, maxPp = 99 }
+  local m2 = team(2, 1000)
+  m2[1].moves = { tm("WIDE_GUARD") }
+  local ev2 = newSim(battler("Boss", 100000, 1, { gmax }, true), m2, 51):turn({ pick(1), { move = 1 } })
+  check(m2[2].mon.hp == 1000 - 20, "a G-Max move through Wide Guard: a quarter (" .. (1000 - m2[2].mon.hp) .. ")")
+  check(has(ev2, function(e) return e.kind == "guard" and e.pierced end) ~= nil, "... said so")
+  local m3 = team(2, 1000)
+  m3[1].moves = { tm("QUICK_GUARD") }
+  local quick = mv("Quick Attack", { power = 40, priority = 1 })
+  newSim(battler("Boss", 100000, 1, { quick }, true), m3, 52):turn({ pick(1), { move = 1 } })
+  check(m3[1].mon.hp == 1000 and m3[2].mon.hp == 1000, "Quick Guard: the priority move stopped")
+  local m4 = team(2, 1000)
+  m4[1].moves = { tm("CRAFTY_SHIELD") }
+  local toxic = mv("Toxic", { status = true, power = 0 }); toxic.side = { status = "TOX" }
+  newSim(battler("Boss", 100000, 1, { toxic }, true), m4, 53):turn({ pick(1), { move = 1 } })
+  check(not m4[1].status and not m4[2].status, "Crafty Shield: the status move stopped")
+  local m5 = team(2, 1000)
+  m5[1].moves = { tm("MAT_BLOCK") }
+  local s5 = newSim(battler("Boss", 100000, 1, { mv("Hit", { power = 30, spread = true }) }, true), m5, 54)
+  s5:turn({ pick(1), { move = 1 } })
+  check(m5[2].mon.hp == 1000, "Mat Block on the first turn: stopped")
+  local ev5 = s5:turn({ pick(1), { move = 1 } })
+  check(has(ev5, function(e) return e.kind == "fail" end) ~= nil and m5[2].mon.hp == 970, "Mat Block after the first turn: fails")
+end
+
+-- Protect: the user safe, a Max move through for a quarter, Spiky Shield hurting the boss's contact
+-- move; Endure keeps 1 HP
+do
+  local m = team(1, 1000)
+  m[1].moves = { tm("PROTECT") }
+  newSim(battler("Boss", 100000, 1, { mv("Hit", { power = 300 }) }, true), m, 60):turn({ pick(1) })
+  check(m[1].mon.hp == 1000, "Protect: the hit stopped")
+  local maxHit = { name = "Max Strike", power = 400, spread = false, isGmax = true, isMax = true, status = false, priority = 0,
+    type = 0, accuracy = 0, pp = 99, maxPp = 99 }
+  local m2 = team(1, 1000)
+  m2[1].moves = { tm("PROTECT") }
+  newSim(battler("Boss", 100000, 1, { maxHit }, true), m2, 61):turn({ pick(1) })
+  check(m2[1].mon.hp == 900, "a Max move through Protect: a quarter")
+  local m3 = team(1, 1000)
+  m3[1].moves = { tm("SPIKY_SHIELD") }
+  local bite = mv("Bite", { power = 60 }); bite.contact = true
+  local boss3 = battler("Boss", 8000, 1, { bite }, true)
+  newSim(boss3, m3, 62):turn({ pick(1) })
+  check(m3[1].mon.hp == 1000 and boss3.mon.hp == 7000, "Spiky Shield: the biting boss loses 1/8")
+  local m4 = team(1, 100)
+  m4[1].moves = { tm("ENDURE") }
+  local ev4 = newSim(battler("Boss", 100000, 1, { mv("Hit", { power = 500 }) }, true), m4, 63):turn({ pick(1) })
+  check(m4[1].mon.hp == 1 and has(ev4, function(e) return e.what == "endured" end) ~= nil, "Endure: 1 HP left")
+end
+
+-- Follow Me draws every single-target move; Helping Hand x1.5
+do
+  local hits = {}
+  for seed = 1, 20 do
+    local m = team(4, 1000, { 50, 50, 50, 50 })
+    m[2].moves = { tm("FOLLOW_ME") }
+    newSim(battler("Boss", 100000, 1, { mv("Hit", { power = 10 }) }, true), m, seed):turn({ { move = 1 }, pick(1), { move = 1 }, { move = 1 } })
+    for i = 1, 4 do if m[i].mon.hp < 1000 then hits[i] = (hits[i] or 0) + 1 end end
+  end
+  check((hits[2] or 0) == 20 and not hits[1] and not hits[3] and not hits[4], "Follow Me: every hit on its user")
+  local m = team(2, 1000, { 60, 40 })
+  m[1].moves = { tm("HELPING_HAND") }
+  m[2].moves = { mv("Hit", { power = 100 }) }
+  local boss = battler("Boss", 100000, 1, { mv("Tap", { power = 1 }) }, true)
+  newSim(boss, m, 70):turn({ pick(1, 2), { move = 1 } })
+  check(boss.mon.hp == 100000 - 150, "Helping Hand: the ally's hit x1.5 (" .. (100000 - boss.mon.hp) .. ")")
+end
+
+-- heals: Life Dew the team a quarter, Heal Pulse an ally half, Pollen Puff an ally or the boss, Heal
+-- Bell the team's status, Wish the next turn, Healing Wish the user fainting
+do
+  local m = team(3, 1000)
+  for _, x in ipairs(m) do x.mon.hp = 500 end
+  m[1].moves = { tm("LIFE_DEW") }
+  newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m, 80):turn({ pick(1), { move = 1 }, { move = 1 } })
+  check(m[1].mon.hp == 750 and m[3].mon.hp == 750, "Life Dew: the team +1/4")
+  local m2 = team(2, 1000)
+  m2[2].mon.hp = 300
+  m2[1].moves = { tm("HEAL_PULSE") }
+  newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m2, 81):turn({ pick(1, 2), { move = 1 } })
+  check(m2[2].mon.hp == 800, "Heal Pulse: the ally +1/2")
+  local m3 = team(2, 1000)
+  m3[2].mon.hp = 300
+  m3[1].moves = { tm("POLLEN_PUFF", { power = 90 }) }
+  m3[2].moves = { mv("Wait", { power = 0, status = true }) }
+  local boss3 = battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true)
+  local s3 = newSim(boss3, m3, 82)
+  s3:turn({ pick(1, 2), { move = 1 } })
+  check(m3[2].mon.hp == 800 and boss3.mon.hp == 100000, "Pollen Puff on an ally: heals it")
+  s3:turn({ pick(1, "boss"), { move = 1 } })
+  check(boss3.mon.hp == 100000 - 90, "Pollen Puff on the boss: an attack")
+  local m4 = team(2, 1000)
+  m4[1].status, m4[2].status = "PSN", "BRN"
+  m4[1].moves = { tm("HEAL_BELL") }
+  newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m4, 83):turn({ pick(1), { move = 1 } })
+  check(not m4[1].status and not m4[2].status, "Heal Bell: the team's status cured")
+  local m5 = team(1, 1000)
+  m5[1].moves = { tm("WISH"), mv("Hit", { power = 1 }) }
+  local s5 = newSim(battler("Boss", 100000, 1, { mv("Hit", { power = 600 }) }, true), m5, 84)
+  s5:turn({ pick(1) })
+  check(m5[1].mon.hp == 400, "Wish: nothing the turn it is made")
+  s5.boss.moves = { mv("Tap", { power = 0, status = true }) }
+  s5:turn({ pick(2) })
+  check(m5[1].mon.hp == 900, "Wish: half its max HP at the next turn's end (" .. m5[1].mon.hp .. ")")
+  local m6 = team(2, 1000)
+  m6[1].moves = { tm("HEALING_WISH") }
+  local s6 = newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m6, 85)
+  s6:turn({ pick(1), { move = 1 } })
+  check(m6[1].mon.hp == 0 and s6.faints == 1, "Healing Wish: the user faints (a faint counted)")
+end
+
+-- boosts: Howl the team, Coaching the allies, Decorate one ally, Gear Up those with Plus / Minus, Flower
+-- Shield the Grass types
+do
+  local function one(key, target, setup)
+    local m = team(3, 1000)
+    m[1].moves = { tm(key) }
+    if setup then setup(m) end
+    newSim(battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true), m, 90):turn({ pick(1, target), { move = 1 }, { move = 1 } })
+    return m
+  end
+  local h = one("HOWL")
+  check(h[1].stages.attack == 1 and h[3].stages.attack == 1, "Howl: the user and allies +1 Attack")
+  local c = one("COACHING")
+  check(c[1].stages.attack == 0 and c[2].stages.attack == 1 and c[2].stages.defense == 1, "Coaching: the allies, not the user")
+  local d = one("DECORATE", 3)
+  check(d[3].stages.attack == 2 and d[3].stages.spAtk == 2 and d[2].stages.attack == 0, "Decorate: one ally +2 / +2")
+  local g = one("GEAR_UP", nil, function(m) m[2].ability = "PLUS" end)
+  check(g[2].stages.attack == 1 and g[1].stages.attack == 0, "Gear Up: only Plus / Minus")
+  local f = one("FLOWER_SHIELD", nil, function(m) m[3].type1 = 12 end)
+  check(f[3].stages.defense == 1 and f[1].stages.defense == 0, "Flower Shield: the Grass types")
+end
+
 -- the same seed, the same turn
 do
   local function run()

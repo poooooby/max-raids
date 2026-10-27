@@ -35,6 +35,19 @@ return function(mod, deps)
   }
   Den.MENU = { "PARTY", "PC", "BACK" }
 
+  -- a portrait screen's ground past the den screen's box (top .. top + bh of an h tall screen): the
+  -- red panel carried on from its edge above and below, the pale one beside it
+  function Den.ground(G, w, h, top, bh)
+    local L = Den.LOOK
+    G.setColor(L.PALE_TOP)
+    G.rectangle("fill", 0, 0, w, top)
+    G.setColor(L.PALE_FOOT)
+    G.rectangle("fill", 0, top + bh, w, h - top - bh)
+    G.setColor(L.RED[1], L.RED[2], L.RED[3], 1)
+    G.rectangle("fill", 0, 0, w * L.SLANT_TOP, top)
+    G.rectangle("fill", 0, top + bh, w * L.SLANT_FOOT, h - top - bh)
+  end
+
   local function se(name)
     local id = SeIds and SeIds[name]
     if id and Audio and Audio.playSe then pcall(Audio.playSe, id) end
@@ -150,15 +163,29 @@ return function(mod, deps)
   end
 
   -- ------- the pad
-  -- the cursor: 1..4 the slots (1 2 / 3 4), 5 START, 6 EXIT
-  local UP = { 1, 2, 1, 2, 3, 5 }
-  local DOWN = { 3, 4, 5, 5, 6, 6 }
-  local SIDE = { 2, 1, 4, 3, 5, 6 }
+  -- the cursor: 1..4 the slots (1 2 / 3 4), 5 START, 6 EXIT, 7 the Dynamax Crystal (over START, while
+  -- the bag holds one or one is in use)
+  local UP = { 1, 2, 1, 2, 3, 5, 3 }
+  local DOWN = { 3, 4, 5, 5, 6, 6, 5 }
+  local SIDE = { 2, 1, 4, 3, 5, 6, 7 }
+  local function crystalShown(r) return r.legend or (Rd.crystals and Rd.crystals() > 0) end
+  Den.crystalShown = crystalShown
+  -- the crystal: in use, put away; else used
+  function Den.crystal(r)
+    if r.legend then return Rd.putCrystalAway() end
+    if not Rd.useCrystal() then se("SE_FAILURE"); return false end
+    return true
+  end
 
   function Den.input(r, input)
     local function pressed(k) return input:wasPressed(k) end
     if not r.key then
-      if pressed("a") or pressed("b") then Rd.close() end
+      -- (a quiet den: the crystal, if any, over EXIT)
+      local crystal = crystalShown(r)
+      if r.cursor ~= 7 or not crystal then r.cursor = 6 end
+      if crystal and (pressed("up") or pressed("down")) then r.cursor = r.cursor == 7 and 6 or 7
+      elseif pressed("a") then if r.cursor == 7 then Den.crystal(r) else Rd.close() end
+      elseif pressed("b") then Rd.close() end
       return
     end
     local p = r.denParty
@@ -180,19 +207,22 @@ return function(mod, deps)
       return
     end
     local c = r.cursor or 1
-    if pressed("up") then r.cursor = UP[c]
-    elseif pressed("down") then r.cursor = DOWN[c]
+    local crystal = crystalShown(r)
+    if c == 7 and not crystal then c = 5 end
+    if pressed("up") then r.cursor = (c == 5 and crystal) and 7 or UP[c]
+    elseif pressed("down") then r.cursor = ((c == 3 or c == 4) and crystal) and 7 or DOWN[c]
     elseif pressed("left") or pressed("right") then r.cursor = SIDE[c]
     elseif pressed("a") then
       if c <= 4 then Den.openMenu(r, c)
       elseif c == 5 then if not Rd.denStart() then se("SE_FAILURE") end
+      elseif c == 7 then Den.crystal(r)
       else Rd.close() end
     elseif pressed("start") then Rd.denStart()
     elseif pressed("b") then Rd.close() end
   end
 
   -- ------- touch: the rects of the last draw (window pixels)
-  local where = { slots = {}, start = {}, exit = {}, menu = {}, party = {}, partyBack = {} }
+  local where = { slots = {}, start = {}, exit = {}, menu = {}, party = {}, partyBack = {}, crystal = {} }
   Den.where = where
   local function inRect(x, y, t) return t and t.w and x >= t.x and x <= t.x + t.w and y >= t.y and y <= t.y + t.h end
   local function rset(t, x, y, w, h) t.x, t.y, t.w, t.h = x, y, w, h; return t end
@@ -201,6 +231,11 @@ return function(mod, deps)
   function Den.pointer(r, ev)
     if ev.phase ~= "released" then return true end
     local x, y = ev.x, ev.y
+    if inRect(x, y, where.crystal) and not (r.denParty or r.denMenu) then
+      r.cursor = 7
+      Den.crystal(r)
+      return true
+    end
     if not r.key then
       if inRect(x, y, where.exit) then Rd.close() end
       return true
@@ -274,6 +309,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   Den.ACCENT = {
     START = { 0.2, 0.75, 0.38 }, EXIT = { 0.9, 0.28, 0.34 }, PARTY = { 0.25, 0.55, 0.95 },
     PC = { 0.62, 0.38, 0.92 }, BACK = { 0.55, 0.56, 0.62 }, SLOT = { 0.92, 0.25, 0.4 },
+    CRYSTAL = { 1, 0.24, 0.47 },
   }
 
   -- a face as the battle pad's (src/pad.lua Pad.face: brushed, a gloss, a bevel; dark when
@@ -405,6 +441,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.setColor(1, 1, 1, 1)
     local size = 26 * u
     Rd.drawStars(G, b.stars, 22 * u + b.stars * size * 1.1, 42 * u, size)
+    -- (a Dynamax Crystal's: a legendary Pokemon, said under the stars)
+    if r.legend then
+      G.setFont(font(14 * u))
+      G.setColor(1, 0.85, 0.9, 1)
+      G.print("A LEGENDARY POK\195\137MON", 22 * u, 60 * u)
+    end
     -- its types
     local ty = 84 * u
     for _, t in ipairs(b.types or {}) do
@@ -549,27 +591,37 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   function Den.draw(G, w, h, r)
     local u = h / 360
     panels(G, w, h, r.t)
+    -- the Dynamax Crystal's pill (how many the bag holds; "Put it away" while one is in use)
+    local function crystalPill(y, sel)
+      if not crystalShown(r) then rset(where.crystal, 0, 0, 0, 0); return end
+      local t = rset(where.crystal, w * 0.62, y, w * 0.34, 34 * u)
+      local word = r.legend and "PUT IT AWAY" or ("DYNAMAX CRYSTAL x%d"):format(Rd.crystals())
+      pill(G, t, word, sel, u, true, Den.ACCENT.CRYSTAL)
+    end
     if not r.key then
       G.setFont(font(22 * u))
       G.setColor(1, 1, 1, 1)
       G.printf("The den is quiet.", 0, h * 0.36, w * 0.5, "center")
       G.setFont(font(14 * u))
-      G.printf("Nothing stirs here today.\nCome back tomorrow.", 0, h * 0.36 + 34 * u, w * 0.5, "center")
+      local more = crystalShown(r) and "\nA Dynamax Crystal could call\na legendary Pok\195\169mon here." or ""
+      G.printf("Nothing stirs here today.\nCome back tomorrow." .. more, 0, h * 0.36 + 34 * u, w * 0.5, "center")
       clear(where.slots)
       rset(where.start, 0, 0, 0, 0)
       local t = rset(where.exit, w * 0.62, h - 70 * u, w * 0.34, 34 * u)
-      pill(G, t, "EXIT", true, u)
+      pill(G, t, "EXIT", r.cursor ~= 7, u)
+      crystalPill(h - 114 * u, r.cursor == 7)
       return
     end
     drawLeft(G, w, h, u, r)
     drawSlots(G, w, h, u, r)
-    -- START and EXIT near the foot
+    -- START and EXIT near the foot, the crystal over them
     local bx, bw2, bh = w * 0.62, w * 0.34, 34 * u
     local ts = rset(where.start, bx, h - 104 * u, bw2, bh)
     local te = rset(where.exit, bx, h - 60 * u, bw2, bh)
     local menus = r.denMenu or r.denParty
     pill(G, ts, "START", r.cursor == 5 and not menus, u, filled(r))
     pill(G, te, "EXIT", r.cursor == 6 and not menus, u)
+    crystalPill(h - 148 * u, r.cursor == 7 and not menus)
     drawMenu(G, w, h, u, r)
     drawParty(G, w, h, u, r)
   end
