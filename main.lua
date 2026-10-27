@@ -87,6 +87,8 @@ return function(mod)
     end
     local ok, bt = pcall(makeBattle, mod, { N = N, Bosses = Bosses, Sprites = Sprites, Gmax = Gmax, dex = dex })
     if ok and type(bt) == "table" then Battle = bt else mod.log:warn("the raid's battle failed to build: %s", tostring(bt)) end
+    -- (the rewards read the TMs' moves through it)
+    if Battle and Rewards then Rewards.battle = Battle end
   end
   local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil }) or nil
   local PadHide = makePadHide and makePadHide(mod) or nil

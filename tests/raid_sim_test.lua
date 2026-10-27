@@ -319,22 +319,40 @@ do
   check(Rw.chance(1, 1) == 90 and Rw.chance(5, 1) == 30, "the tier's chance with a Poke Ball")
   check(Rw.chance(3, 1.5) == 90 and Rw.chance(1, 2) == 100, "a Great / Ultra Ball's multiplier, held to 100")
   check(Rw.chance(5, 0) == 100, "a Master Ball never misses")
-  local rng = rngOf(31)
-  local seenLow, seenHigh = false, false
-  for _ = 1, 200 do
-    for _, it in ipairs(Rw.rollItems(1, 1, rng)) do
-      if it.name == "ITEM_PP_MAX" or it.name == "ITEM_BIG_PEARL" then seenHigh = true end
-      seenLow = true
-    end
+  -- the drops (Sword / Shield's spread): item ids stood in by their names, the candies National Dex's
+  Rw.itemId = function(name) return name end
+  mod.find = function() return { exports = { expCandies = { EXP_CANDY_XS = "XS", EXP_CANDY_S = "S",
+    EXP_CANDY_M = "M", EXP_CANDY_L = "L", EXP_CANDY_XL = "XL" } } } end
+  local Bs = { ONE = { stars = 1, types = { "NORMAL" } }, FIVE = { stars = 5, types = { "STEEL" } } }
+  Rw = assert(loadstring(read("src/rewards.lua"), "@src/rewards.lua"))()(mod, { N = N, Bosses = Bs, Sprites = {} })
+  Rw.itemId = function(name) return name end
+  -- (rates need an even generator: the test's rngOf takes an LCG's low bits, patterned for % rolls)
+  math.randomseed(31)
+  local rng = function(lo, hi) return math.random(lo, hi) end
+  local function count(items)
+    local c = {}
+    for _, it in ipairs(items) do c[it.id] = (c[it.id] or 0) + it.n end
+    return c
   end
-  check(seenLow and not seenHigh, "a 1-star raid rolls only its tier's items")
-  local most = 0
-  for _ = 1, 200 do
-    local n = 0
-    for _, it in ipairs(Rw.rollItems(5, 3, rng)) do n = n + it.n end
-    most = math.max(most, n)
+  local one = count(Rw.rollItems("ONE", rng))
+  check(one.XS == 5 and one.S == 1 and not one.L, "a 1-star raid: Exp. Candy XS x5 and S x1")
+  local five = count(Rw.rollItems("FIVE", rng))
+  check(five.L == 2 and five.XL == 1, "a 5-star raid: Exp. Candy L x2 and XL x1")
+  local seen = { berry = 0, nugget = 0, rare = 0, ppmax = 0, ppmax1 = 0 }
+  local runs = 2000
+  for _ = 1, runs do
+    local c = count(Rw.rollItems("FIVE", rng))
+    for id in pairs(c) do if tostring(id):find("BERRY", 1, true) then seen.berry = seen.berry + c[id] end end
+    if c.ITEM_NUGGET then seen.nugget = seen.nugget + 1 end
+    if c.ITEM_RARE_CANDY then seen.rare = seen.rare + 1 end
+    if c.ITEM_PP_MAX then seen.ppmax = seen.ppmax + 1 end
+    if count(Rw.rollItems("ONE", rng)).ITEM_PP_MAX then seen.ppmax1 = seen.ppmax1 + 1 end
   end
-  check(most > 4, ("a 5-star raid with both bonuses rolls more (%d)"):format(most))
+  local function near(v, want, tol) return math.abs(v / runs - want) <= tol end
+  check(near(seen.berry, 1.6, 0.1), ("berries: two at 80%% each (%.2f a raid)"):format(seen.berry / runs))
+  check(near(seen.nugget, 0.5, 0.05), ("a 5-star Nugget at 50%% (%.2f)"):format(seen.nugget / runs))
+  check(near(seen.rare, 0.25, 0.04), ("a Rare Candy at 25%% (%.2f)"):format(seen.rare / runs))
+  check(near(seen.ppmax, 0.03, 0.015) and seen.ppmax1 == 0, ("the Bottle Cap's PP Max: 3%% at 5 stars (%.3f), never at 1"):format(seen.ppmax / runs))
 end
 
 -- the same seed, the same turn

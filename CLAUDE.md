@@ -507,6 +507,16 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   - The end card: Next -> phase "outro" (`Rd.OUTRO`): the den once more (wide, the boss gone), a circle
     closing to black (`Rd.drawIris`), then the evolutions / moves over black.
   - Driver `tests/drivers/catch_probe.lua` (the roll made sure; `PROBE_FAIL=1` a miss).
+- **Rewards as Sword / Shield's** (2026-10-26; Serebii's den tables, EVIDENCE "RAID.REWARD"):
+  `RAID.REWARD` - Exp. Candies always (1★ XS x5 + S, 2★ S x5 + M, 3★ M x5 + L, 4★ M x2 + L x3,
+  5★ L x2 + XL; National Dex Gen 3 registers them, `exports.expCandies`; Rare Candies stand in
+  without), TMs 1 / 1 / 2 / 3 / 3 (Gen 3's 289..338, damaging, of the boss's types first:
+  `Rw.tmsFor`, read through `Rw.battle` = src/battle.lua), two berries at 80% each from a pool,
+  Nugget / Big Pearl / Star Piece (Big Nugget and Rare Bone stand-ins) at 20-50% each by tier, a Rare
+  Candy at 25%, a PP Max for the Bottle Cap at 1-3% from 3★. No Dynamax Candy, no Exp. or EVs straight
+  to the four (so the after-raid evolutions / moves no longer arise; the code stays). Names on the
+  card: "TM38 Fire Blast", "Exp. Candy XL" (`Rw.itemName`). Driver `tests/drivers/rewards_probe.lua`;
+  sim test checks the spread (with an even generator: rngOf's low bits bias % rolls).
 - **The party's pictures whole** (2026-10-26, Wooble: big sprites cut off at the top): `memberPics` took
   a 64 x 64 corner of the back pic; a sprite mod paints a big Pokemon on a canvas larger than the 64 x 64
   it reports (g9-battle-sprites-gen3), so the head was cut. Now the provider's own quad when it gives

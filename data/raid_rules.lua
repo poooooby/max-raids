@@ -41,12 +41,34 @@ N.RAID = {
   -- it }, ITEM_ROLLS picks, +1 from 4 stars), the boss's Exp to each of the four (the Gen 3 formula,
   -- one participant), the tier's EVs in the boss's best base stat; x NO_FAINT_MULT with no knock-out,
   -- x FIRST_WIN_MULT the first time that boss is beaten
-  REWARD = { NO_FAINT_MULT = 1.5, FIRST_WIN_MULT = 2, ITEM_ROLLS = { 1, 3 },
-    POOL = {
-      { "ITEM_RARE_CANDY", 1, 3 }, { "ITEM_HP_UP", 1, 1 }, { "ITEM_PROTEIN", 1, 1 }, { "ITEM_IRON", 1, 1 },
-      { "ITEM_CARBOS", 1, 1 }, { "ITEM_CALCIUM", 1, 1 }, { "ITEM_ZINC", 1, 1 }, { "ITEM_NUGGET", 1, 2 },
-      { "ITEM_PP_UP", 2, 1 }, { "ITEM_STAR_PIECE", 2, 1 }, { "ITEM_BIG_PEARL", 3, 1 }, { "ITEM_PP_MAX", 4, 1 },
-    } },
+  -- rewards on a win, as Sword / Shield's dens give them (Serebii's den tables, e.g. Den #18), every
+  -- tier its own spread; Gen 3 stand-ins where it lacks the item (see EVIDENCE "RAID.REWARD"):
+  --   CANDIES   Exp. Candies, always, by tier (National Dex Gen 3 registers them: EXP_CANDY_XS..XL)
+  --   TMS       how many TMs (Sword / Shield's TRs: single-use, as Gen 3's TMs are), always, of the
+  --             boss's types where it has enough damaging ones, else any damaging TM
+  --   BERRIES   N berries, each at CHANCE %, from POOL (two kinds at most)
+  --   TREASURES each of ITEMS at CHANCE[tier] %: Nugget, and Big Pearl / Star Piece for the Big Nugget
+  --             and Rare Bone Gen 3 lacks
+  --   RARE_CANDY its chance %; CAP the Bottle Cap's chance by tier, as a PP Max (no Hyper Training)
+  -- No Dynamax Candy (no Dynamax levels), no Exp. or EVs straight to the four (Sword / Shield gives none)
+  REWARD = {
+    CANDIES = {
+      [1] = { { "XS", 5 }, { "S", 1 } },
+      [2] = { { "S", 5 }, { "M", 1 } },
+      [3] = { { "M", 5 }, { "L", 1 } },
+      [4] = { { "M", 2 }, { "L", 3 } },
+      [5] = { { "L", 2 }, { "XL", 1 } },
+    },
+    TMS = { 1, 1, 2, 3, 3 },
+    BERRIES = { N = 2, CHANCE = 80, POOL = { "ITEM_POMEG_BERRY", "ITEM_KELPSY_BERRY", "ITEM_QUALOT_BERRY",
+      "ITEM_HONDEW_BERRY", "ITEM_GREPA_BERRY", "ITEM_TAMATO_BERRY", "ITEM_LUM_BERRY", "ITEM_SITRUS_BERRY",
+      "ITEM_LEPPA_BERRY" } },
+    TREASURES = { CHANCE = { 20, 25, 30, 35, 50 }, ITEMS = { "ITEM_NUGGET", "ITEM_BIG_PEARL", "ITEM_STAR_PIECE" } },
+    RARE_CANDY = 25,
+    CAP = { CHANCE = { 0, 0, 1, 2, 3 }, ITEM = "ITEM_PP_MAX" },
+    -- (without National Dex's candies: Rare Candies, this many by tier)
+    CANDY_STAND_IN = { 1, 1, 2, 3, 4 },
+  },
   -- the catch after a win: a chance by the tier, times the ball's (the engine's catch multipliers:
   -- Great 1.5, Ultra 2; Master never misses); the balls offered in BALLS' order, those the bag holds
   CATCH = {
@@ -99,6 +121,7 @@ N.EVIDENCE = {
   ["RAID.BREAK_DROP"] = { class = "verified", source = "Pokemon.com; GameSpot: breaking the barrier sharply lowers the boss's Defense and Sp. Def", confidence = "medium" },
   ["RAID.ITEM_PRIORITY"] = { class = "ours", source = "items before moves, as the main games run the bag; raids have no bag", confidence = "high" },
   ["RAID.STARS"] = { class = "inferred", source = "levels by tier: Serebii (15-20 .. 55-60); HP x1.4 / 1.6 / 1.9 / 2.5 for 1-4★: Bulbapedia Max Raid Battle; 5★ x5.0 (ours: x3.0 let a Lv 70 team, IVs 31, 252-EV spreads, win every 5★ in 3-8 of its 10 turns - balance_probe, 2026-10-26), the thresholds, IVs, EVs, bags and medal turns are ours; shields: none at 1-2★ in the games (one here, to teach it), one at 3-4★, two at 5★ (Bulbapedia, Pokemon.com)", confidence = "medium" },
+  ["RAID.REWARD"] = { class = "inferred", source = "Serebii, Sword / Shield Max Raid den listings (den18): Exp. Candy XS x5 + S x1 (1★), S x5 + M x1 (2★), M x5 + L x1 (3★), M x2 + L x3 (4★), L x2 + XL x1 (5★); Dynamax Candy 1-2; TRs 1 / 1 / 2 / 3 / 3 at 100%; two berries at 80%; Big Nugget / Nugget / Rare Bone 20-50% each by tier; Rare Candy 25%; Bottle Cap 1-3% from 3★. Gen 3 stand-ins ours (TMs for TRs; Big Pearl / Star Piece for Big Nugget / Rare Bone; PP Max for the Bottle Cap; no Dynamax Candy)", confidence = "medium" },
   ["RAID.SEGMENTS"] = { class = "ours", source = "the games: 2 to 8 segments, by the boss's defensive stats (Bulbapedia, Serebii); this formula is ours", confidence = "medium" },
   ["RAID.CHEER"] = { class = "verified", source = "Serebii: cheer heals, raises a stat, sets a screen or breaks the barrier, about 16% each, nothing 20%; the screens are a Defense / Sp. Def raise here", confidence = "medium" },
   ["RAID.POUCH"] = { class = "ours", source = "raids in the games have no bag; ITEM is ours", confidence = "high" },

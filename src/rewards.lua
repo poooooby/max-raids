@@ -1,14 +1,13 @@
 -- After a won raid: the catch and the rewards (data/raid_rules.lua RAID.CATCH / RAID.REWARD), on the
 -- engine. The catch: one throw of a ball the bag holds (used up), a chance by the tier times the
 -- ball's; caught, the boss's species at its level joins the party (or the PC), registered caught in
--- the Pokedex, in that ball. The rewards: items into the bag, the boss's Exp to each of the four
--- who fought (their own Pokemon, not the raid's copies; levels with their stats - new moves and
--- evolutions follow after the raid, src/raid.lua), the tier's EVs in the boss's best base stat; x NO_FAINT_MULT with no knock-out, x
--- FIRST_WIN_MULT the first time that boss is beaten (save "wins").
---   Rw = rewards(mod, { N, Bosses, Sprites })
+-- the Pokedex, in that ball. The rewards: Sword / Shield's drops by tier, into the bag - Exp. Candies
+-- (National Dex Gen 3's), TMs of the boss's types, berries, treasures, a Rare Candy, a PP Max for the
+-- Bottle Cap (RAID.REWARD); nothing straight to the four who fought.
+--   Rw = rewards(mod, { N, Bosses, Sprites }) ; Rw.battle = src/battle.lua's (for the TMs' moves)
 --   Rw.balls() -> { { item, name, n, mult }, ... } ; Rw.chance(stars, mult) (pure)
 --   Rw.throw(key, level, ball, rng) -> caught, { name, toPC } | why
---   Rw.give(r) -> { items, team, evStat, ev, mult, firstWin }
+--   Rw.rollItems(key, rng) -> { { id, n }, ... } ; Rw.give(r, rng) -> { items, firstWin }
 
 return function(mod, deps)
   local N, Bosses, Sprites = deps.N, deps.Bosses, deps.Sprites
@@ -27,7 +26,6 @@ return function(mod, deps)
   local Party = engine("src.core.game3.party")
   local Dex = engine("src.core.game3.dex")
   local Pokemon = engine("src.core.game3.pokemon")
-  local Experience = engine("src.core.game3.battle.experience")
 
   local function session() return Runtime and Runtime.getSession and Runtime.getSession() or nil end
 
@@ -42,10 +40,21 @@ return function(mod, deps)
     return ok and tonumber(id) or nil
   end
   function Rw.itemName(id)
+    -- a TM by its number and move, as Sword / Shield names its TRs ("TM42 Facade")
+    local n = tonumber(id)
+    if n and n >= 289 and n <= 338 and Pokemon and Pokemon.moveFromTmItem and Rw.battle and Rw.battle.move then
+      local okM, move = pcall(Pokemon.moveFromTmItem, n)
+      local okB, mv = pcall(Rw.battle.move, move)
+      if okM and okB and type(mv) == "table" and mv.name then return ("TM%02d %s"):format(n - 288, mv.name) end
+    end
     if ItemsData and ItemsData.displayName then
-      local ok, n = pcall(ItemsData.displayName, id)
-      if ok and type(n) == "string" and n ~= "" then
-        return (n:lower():gsub("(%a)([%w']*)", function(a, b) return a:upper() .. b end))
+      local ok, nm = pcall(ItemsData.displayName, id)
+      if ok and type(nm) == "string" and nm ~= "" then
+        nm = nm:lower():gsub("(%a)([%w']*)", function(a, b) return a:upper() .. b end)
+        -- (the sizes and initials stay capitals: Exp. Candy XS / XL, PP Max)
+        nm = nm:gsub("%f[%w]Xs%f[%W]", "XS"):gsub("%f[%w]Xl%f[%W]", "XL"):gsub("%f[%w]Pp%f[%W]", "PP")
+          :gsub("%f[%w]Tm(%d+)", "TM%1"):gsub("%f[%w]Hp%f[%W]", "HP")
+        return nm
       end
     end
     return "?"
@@ -109,74 +118,90 @@ return function(mod, deps)
 
   -- ------- the rewards
 
-  local STAT_FROM_BASE = { hp = "hp", atk = "atk", def = "def", spe = "spe", spa = "spa", spd = "spd" }
-  Rw.STAT_WORD = { hp = "HP", atk = "Attack", def = "Defense", spe = "Speed", spa = "Sp. Atk", spd = "Sp. Def" }
-
-  -- the boss's best base stat (its EV yield here)
-  function Rw.evStat(key)
-    local sp = Sprites[key]
-    local best, bestV = "hp", -1
-    for k, v in pairs(sp and sp.base or {}) do
-      if STAT_FROM_BASE[k] and v > bestV then best, bestV = k, v end
-    end
-    return best
+  -- the Exp. Candies' item numbers (National Dex Gen 3's: EXP_CANDY_XS..XL), or nil without them
+  local function candyIds()
+    local ok, d = pcall(mod.find, mod, "national_dex_gen3")
+    local ids = ok and type(d) == "table" and d.exports and d.exports.expCandies
+    return type(ids) == "table" and ids or nil
   end
+  Rw.candyIds = candyIds
 
-  -- the items a win rolls (pure but for its dice): { { name = "ITEM_X", n }, ... }, merged
-  function Rw.rollItems(stars, mult, rng)
-    local P = R.REWARD
-    local pool = {}
-    for _, row in ipairs(P.POOL or {}) do if stars >= row[2] then pool[#pool + 1] = row end end
-    local picks = rng(P.ITEM_ROLLS[1], P.ITEM_ROLLS[2]) + (stars >= 4 and 1 or 0)
-    local got, order = {}, {}
-    for _ = 1, picks do
-      local row = pool[rng(1, #pool)]
-      if row then
-        local n = rng(1, max(1, min(row[3], ceil(stars / 2)))) * 1
-        n = max(1, floor(n * mult + 0.5))
-        if not got[row[1]] then got[row[1]] = 0; order[#order + 1] = row[1] end
-        got[row[1]] = got[row[1]] + n
+  -- Gen 3's TMs (items 289..338 in every version) that teach a damaging move: { { id, typeName } }
+  local tmList = nil
+  local function tms()
+    if tmList then return tmList end
+    tmList = {}
+    local Bt = Rw.battle
+    if not (Pokemon and Pokemon.moveFromTmItem and Bt and Bt.move) then return tmList end
+    for id = 289, 338 do
+      local okM, move = pcall(Pokemon.moveFromTmItem, id)
+      local okB, mv = pcall(Bt.move, move)
+      if okM and move and okB and type(mv) == "table" and not mv.status and (tonumber(mv.power) or 0) > 0 then
+        tmList[#tmList + 1] = { id = id, typeName = mv.typeName }
       end
     end
+    return tmList
+  end
+
+  -- n TMs, all different: of the boss's types first, then any damaging one
+  function Rw.tmsFor(types, n, rng)
+    local list = tms()
+    local mine, rest = {}, {}
+    local want = {}
+    for _, t in ipairs(types or {}) do want[t] = true end
+    for _, t in ipairs(list) do
+      if want[t.typeName] then mine[#mine + 1] = t else rest[#rest + 1] = t end
+    end
     local out = {}
-    for _, k in ipairs(order) do out[#out + 1] = { name = k, n = got[k] } end
+    local function take(from)
+      while #out < n and #from > 0 do
+        local i = rng(1, #from)
+        out[#out + 1] = from[i].id
+        table.remove(from, i)
+      end
+    end
+    take(mine)
+    take(rest)
     return out
   end
 
-  -- EVs into one stat of a Pokemon, held to 252 a stat and 510 in all (Super Training's caps), its
-  -- HP moving by the change in its maximum
-  local function addEvs(mon, stat, n)
-    if not (Pokemon and Pokemon.evsOf) then return 0 end
-    local ok, evs = pcall(Pokemon.evsOf, mon)
-    if not ok or type(evs) ~= "table" then return 0 end
-    local total = 0
-    for _, v in pairs(evs) do total = total + (tonumber(v) or 0) end
-    local add = max(0, min(n, 252 - (evs[stat] or 0), 510 - total))
-    if add == 0 then return 0 end
-    evs[stat] = (evs[stat] or 0) + add
-    local oldMax, oldHp = tonumber(mon.maxHp) or 0, tonumber(mon.hp) or 0
-    if Pokemon.applyStats then pcall(Pokemon.applyStats, mon) end
-    local newMax = tonumber(mon.maxHp) or oldMax
-    mon.hp = max(oldHp > 0 and 1 or 0, min(newMax, oldHp + (newMax - oldMax)))
-    return add
-  end
-
-  -- Exp to a Pokemon: its levels (stats with them) and a friendship step a level -> gained,
-  -- fromLevel, toLevel. Its new moves and an evolution come after the raid, one by one (raid.lua)
-  local function addExp(mon, amount)
-    if not (Experience and Experience.apply) then return 0, mon.level, mon.level end
-    local ok, res = pcall(Experience.apply, mon, amount)
-    if not ok or type(res) ~= "table" then return 0, mon.level, mon.level end
-    local from, to = tonumber(res.fromLevel) or mon.level, tonumber(res.toLevel) or mon.level
-    for _ = from + 1, to do
-      if Pokemon and Pokemon.adjustFriendship then
-        pcall(Pokemon.adjustFriendship, mon, Pokemon.FRIENDSHIP_EVENT_GROW_LEVEL or 0, {})
+  -- a won raid's drops, rolled (no bag yet): { { id = number, n }, ... } in the card's order -
+  -- the Exp. Candies, the TMs, the berries, the treasures, a Rare Candy, a PP Max
+  function Rw.rollItems(key, rng)
+    local P = R.REWARD
+    local b = Bosses[key] or { stars = 1 }
+    local stars = math.max(1, math.min(5, b.stars or 1))
+    local out = {}
+    local function add(id, n)
+      if not id or (n or 0) <= 0 then return end
+      for _, it in ipairs(out) do if it.id == id then it.n = it.n + n; return end end
+      out[#out + 1] = { id = id, n = n }
+    end
+    local candies = candyIds()
+    if candies then
+      for _, row in ipairs(P.CANDIES[stars] or {}) do add(candies["EXP_CANDY_" .. row[1]], row[2]) end
+    else
+      add(Rw.itemId("ITEM_RARE_CANDY"), P.CANDY_STAND_IN[stars] or 1)
+    end
+    for _, id in ipairs(Rw.tmsFor(b.types, P.TMS[stars] or 1, rng)) do add(id, 1) end
+    local pool = {}
+    for _, name in ipairs(P.BERRIES.POOL) do pool[#pool + 1] = name end
+    for _ = 1, P.BERRIES.N do
+      if #pool > 0 and rng(1, 100) <= P.BERRIES.CHANCE then
+        local i = rng(1, #pool)
+        add(Rw.itemId(pool[i]), 1)
+        table.remove(pool, i)
       end
     end
-    return tonumber(res.gained) or amount, from, to
+    for _, name in ipairs(P.TREASURES.ITEMS) do
+      if rng(1, 100) <= (P.TREASURES.CHANCE[stars] or 0) then add(Rw.itemId(name), 1) end
+    end
+    if rng(1, 100) <= P.RARE_CANDY then add(Rw.itemId("ITEM_RARE_CANDY"), 1) end
+    if rng(1, 100) <= (P.CAP.CHANCE[stars] or 0) then add(Rw.itemId(P.CAP.ITEM), 1) end
+    return out
   end
 
-  -- the first win against a boss (save "wins": key -> count), counted
+  -- the wins against each boss (save "wins": key -> count)
   local function countWin(key)
     local wins = mod.save:get("wins")
     if type(wins) ~= "table" then wins = {} end
@@ -186,45 +211,16 @@ return function(mod, deps)
     return first
   end
 
-  -- a won raid's rewards, given: r = the raid (key, boss, members with `orig`, sim)
+  -- a won raid's rewards, into the bag: r = the raid (key)
   function Rw.give(r, rng)
     rng = rng or function(lo, hi) return math.random(lo, hi) end
     local s = session()
-    local b = Bosses[r.key] or { stars = 1 }
-    local out = { items = {}, team = {} }
+    local out = { items = {} }
     out.firstWin = countWin(r.key)
-    local mult = 1
-    if r.sim and r.sim.faints == 0 then mult = mult * (R.REWARD.NO_FAINT_MULT or 1) end
-    if out.firstWin then mult = mult * (R.REWARD.FIRST_WIN_MULT or 1) end
-    out.mult = mult
-    -- items
-    for _, it in ipairs(Rw.rollItems(b.stars, mult, rng)) do
-      local id = Rw.itemId(it.name)
-      if id and s and Bag and Bag.add then
-        local ok, placed = pcall(Bag.add, s.bag, id, it.n)
-        if ok and placed ~= false then out.items[#out.items + 1] = { id = id, name = Rw.itemName(id), n = it.n } end
-      end
-    end
-    -- Exp and EVs to the four's own Pokemon
-    local level = r.boss and r.boss.mon and r.boss.mon.level or 20
-    local species = r.boss and r.boss.mon and r.boss.mon.species
-    local exp = 0
-    if Experience and Experience.gainFor and species and species > 0 then
-      local ok, e = pcall(Experience.gainFor, species, level, { participants = 1 })
-      exp = ok and tonumber(e) or 0
-    end
-    if exp <= 0 then exp = floor(200 * level / 7) end
-    exp = floor(exp * mult)
-    local T = R.STARS[b.stars] or R.STARS[1]
-    out.evStat, out.ev = Rw.evStat(r.key), T.ev or 0
-    for _, m in ipairs(r.members) do
-      local mon = m.orig
-      if mon then
-        local gained, from, to = addExp(mon, exp)
-        local evs = addEvs(mon, out.evStat, out.ev)
-        m.levelFrom, m.levelTo = from, to
-        out.team[#out.team + 1] = { name = m.b and m.b.name or "?", exp = gained, from = from, to = to,
-          evs = evs, icon = m.info and m.info.icon }
+    for _, it in ipairs(Rw.rollItems(r.key, rng)) do
+      if s and Bag and Bag.add then
+        local ok, placed = pcall(Bag.add, s.bag, it.id, it.n)
+        if ok and placed ~= false then out.items[#out.items + 1] = { id = it.id, name = Rw.itemName(it.id), n = it.n } end
       end
     end
     return out
