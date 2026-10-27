@@ -131,6 +131,15 @@ return function(mod, deps)
 
   local clock = 0
   function Sc.setTime(t) clock = t or 0 end
+  -- a new raid: what the last one set going (a shake, a jab, a battler struck, the roar's burst) is
+  -- dropped - each raid's clock starts again from 0
+  function Sc.resetEffects()
+    clock = 0
+    if Sc._shake then Sc._shake.amp = 0 end
+    if Sc._kick then Sc._kick.deg = 0 end
+    if Sc._struck then for k in pairs(Sc._struck) do Sc._struck[k] = nil end end
+    if Sc._burst then Sc._burst.t0 = nil end
+  end
 
   local function copyPose(dst, src)
     dst.eye[1], dst.eye[2], dst.eye[3] = src.eye[1], src.eye[2], src.eye[3]
@@ -159,18 +168,21 @@ return function(mod, deps)
   function Sc.shotDone() return move.dur <= 0 or clock - move.t0 >= move.dur end
 
   local shake = { amp = 0, t0 = 0, dur = 0 }
+  Sc._shake = shake
   function Sc.shake(amp, dur)
     -- (a stronger shake takes over; a weaker one under way is left be)
     local st = clock - shake.t0
-    local now = shake.amp > 0 and st < shake.dur and shake.amp * (1 - st / shake.dur) or 0
+    local now = shake.amp > 0 and st >= 0 and st < shake.dur and shake.amp * (1 - st / shake.dur) or 0
     if (amp or 0.15) < now then return end
     shake.amp, shake.t0, shake.dur = amp or 0.15, clock, dur or 0.6
   end
   -- a blow's jab: the view narrows by deg degrees at once and eases back over dur
   local kick = { deg = 0, t0 = 0, dur = 0 }
+  Sc._kick = kick
   function Sc.kick(deg, dur) kick.deg, kick.t0, kick.dur = deg or 3, clock, dur or 0.35 end
   -- a battler struck ("boss" or a member's place): it flashes white and is knocked back, by power
   local struck = {}
+  Sc._struck = struck
   function Sc.hit(which, power) struck[which] = { t0 = clock, p = power or 0.5 } end
   Sc.HIT_FLASH_S, Sc.KNOCK_S = 0.16, 0.4
   -- white 0..1, knock 0..1 (out and back) for a battler now
@@ -204,7 +216,8 @@ return function(mod, deps)
     -- the shake: a quick jitter dying away
     local hx, hy = 0, 0
     local st = clock - shake.t0
-    if shake.amp > 0 and st < shake.dur then
+    -- (a shake not yet begun - a clock set back - does nothing)
+    if shake.amp > 0 and st >= 0 and st < shake.dur then
       local a = shake.amp * (1 - st / shake.dur)
       hx, hy = a * sin(st * 71), a * sin(st * 53 + 1.3)
     end
@@ -943,6 +956,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- ring running over the ground from the pad, a red wash fading (Sc.burst at the clock's now)
   Sc.BURST_S = 1.6
   local burst = { t0 = nil }
+  Sc._burst = burst
   function Sc.burst() burst.t0 = clock end
   function Sc.bursting() return burst.t0 ~= nil and clock - burst.t0 < Sc.BURST_S end
   local function drawBurst(G2, ex, ey, ew, eh, bx, by, size)

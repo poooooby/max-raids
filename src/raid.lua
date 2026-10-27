@@ -328,6 +328,7 @@ return function(mod, deps)
 
   -- the raid itself begins: the intro from the close-up on the party
   local function begin(members)
+    if Scene and Scene.resetEffects then Scene.resetEffects() end
     r.phase, r.t, r.members, r.cues, r.hud = "intro", 0, members, {}, 0
     r.say = nil
     setupBattle(members)
@@ -1089,7 +1090,10 @@ return function(mod, deps)
     r.events, r.rows, r.bossShow = nil, {}, true
     if r.boss then r.boss.shieldShown = nil end
     local balls = Rewards.balls()
-    for _, bl in ipairs(balls) do bl.desc = Rewards.itemDesc and Rewards.itemDesc(bl.item) or "" end
+    for _, bl in ipairs(balls) do
+      bl.desc = Rewards.itemDesc and Rewards.itemDesc(bl.item) or ""
+      bl.rgb = BALL_RGB[bl.key]
+    end
     r.cmd = { menu = "catchq", cursor = 1, balls = balls, ball = 1, chosen = {}, moveList = {} }
     if Scene then Scene.shot("field", 0.8) end
     if #balls == 0 then r.cmd.cursor = 2 end
@@ -1836,7 +1840,10 @@ return function(mod, deps)
       end
       return true
     end
-    if r and r.phase == "catch" then return Rd.catchPointer(ev) end
+    if r and r.phase == "catch" then
+      if deps.padOnSecond() then return false end
+      return Rd.catchPointer(ev)
+    end
     if not (r and Pad) or deps.padOnSecond() or r.phase ~= "command" or r.say or r.summary then return false end
     local hit = Pad.hit(ev.x, ev.y, r.cmd.menu)
     if hit and hit ~= "panel" then
@@ -1867,6 +1874,17 @@ return function(mod, deps)
     elseif r.phase == "after" and r.ask and r.ask.kind == "yesno" and slot then
       r.cmd.cursor = slot
       if released then Rd.answer(slot == 1) end
+    elseif r.phase == "catch" and r.cmd and not r.say then
+      -- the catch on the second screen: Catch / Don't Catch, then the ball box
+      if r.cmd.menu == "catchq" then
+        if id == "catch" then r.cmd.cursor = 1 elseif id == "leave" then r.cmd.cursor = 2 end
+        if released and (id == "catch" or id == "leave") then Rd.catchChoose(id) end
+      elseif released then
+        if id == "left" then Rd.catchBall(-1)
+        elseif id == "right" then Rd.catchBall(1)
+        elseif id == "use" then Rd.pickBall()
+        elseif id == "back" then Rd.catchBack() end
+      end
     end
     uiTick(before)
   end
@@ -2193,7 +2211,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     elseif r.phase == "battle" and BattlerHud and r.rows and #r.rows > 0 then
       BattlerHud.drawRows(G, w, h, r.rows, r.t)
     elseif r.phase == "catch" then
-      if not r.say then Rd.drawCatch(G, w, h) end
+      -- (on the second screen when the pad is there)
+      if not r.say and not deps.padOnSecond() then Rd.drawCatch(G, w, h) end
     elseif r.phase == "rewards" then
       Rd.drawRewards(G, w, h)
     elseif r.phase == "after" then
@@ -2295,6 +2314,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.circle("fill", x + size / 2, y + size / 2, size * 0.38, 16)
   end
   Rd.itemIcon = itemIcon
+  if Pad then Pad.itemIcon = itemIcon end
 
   local function chevron(G, x, y, s)
     G.setColor(0, 0, 0, 1)

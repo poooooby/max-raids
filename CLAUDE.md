@@ -535,7 +535,15 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
   lower, no shadow, a dark lip inside its top (selected also black with a rim in its colour).
   `Pad.hitSecond`, `Pad.sWhere`. Driver `tests/drivers/screen2_probe.lua` (the display stood in for:
   frames saved as PNGs, taps queued; `_test.padSecond(on)` forces the option, `_test.screen2.bridge`).
-  The catch's choice and the ball box stay on the main screen for now.
+  The catch is there too when the pad is (2026-10-26): Catch / Don't Catch as two wide buttons, then the
+  ball box (big left / right buttons, the ball's dark card with its bag icon via `Pad.itemIcon` = the
+  raid's `Rd.itemIcon`, name, xN, "n of N", its words, Use; Back in the header); `Rd.secondPress` takes
+  catch / leave / left / right / use / back; the main screen then draws no choice and takes no taps.
+- **Each raid's scene starts clean** (2026-10-26, Wooble saw the camera shake wildly on a raid opened right
+  after a catch): the shake ran on `st = clock - t0`, and a new raid's clock starts at 0, so a shake
+  from the last raid (the catch's landing, t0 ~25 s) had st < 0 and an amplitude growing with it.
+  Now a shake not yet begun does nothing (`st >= 0`), and `begin` calls `Sc.resetEffects()` (clock 0,
+  shake, jab, struck battlers, the roar's burst). screen2_probe checks it on a raid reopened after a throw.
 - **Textured buttons** (Wooble: modern, texture instead of flat): `Pad.face(G, x, y, w, h, rad, o)` - a
   shader-drawn rounded face: a lit gradient (light, or dark when selected), a brushed grain, a gloss
   over the upper half, a bevel (lit top, shaded foot; pressed: turned over, a shadow inside its top),

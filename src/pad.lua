@@ -490,7 +490,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G.setColor(c[1], c[2], c[3], k)
       drawIcon(G, x + w / 2, y + h * (iconY or 0.4), h * 0.22, sel and { 0.07, 0.07, 0.09 } or { 0.95, 0.95, 0.96 })
     end
-    local f = font(h * (drawIcon and 0.17 or 0.2))
+    -- (words alone: as large as the button's height allows, held in by its width)
+    local f = font(drawIcon and h * 0.17 or (sub and h * 0.2 or min(h * 0.34, w * 0.06)))
     G.setFont(f)
     if sel then G.setColor(1, 1, 1, 1) elseif live then G.setColor(0.08, 0.08, 0.1, 1) else G.setColor(0.6, 0.6, 0.62, 1) end
     local ty = drawIcon and (iconY and (y + h * 0.5 - f:getHeight() / 2) or (y + h * 0.7))
@@ -539,6 +540,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local c = r and r.cmd
     local cmdUp = r and r.phase == "command" and c and not r.say
     local ask = r and r.phase == "after" and r.ask and r.ask.kind == "yesno"
+    local catchUp = r and r.phase == "catch" and c and (c.menu == "catchq" or c.menu == "ballbox")
     local title
     if cmdUp then
       local m = c.actor and r.members and r.members[c.actor]
@@ -548,6 +550,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       elseif c.menu == "target" then title = "Use it on whom?"
       else title = ("What will %s do?"):format(nm) end
     elseif ask then title = "Yes or no?"
+    elseif catchUp then
+      title = c.menu == "ballbox" and "Choose a Pok\195\169 Ball" or "Will you catch it?"
     else title = "Max Raid Battle" end
     G.print(title, h * 0.04, (hh - fh:getHeight()) / 2)
     for i = #sWhere.cells, 1, -1 do sWhere.cells[i] = nil end
@@ -556,7 +560,77 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local gx, gy, gw, gh = pad, hh + pad, w - pad * 2, h - hh - pad * 2
     local cw, ch = (gw - pad) / 2, (gh - pad) / 2
     local function cell(i) return gx + ((i - 1) % 2) * (cw + pad), gy + math.floor((i - 1) / 2) * (ch + pad) end
-    if cmdUp and c.menu == "main" then
+    if catchUp and c.menu == "catchq" then
+      -- Catch / Don't Catch: two wide buttons
+      local bh = (gh - pad) / 2
+      local balls = c.balls or {}
+      local rows = { { id = "catch", word = "Catch", rgb = { 0.93, 0.18, 0.42 }, icon = EMBLEM.pokemon, live = #balls > 0 },
+        { id = "leave", word = "Don't Catch", rgb = { 0.55, 0.55, 0.6 }, live = true } }
+      for i, row in ipairs(rows) do
+        local t = { x = gx, y = gy + (i - 1) * (bh + pad), w = gw, h = bh, id = row.id }
+        sWhere.cells[i] = t
+        quadButton(G, t, row.rgb, c.cursor == i, held == row.id, row.live, row.icon, row.word)
+      end
+    elseif catchUp then
+      -- the ball box: < the ball (its icon, name, how many) >, its words, Use
+      local balls = c.balls or {}
+      local bl = balls[c.ball or 1]
+      local bw2, bh2 = hh * 2.2, hh * 0.66
+      local b = rset(sWhere.back, w - bw2 - h * 0.03, (hh - bh2) / 2, bw2, bh2)
+      Pad.face(G, b.x, b.y + (held == "back" and bh2 * 0.06 or 0), b.w, b.h, bh2 / 2, { pressed = held == "back" })
+      local fb = font(bh2 * 0.5)
+      G.setFont(fb)
+      G.setColor(0.08, 0.08, 0.1, 1)
+      G.printf("Back", b.x, b.y + (bh2 - fb:getHeight()) / 2 + (held == "back" and bh2 * 0.06 or 0), b.w, "center")
+      -- the arrows and the ball between them
+      local rowH = gh * 0.42
+      local aw = rowH * 0.62
+      local arrows = { { id = "left", x = gx }, { id = "right", x = gx + gw - aw } }
+      for i, a in ipairs(arrows) do
+        local t = { x = a.x, y = gy, w = aw, h = rowH, id = a.id }
+        sWhere.cells[#sWhere.cells + 1] = t
+        local down = held == a.id and rowH * 0.045 or 0
+        if down == 0 then
+          G.setColor(0, 0, 0, 0.35)
+          G.rectangle("fill", t.x + 3, t.y + 5, t.w, t.h, aw * 0.2, aw * 0.2)
+        end
+        Pad.face(G, t.x, t.y + down, t.w, t.h, aw * 0.2, { pressed = held == a.id })
+        local cx, cy, sz = t.x + t.w / 2, t.y + down + t.h / 2, aw * 0.22
+        G.setColor(0.1, 0.1, 0.12, 1)
+        if i == 1 then G.polygon("fill", cx - sz, cy, cx + sz * 0.7, cy - sz * 1.1, cx + sz * 0.7, cy + sz * 1.1)
+        else G.polygon("fill", cx + sz, cy, cx - sz * 0.7, cy - sz * 1.1, cx - sz * 0.7, cy + sz * 1.1) end
+      end
+      local px, pw2 = gx + aw + pad, gw - (aw + pad) * 2
+      Pad.face(G, px, gy, pw2, rowH, rowH * 0.12, { dark = true, accent = bl and bl.rgb or { 0.9, 0.2, 0.3 }, tint = 0.15 })
+      if bl then
+        local is = rowH * 0.42
+        if Pad.itemIcon then Pad.itemIcon(G, bl.item, px + pw2 / 2 - is / 2, gy + rowH * 0.08, is, bl.rgb) end
+        local nm = bl.name or "?"
+        if (bl.n or 1) > 1 and not nm:match("s$") then nm = nm .. "s" end
+        local fn = font(rowH * 0.17)
+        G.setFont(fn)
+        G.setColor(1, 1, 1, 1)
+        G.printf(nm, px, gy + rowH * 0.56, pw2, "center")
+        local fc = font(rowH * 0.13)
+        G.setFont(fc)
+        G.setColor(0.8, 0.8, 0.85, 1)
+        G.printf("\195\151" .. tostring(bl.n or 0) .. ("   %d of %d"):format(c.ball or 1, #balls), px, gy + rowH * 0.78, pw2, "center")
+        -- its words
+        local dy = gy + rowH + pad * 0.6
+        local dh = gh * 0.3
+        G.setColor(1, 1, 1, 0.92)
+        G.rectangle("fill", gx, dy, gw, dh, dh * 0.12, dh * 0.12)
+        local fd = font(dh * 0.17)
+        G.setFont(fd)
+        G.setColor(0.1, 0.1, 0.12, 1)
+        G.printf(bl.desc or "", gx + dh * 0.15, dy + dh * 0.12, gw - dh * 0.3, "left")
+      end
+      -- Use
+      local uy = gy + rowH + pad * 1.2 + gh * 0.3
+      local t = { x = gx + gw * 0.15, y = uy, w = gw * 0.7, h = gy + gh - uy, id = "use" }
+      sWhere.cells[#sWhere.cells + 1] = t
+      quadButton(G, t, { 0.93, 0.18, 0.42 }, true, held == "use", bl ~= nil, nil, "Use")
+    elseif cmdUp and c.menu == "main" then
       -- Fight, Pokemon / Bag, Run
       for i, item in ipairs(Pad.ITEMS) do
         local x, y = cell(i)
