@@ -406,13 +406,25 @@ return function(mod, deps)
     return true
   end
 
-  -- from the den screen into the raid with the slots' Pokemon (slot order)
+  -- from the den screen into the raid with the slots' Pokemon (slot order): the screen fades to
+  -- black (OUT), holds (BLACK), the raid begins and fades in (IN) with its intro held until it has,
+  -- so the camera's pull-back starts on a clear screen
+  Rd.DEN_FADE = { OUT = 0.45, BLACK = 0.25, IN = 0.7 }
   function Rd.denStart()
-    if not (r and r.phase == "den" and r.key and Den) then return false end
+    if not (r and r.phase == "den" and r.key and Den) or r.starting then return false end
     local members = Den.members(r)
     if #members == 0 then return false end
-    begin(members)
+    r.starting = { t0 = r.t, members = members }
+    r.denMenu, r.denParty = nil, nil
     return true
+  end
+  -- (each den-screen frame: into the raid once the black has held)
+  local function stepStarting()
+    local st = r.starting
+    if not st or r.t - st.t0 < Rd.DEN_FADE.OUT + Rd.DEN_FADE.BLACK then return end
+    r.starting = nil
+    begin(st.members)
+    r.fadeIn = Rd.DEN_FADE.IN
   end
 
   function Rd.close()
@@ -456,10 +468,18 @@ return function(mod, deps)
       r.hitStop = r.hitStop - dt
       dt = dt * 0.06
     end
+    -- (the raid fading in: its clock held at the intro's start until the black has gone)
+    if r.phase == "intro" and (r.fadeIn or 0) > 0 then
+      r.fadeIn = max(0, r.fadeIn - dt)
+      dt = 0
+    end
     r.t = r.t + dt
     Rd.stepWarm()
     -- the den screen: no den in 3D yet
-    if r.phase == "den" then return end
+    if r.phase == "den" then
+      stepStarting()
+      if r.phase == "den" then return end
+    end
     if Scene then Scene.setTime(r.t) end
     if r.phase == "intro" then
       local I = Rd.INTRO
@@ -1931,7 +1951,7 @@ return function(mod, deps)
     if r.skipInput then r.skipInput = nil; return end
     if r.phase == "den" then
       -- (the press that opened the den is still down on its first frames: not a choice)
-      if r.t < Rd.DEN_ARM_S or not Den then return end
+      if r.t < Rd.DEN_ARM_S or not Den or r.starting then return end
       Den.input(r, input)
       return
     end
@@ -1986,7 +2006,7 @@ return function(mod, deps)
   end
   function pointerInner(ev)
     if r and r.phase == "den" then
-      if r.t >= Rd.DEN_ARM_S and Den then Den.pointer(r, ev) end
+      if r.t >= Rd.DEN_ARM_S and Den and not r.starting then Den.pointer(r, ev) end
       return true
     end
     if r and r.phase == "rewards" then
@@ -2243,8 +2263,21 @@ return function(mod, deps)
     if not r or r.summary or r.aside then return end
     if r.phase == "den" then
       if Den then Den.draw(G, w, h, r) end
+      -- START: the screen fading to black
+      if r.starting then
+        G.setColor(0, 0, 0, min(1, (r.t - r.starting.t0) / Rd.DEN_FADE.OUT))
+        G.rectangle("fill", 0, 0, w, h)
+      end
       return
     end
+    Rd.drawMain(G, w, h)
+    -- the raid fading in from the black (its intro held until it has)
+    if (r.fadeIn or 0) > 0 then
+      G.setColor(0, 0, 0, min(1, r.fadeIn / Rd.DEN_FADE.IN))
+      G.rectangle("fill", 0, 0, w, h)
+    end
+  end
+  function Rd.drawMain(G, w, h)
     local img, q = Rd.frameAt(r.key, r.t)
     if img and loaded then
       bossPic.image, bossPic.quad, bossPic.box, bossPic.size = img, q, loaded.box, Rd.sizeOf(r.key)

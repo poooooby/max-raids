@@ -121,6 +121,10 @@ local function body(game, log)
   -- START: the raid with them
   r.cursor = 5
   check(R.denStart(), "START goes in")
+  U.wait(15); shot("p10b_start_fading")
+  -- (START fades to black first: the raid begins behind it)
+  waitFor(function() return X.state().phase == "intro" end, 600)
+  U.wait(10); shot("p10c_fading_in")
   local ms = R.current().members
   check(ms and ms[3] and ms[3].orig == boxed[1], "the boxed one fights in slot 3")
   waitFor(function() return (X.state().t or 0) >= 6 end, 3000)
