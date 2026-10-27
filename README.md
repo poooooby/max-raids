@@ -112,6 +112,9 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 - 🔴 **One throw to catch it:** choose one of your Poké Balls. The Pokémon joins your party, or
   your PC when the party is full. The higher its stars, the harder it is to catch, and the better
   its IVs: one perfect IV at 1★, two at 2★, three at 3★, four at 4★ and 5★.
+- ✨ **Shiny raid Pokémon:** a den's Pokémon is shiny 1 time in 4,096, as in Sword and Shield, and a
+  Dynamax Crystal's legendary raid 1 in 300, as the Dynamax Adventures. A shiny one shows its shiny
+  colours from the start and sparkles once its entrance clears; catch it and it's shiny in your party.
 - 🌟 **Dynamax marks:** a caught raid Pokémon has a Dynamax Level by the raid's stars (1–2 at 1★
   up to 6–8 at 5★), and one caught from a Gigantamax raid has the Gigantamax Factor. Both show on
   its summary.

@@ -106,7 +106,9 @@ return function(mod, deps)
     if loaded.cry and loaded.cry.release then pcall(loaded.cry.release, loaded.cry) end
     loaded = nil
   end
+  -- (shiny: the shiny sheet; left out, the raid's own roll - Rd.shinyKey, the shiny boss's key)
   function Rd.load(key, shiny)
+    if shiny == nil then shiny = Rd.shinyKey ~= nil and Rd.shinyKey == key end
     if loaded and loaded.key == key and loaded.shiny == (shiny == true) then return loaded end
     Rd.release()
     local b, sp = Rd.boss(key)
@@ -151,6 +153,24 @@ return function(mod, deps)
   end
 
   -- the boss's cry: the pack's .ogg, at the game's effects volume; a Dynamax boss's the game's own
+  -- a shiny Pokemon's sparkle (the games' as one appears): stars bursting round it, a flash, SE_SHINY
+  function Rd.shinySparkle(b)
+    local A = b and Rd.placeOf and Rd.placeOf(b)
+    if Sounds and Sounds.CATCH.shiny then Rd.se(Sounds.CATCH.shiny) end
+    if not (Fx and A) then return end
+    for j = 1, 14 do
+      local th = j / 14 * 2 * math.pi
+      local p = Fx.emit("twinkle", A.X + math.cos(th) * A.h * 0.35, A.Y + math.sin(th) * A.h * 0.35, A.Z + 0.3,
+        math.cos(th) * 1.2, math.sin(th) * 1.2, 0, 1.1, A.h * 0.03, 1, 0.95, 0.55, 1)
+      if p then p.grow = 0 end
+    end
+    for j = 1, 4 do
+      Fx.emit("twinkle", A.X + (j - 2.5) * A.h * 0.2, A.Y + A.h * 0.15 * ((j % 2) * 2 - 1), A.Z + 0.35, 0, 0.2, 0,
+        0.9, A.h * 0.07, 1, 1, 0.8, 1)
+    end
+    Fx.emit("light", A.X, A.Y, A.Z + 0.3, 0, 0, 0, 0.6, A.h * 1.8, 1, 0.95, 0.6, 0.5)
+  end
+
   -- a Dynamax Pokemon's cry (a route one's boss, one of the four grown giant): its own cry played
   -- lower and slower, as the much bigger creature - the engine's cry (or a cry mod's) then its voice
   -- pitched to GIANT_CRY (a Source's pitch slows it with it: 0.8 is ~4 semitones down, 25% longer).
@@ -444,6 +464,13 @@ return function(mod, deps)
     local rng = function(lo, hi) return gen and gen:random(lo, hi) or math.random(lo, hi) end
     r.rng = rng
     r.boss = Battle.boss(r.key, rng)
+    -- shiny? 1 in 4096, a Dynamax Crystal's legendary raid 1 in 300 (shown from the start: its shiny
+    -- sheet, sparkling as it appears)
+    local SH = R.SHINY or { ODDS = 4096, ADVENTURE = 300 }
+    local odds = r.legend and SH.ADVENTURE or SH.ODDS
+    if Rd.FORCE_SHINY ~= nil then r.shiny = Rd.FORCE_SHINY else r.shiny = rng(1, odds) == 1 end
+    Rd.shinyKey = r.shiny and r.key or nil
+    if r.boss then r.boss.shiny = r.shiny end
     local list = {}
     for i, m in ipairs(members) do
       m.orig = m.mon
@@ -573,6 +600,7 @@ return function(mod, deps)
   function Rd.close()
     if not r then return false end
     r = nil
+    Rd.shinyKey = nil
     if Fx then Fx.clear() end
     Rd.release()
     -- the field's song back, the raid's faded out under it (not cut, not over it)
@@ -641,8 +669,9 @@ return function(mod, deps)
   -- whole height; it roars (its cry, a burst of energy, a shake), "X appeared!", the HUD comes in,
   -- and the camera swings over the first member's shoulder for its command (seconds from opening)
 
+  -- (SHINY_AT: a shiny boss's sparkle, once the roar's burst - Scene.BURST_S - has played out)
   Rd.INTRO = { REVEAL_AT = 1.3, REVEAL_S = 2.4, ROAR_AT = 3.6, SAY_AT = 4.0, HUD_S = 0.5,
-    MEMBER_AT = 6.0, MEMBER_S = 1.2, DONE = 7.2 }
+    SHINY_AT = 5.2, MEMBER_AT = 6.0, MEMBER_S = 1.2, DONE = 7.2 }
   local function once(name, at)
     if r.cues[name] or r.t < at then return false end
     r.cues[name] = true
@@ -680,6 +709,8 @@ return function(mod, deps)
         Rd.cry(r.key)
         if Scene then Scene.burst(); Scene.shake(0.22, 1.0) end
       end
+      -- a shiny one sparkles once its explosive entrance is over
+      if r.shiny and once("shiny", I.SHINY_AT) then Rd.shinySparkle(r.boss) end
       if once("say", I.SAY_AT) then
         local b = Bosses[r.key]
         Rd.say((b and b.name or "The boss") .. " appeared!")
@@ -1881,7 +1912,8 @@ return function(mod, deps)
     local ball = r.cmd.balls[i or r.cmd.ball]
     if not ball then return false end
     local level = r.boss and r.boss.mon.level or 20
-    local caught, info = Rewards.throw(r.key, level, ball, r.rng, r.boss and r.boss.mon.ivs or nil, r.boss and r.boss.gender)
+    local caught, info = Rewards.throw(r.key, level, ball, r.rng, r.boss and r.boss.mon.ivs or nil, r.boss and r.boss.gender,
+      r.shiny)
     r.throw = { t0 = r.t, caught = caught, info = type(info) == "table" and info or nil, ball = ball,
       rgb = BALL_RGB[ball.key] or BALL_RGB.ITEM_POKE_BALL, said = {}, cues = {}, acc = 0 }
     r.phase = "throw"

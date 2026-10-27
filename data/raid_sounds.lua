@@ -68,6 +68,8 @@ S.CATCH = {
   land = "SE_M_EARTHQUAKE", bounce = "SE_BALL_BOUNCE_1", wobble = "SE_BALL",
   click = { "SE_BALL_CLICK", "SE_RG_BALL_CLICK", "SE_BALL" },
   burst = "SE_BALL_OPEN", gone = "SE_FLEE",
+  -- a shiny boss's sparkle as it appears
+  shiny = "SE_SHINY",
 }
 S.UI = { move = "SE_SELECT", pick = "SE_SELECT" }
 

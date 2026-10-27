@@ -6,6 +6,9 @@
 local N = {}
 
 N.RAID = {
+  -- a raid's boss is shiny 1 in ODDS (Sword / Shield's dens: the Shiny Charm does not count there);
+  -- a Dynamax Crystal's legendary raid - our Dynamax Adventure - 1 in ADVENTURE (the Max Lair's)
+  SHINY = { ODDS = 4096, ADVENTURE = 300 },
   TURNS = 10,                 -- the storm: a raid ends lost when its 10th turn ends
   FAINTS = 4,                 -- knock-outs in all, the same member counting each time
   SHIELD_DMG = 0.25,          -- a hit's damage while the shield stands
@@ -145,6 +148,7 @@ N.EVIDENCE = {
   ["RAID.SCRIPTS"] = { class = "inferred", source = "the games: the boss may act more than once a turn (a Max Move, a wave cancelling the players' stat changes); how often is not published (Pokemon.com, GamerGuides, Serebii); these schedules are ours", confidence = "medium" },
   ["RAID.SIZE"] = { class = "ours", source = "the boss drawn 6.5 to 8.5 times a member's height (Sword / Shield's giants tower over the party)", confidence = "high" },
   ["RAID.DENS.RARE"] = { class = "inferred", source = "Sword / Shield: a den's beam is red (its common pool) or purple (its rare pool, where the Gigantamax Pokemon are); ~10% purple by players' counts (GameFAQs), no datamined figure", confidence = "low" },
+  ["RAID.SHINY"] = { class = "verified", source = "Bulbapedia 'Shiny Pokemon' (Gen VIII: Max Raid Battles 1/4096, the Shiny Charm not applying; Dynamax Adventures 1/300, 1/100 with the Shiny Charm - Gen 3 has none); Serebii 'Dynamax Adventures'", confidence = "high" },
   ["RAID.BADGE_STARS"] = { class = "verified", source = "Sword / Shield's star range by badges (0: 1, 1-2: 1-2, 3: 1-3, 4: 2-3, 5-6: 3-4, 7-8: 3-5; Smogon's SwSh shiny hunting guide); the pick within a range is even (the game weights per den)", confidence = "medium" },
   ["RAID.DENS"] = { class = "ours", source = "Wooble 2026-10-26: dens generated on the routes, seeded per save, refreshing daily", confidence = "high" },
 }

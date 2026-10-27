@@ -6,8 +6,8 @@
 -- Bottle Cap (RAID.REWARD); nothing straight to the four who fought.
 --   Rw = rewards(mod, { N, Bosses, Sprites }) ; Rw.battle = src/battle.lua's (for the TMs' moves)
 --   Rw.balls() -> { { item, name, n, mult }, ... } ; Rw.chance(stars, mult) (pure)
---   Rw.throw(key, level, ball, rng, ivs, gender) -> caught, { name, toPC } | why   (ivs, gender: the
---   boss's, kept)
+--   Rw.throw(key, level, ball, rng, ivs, gender, shiny) -> caught, { name, toPC } | why   (ivs,
+--   gender, shiny: the boss's, kept)
 --   Rw.rollItems(key, rng) -> { { id, n }, ... } ; Rw.give(r, rng) -> { items, firstWin }
 
 return function(mod, deps)
@@ -116,7 +116,37 @@ return function(mod, deps)
     return false
   end
 
-  function Rw.throw(key, level, ball, rng, ivs, gender)
+  -- the caught Pokemon made shiny (want) or not, as the raid rolled it: Gen 3's shininess is the trainer
+  -- ids against the personality's halves, so its upper half is set (the lower kept: its gender byte
+  -- and ability bit stay; its nature may change, the stats are worked out again)
+  function Rw.setShiny(mon, want, rng)
+    if type(mon) ~= "table" then return false end
+    local bit = rawget(_G, "bit") or (pcall(require, "bit") and require("bit")) or nil
+    if not bit then return false end
+    local p = (tonumber(mon.personality) or 0) % 4294967296
+    local full = (tonumber(mon.otId) or tonumber(mon.trainerId) or 0) % 4294967296
+    local tid = full % 65536
+    local sid = (tonumber(mon.otSecretId) or math.floor(full / 65536)) % 65536
+    local lo, hi = p % 65536, math.floor(p / 65536)
+    local value = bit.bxor(bit.bxor(tid, sid), bit.bxor(hi, lo))
+    if want and value >= 8 then
+      hi = bit.bxor(bit.bxor(tid, sid), lo) % 65536
+      hi = bit.bxor(hi, rng and rng(0, 7) or 0)
+    elseif not want and value < 8 then
+      hi = bit.bxor(hi, 8)
+    else
+      mon.isShiny = want and true or false
+      return true
+    end
+    mon.personality = hi * 65536 + lo
+    mon.isShiny = want and true or false
+    local s = session()
+    if Pokemon and Pokemon.applyStats then pcall(Pokemon.applyStats, mon, s) end
+    mon.hp = mon.maxHp or mon.hp
+    return true
+  end
+
+  function Rw.throw(key, level, ball, rng, ivs, gender, shiny)
     local s = session()
     local b = Bosses[key]
     if not (s and b and ball) then return false, "no session" end
@@ -140,6 +170,8 @@ return function(mod, deps)
     end
     -- (the boss's gender: a personality as near as keeps its nature, ability and shininess)
     if (gender == "M" or gender == "F") then Rw.keepGender(mon, species, gender) end
+    -- (shiny as the raid's boss was, and only then)
+    Rw.setShiny(mon, shiny == true, rng)
     -- its Dynamax marks, as Sword / Shield's raid catches: a Dynamax Level by the stars, and the
     -- G-Max Factor from a Gigantamax boss (National Dex's, when it has them)
     local dx = Rw.dynamax()

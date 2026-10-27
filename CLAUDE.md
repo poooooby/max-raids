@@ -190,6 +190,18 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
     driver `tests/drivers/gmax_probe.lua` (HATTERENE_2: Dazzling Gleam on all four, G-Max Smite on one
     and confusing all; g01-g03); driver `tests/drivers/team_moves_probe.lua` (t00 Light Screen's arrows, t01-t13 shots, t14 / t14b
     Surf's target screen on both screens, t15 Surf on the allies).
+- **Shiny bosses** (2026-10-27, Wooble: 1/4096, a Dynamax Adventure 1/300; "the art shiny in battle",
+  "a shiny sparkle when they appear, after their explosion entrance"): `RAID.SHINY` { ODDS 4096,
+  ADVENTURE 300 } (EVIDENCE); `setupBattle` rolls `r.shiny` (a crystal's legend raid `r.legend` - our
+  Dynamax Adventure - takes ADVENTURE; `Rd.FORCE_SHINY` for drivers) and sets `Rd.shinyKey`, which
+  `Rd.load` takes when no `shiny` is passed: the pack's `_shiny` sheet (all 37 baked), a Dynamax boss's
+  shiny front through Pokemon.frontPic, from the intro through the rewards card. The sparkle
+  (`Rd.shinySparkle`: twinkles bursting round it, a light, SE_SHINY `Sounds.CATCH.shiny`) at
+  `Rd.INTRO.SHINY_AT` 5.2 s, once the roar's burst (`Scene.BURST_S`) has played out. The catch:
+  `Rw.throw(..., shiny)` -> `Rw.setShiny(mon, want, rng)` sets the personality's upper half against
+  the trainer's ids (lower half kept: gender byte, ability bit; the nature may change, stats worked
+  again) and `mon.isShiny`, after `keepGender`; never shiny when the raid was not. Driver
+  `tests/drivers/shiny_probe.lua` (s01 / s02 the sparkle and the battle, the catch three ways).
 - **The Dynamax Crystal** (National Dex item 958; 2026-10-27, Wooble: "legendary raid key"): the den
   screen's cursor 7, a pill over START (over EXIT on a quiet den) while `Rd.crystals()` > 0 or one is in
   use (`r.legend`). `Rd.useCrystal` picks `Dy.pickLegend` (every legendary and mythical that can Dynamax:
