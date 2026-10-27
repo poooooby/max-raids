@@ -446,7 +446,25 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
     the boss's scripts, cheers, the pouch (Bag -> item -> target).
   - Phase 3b, the catch and rewards (2026-10-26).
   - Phase 3c, the moves acted out (2026-10-26, first pass; polish later: Wooble).
-- **Next.** Polish of the move looks; sound;
+- **In progress: the move looks' polish** (Wooble 2026-10-26: "not as cartoonish, detailed, work well
+  in 3D, true impact felt"; committed first pass 764dcb1). The plan:
+  - **3D:** effects in the den's world space, not screen overlays - `Sc.project(x, y, z)` (raid_scene,
+    already exported: screen x, y and depth d; pixels per metre = `Sc.cam.F / d`) each frame, so they
+    scale with depth and hold still as the camera moves. World points: member i at
+    (`Sc.MEMBERS[i].x`, `MEMBER_H` 0.55, `.z`), the boss at (`Sc.PAD.x`, its height x 0.5, `Sc.PAD.z`),
+    its height `MEMBER_H * Rd.sizeOf(key)`; the ground y 0.
+  - **Detail:** shader-drawn - fire (done: `fireRect`), an energy-beam shader (a core, turbulent
+    noise flowing along, additive) on a mesh strip along the projected segment, lightning (a jagged
+    world polyline from the sky, glow passes, a ground scorch), water (fbm + highlights, foam), smoke
+    and dust (soft fbm puffs), glowing orbs (swirling noise), shockwave rings on the ground plane, the
+    rock shader (done) on 3D chunks; world-space particles (a soft radial sprite made once from
+    ImageData) with gravity and ground bounce: sparks, debris, dust, embers.
+  - **Impact:** hit-stop (the raid's clock slowed ~0.06-0.12 s by the blow's power), a camera punch
+    (a `Sc.kick` FOV jab easing back) and shake by power, a full-screen flash in the type's colour,
+    the target flashing white (a silhouette pass in drawMember / drawBoss, `pic.hit`) and knocked
+    back, ground decals (scorch, cracks under the slab), a brief light on the den.
+  - Then: sound; the second-screen pad; FireRed / LeafGreen / Ruby / Sapphire.
+- **Next after that.** Sound;
   the second-screen pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4:
   polish and the Thor. Weather moves (the video's sandstorm) are not in the sim.
 - **Not in the sim yet:** confusion, flinch, multi-hit (Surging Strikes' three), Spectral Thief's
