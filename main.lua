@@ -116,7 +116,7 @@ return function(mod)
 
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax,
-    Rewards = Rewards, Fx = makeFx and makeFx() or nil, MoveFx = MoveFx,
+    Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene }) or nil, MoveFx = MoveFx,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome)
       if outcome == "win" and den and Dens and Dens.finish then pcall(Dens.finish, den) end
@@ -215,6 +215,6 @@ return function(mod)
   mod.exports.bosses = function() return Bosses.ORDER end
   mod.exports.dens = Dens
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
-    rewards = Rewards }
+    rewards = Rewards, fx = Raid and Raid.Fx or nil }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end

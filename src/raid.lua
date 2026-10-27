@@ -20,7 +20,7 @@ return function(mod, deps)
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
 
-  local Rd = { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene }
+  local Rd = { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Fx = Fx }
   -- an animation frame lasts AnimationSpeed of these (the pack's metrics, Essentials' units)
   Rd.ANIM_UNIT_S = 1 / 20
 
@@ -342,6 +342,7 @@ return function(mod, deps)
     if not Rd.boss(key) then return false, "unknown boss" end
     if not Rd.load(key) then return false, "no pictures" end
     r = { key = key, den = opts and opts.den }
+    if Fx then Fx.clear() end
     begin((opts and opts.members) or Rd.lineup())
     if deps.onOpen then deps.onOpen(r) end
     return true
@@ -410,6 +411,7 @@ return function(mod, deps)
   function Rd.close()
     if not r then return false end
     r = nil
+    if Fx then Fx.clear() end
     Rd.release()
     if Audio then
       if Audio.restoreMapSong then pcall(Audio.restoreMapSong)
@@ -438,6 +440,11 @@ return function(mod, deps)
   function Rd.update(dt)
     if not r then return end
     dt = min(0.1, dt or 0)
+    -- a blow's hit-stop: the raid's clock all but held for a moment (real time)
+    if (r.hitStop or 0) > 0 then
+      r.hitStop = r.hitStop - dt
+      dt = dt * 0.06
+    end
     r.t = r.t + dt
     -- the den screen: no den in 3D yet
     if r.phase == "den" then return end
@@ -744,18 +751,45 @@ return function(mod, deps)
   Rd.GMAX_CHARGE_S = 1.5
   local LUNGE = { slam = true, multi = true, bite = true, slash = true }
 
-  -- a battler's place on screen now: { x, y (its middle), s (its height) }
+  -- a battler's place in the den (src/fx.lua's anchor): its middle, height and ground, in metres
   local function placeOf(b)
+    if not (Scene and Scene.PAD) then return nil end
     if b.boss then
-      local LB = Scene and Scene.lastBoss
-      if not LB then return nil end
-      return { x = LB.x, y = LB.y, s = LB.h * 0.4 }
+      local P = Scene.PAD
+      local h = Scene.MEMBER_H * (Rd.sizeOf(r.key) or 3.5)
+      return { X = P.x, Y = P.h + h * 0.5, Z = P.z, h = h, foot = P.h, boss = true }
     end
     local i = memberIndex(b)
-    if not (i and Scene and Scene.memberAt) then return nil end
-    local x, y, hpx = Scene.memberAt(i)
-    if not x then return nil end
-    return { x = x, y = y - hpx * 0.5, s = hpx }
+    local m = i and Scene.MEMBERS[i]
+    if not m then return nil end
+    return { X = m.x, Y = Scene.MEMBER_H * 0.5, Z = m.z, h = Scene.MEMBER_H, foot = 0, i = i }
+  end
+  Rd.placeOf = placeOf
+
+  -- a blow felt (Fx.onImpact): the raid's clock held a moment, the camera jabbed and shaken, the one
+  -- struck flashing white and thrown back - all by the blow's power (0..1+, from the HP it takes)
+  Rd.IMPACT = { STOP_S = 0.045, STOP_PER = 0.09, KICK = 1.5, KICK_PER = 4.5, SHAKE = 0.04, SHAKE_PER = 0.2 }
+  function Rd.impact(T, power)
+    if not r then return end
+    local I = Rd.IMPACT
+    local p = power or 0.5
+    r.lastImpact = r.t
+    if not T.frac then
+      -- (it missed, or did no harm: a small jolt only)
+      if Scene then Scene.shake(I.SHAKE * 0.5, 0.2) end
+      return
+    end
+    r.hitStop = max(r.hitStop or 0, I.STOP_S + I.STOP_PER * min(1, p))
+    if Scene then
+      if Scene.kick then Scene.kick(I.KICK + I.KICK_PER * min(1, p), 0.25 + 0.2 * p) end
+      Scene.shake(I.SHAKE + I.SHAKE_PER * p, 0.3 + 0.35 * p)
+      if Scene.hit then Scene.hit(T.boss and "boss" or T.i, min(1, p)) end
+    end
+  end
+  if Fx then Fx.onImpact = function(T, power) Rd.impact(T, power) end end
+  if Fx and Scene then
+    Scene.onBack = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "back", r.t) end end
+    Scene.onMid = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "mid", r.t) end end
   end
 
   function Rd.specOf(mv)
@@ -777,7 +811,12 @@ return function(mod, deps)
         local x = list[j]
         if x.kind == "use" or x.kind == "over" or x.kind == "cheer" or x.kind == "item" then break end
         local who = x.target or ((x.kind == "status" or x.kind == "stage") and x.who ~= e.who and x.who) or nil
-        if who and not seen[who] then seen[who] = true; targets[#targets + 1] = who end
+        if who and not seen[who] then seen[who] = { b = who }; targets[#targets + 1] = seen[who] end
+        -- (how hard it lands on each: the share of its HP the move takes)
+        if who and x.kind == "damage" and x.amount then
+          local most = max(1, tonumber(who.mon and who.mon.maxHp) or 1)
+          seen[who].frac = (seen[who].frac or 0) + x.amount / most
+        end
       end
     end
     local words = #(e.text or "") / Rd.MSG.CPS + 0.25
@@ -801,7 +840,8 @@ return function(mod, deps)
       local LB = Scene and Scene.lastBoss
       if Scene then Scene.shot("boss", 0.5); Scene.burst(); Scene.shake(0.2, 1.0) end
       Rd.cry(r.key)
-      if LB then Fx.charge(LB.x, LB.y, LB.h, r.t, Rd.GMAX_CHARGE_S) end
+      local _ = LB
+      Fx.charge(placeOf(a.user), r.t, Rd.GMAX_CHARGE_S)
     end
     if not a.started and r.t >= a.at then
       a.started = true
@@ -809,13 +849,13 @@ return function(mod, deps)
       -- (a G-Max move: back to whom it falls on for the blow)
       if a.gmax and Scene then
         if #a.targets > 1 then Scene.shot("spread", 0.3)
-        elseif a.targets[1] and memberIndex(a.targets[1]) then Scene.shot("target", 0.3, memberIndex(a.targets[1])) end
+        elseif a.targets[1] and memberIndex(a.targets[1].b) then Scene.shot("target", 0.3, memberIndex(a.targets[1].b)) end
       end
       local from = placeOf(a.user)
       local tg = {}
       for _, t in ipairs(a.targets) do
-        local p = placeOf(t)
-        if p then tg[#tg + 1] = p end
+        local p = placeOf(t.b)
+        if p then p.frac = t.frac; tg[#tg + 1] = p end
       end
       if from then Fx.move(a.spec, a.type, from, tg, r.t, a.gmax) end
     end
@@ -826,6 +866,26 @@ return function(mod, deps)
       if u >= 0 and u <= 1.4 then r.lunge = math.sin(math.min(1, u) * math.pi) end
     end
     if r.t > a.at + a.len + 0.2 then r.anim = nil end
+  end
+
+  -- (drivers) a look played now, outside any turn: spec (a table, or a move's key), the user (the boss,
+  -- or a member's place), whom it falls on (members' places, or "boss"), frac (the HP each loses)
+  function Rd.testLook(spec, typeName, user, onto, gmax, frac)
+    if not (r and Fx) then return nil end
+    if type(spec) == "string" then spec = (gmax and MoveFx.GMAX[spec]) or MoveFx.MOVES[spec] or { "slam" } end
+    local function battler(w) if w == "boss" then return r.boss end return r.members[w] and r.members[w].b end
+    local targets = {}
+    for _, w in ipairs(onto or {}) do
+      local b = battler(w)
+      if b then targets[#targets + 1] = { b = b, frac = frac } end
+    end
+    local K = Fx.KIND[(spec[1] == "drop" and spec.shape == "slab") and "slab" or spec[1]] or Fx.KIND.slam
+    local len = K[1] * (gmax and Fx.GMAX_K or 1)
+    if spec[1] == "multi" then len = K[1] * (spec.n or 3) + 0.2 end
+    r.anim = { at = r.t + (gmax and Rd.GMAX_CHARGE_S or 0), spec = spec, user = battler(user), targets = targets,
+      type = typeName or "NORMAL", gmax = gmax, chargeAt = gmax and r.t or nil, len = len,
+      impact = K[2] and K[2] * (gmax and Fx.GMAX_K or 1) or len }
+    return r.anim
   end
 
   -- the members a boss's move at events[k] falls on: those hit, missed or touched by it, up to the
@@ -875,7 +935,7 @@ return function(mod, deps)
       hit.dispTarget = e.hp
       local i = memberIndex(hit)
       if i then r.focus = i end
-      if (e.kind == "damage" or e.kind == "residual") and Scene then
+      if (e.kind == "damage" or e.kind == "residual") and Scene and not (r.lastImpact and r.t - r.lastImpact < 1.5) then
         Scene.shake(hit.boss and 0.08 or 0.14, 0.4)
       end
     end

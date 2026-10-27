@@ -1,527 +1,906 @@
--- The raid's move effects, drawn in code over the den (window pixels; no art):
---   * a hit: a short effect by the move's type where it lands (Fx.hit), larger for a G-Max move
---   * the G-Max charge: the screen washed red, energy streaking into the boss (Fx.charge)
---   * what lasts: a G-Max field round the party (flames, a vortex, vines, rocks: Fx.drawField), the
---     boss's veil (Fx.drawVeil), its barrier while it stands (Fx.drawBarrier)
--- Fx.update(now) drops what has finished; Fx.draw(G, now) draws the hits and the charge.
---   Fx = fx() ; Fx.hit(typeName, x, y, size, big, now) ; Fx.charge(x, y, size, now, dur)
+-- The raid's move effects, drawn in code over the den in its own 3D space (no art):
+--   * every effect lives at world points (metres, the den's: y up, the party toward +z) and is
+--     projected through the den's camera each frame (deps.Scene.project), so it scales with depth and
+--     holds still as the camera moves
+--   * three layers, by depth: "back" (the ground and what stands behind the boss: drawn before the
+--     boss), "mid" (between the boss and the party: before the members), "front" (over everything);
+--     the den calls Fx.drawLayer for the first two (Sc.onBack / Sc.onMid), the raid Fx.draw after
+--   * shaders for fire, rock, energy beams, glowing orbs, smoke / dust and walls of water or sand;
+--     world particles (sparks, embers, dust, smoke, debris, drops, leaves, shards, bubbles, twinkles,
+--     wisps, coins, rings) with gravity, drag and a bounce on the ground; decals on the ground
+--     (scorch, cracks, frost, wet)
+--   * an impact: the type's hit at the target, a flash, and Fx.onImpact(anchor, power, type, big) for
+--     the raid (its hit-stop, the camera's jab and shake, the target flashing and knocked back)
+-- An anchor is { X, Y (its middle), Z, h (its height), foot (its ground's height), boss, i, frac
+-- (the share of its HP the move takes; nil = no damage) }.
+--   Fx = fx({ Scene = Sc }) ; Fx.move(spec, typeName, fromAnchor, targetAnchors, now, big)
+--   Fx.charge(anchor, now, dur) ; Fx.update(now) ; Fx.drawLayer(G, layer, now) ; Fx.draw(G, w, h, now)
 
-return function()
+return function(deps)
+  deps = deps or {}
   local Fx = {}
-  local sin, cos, pi, max, min, floor, abs = math.sin, math.cos, math.pi, math.max, math.min, math.floor, math.abs
-
-  Fx.HIT_S = 0.7           -- a hit's effect
-  local live = {}          -- the hits playing: { kind, t0, x, y, s, big, seed }
-  local charge = nil       -- the G-Max charge: { x, y, s, t0, dur }
+  local Sc = deps.Scene
+  local sin, cos, pi, max, min, floor, abs, sqrt = math.sin, math.cos, math.pi, math.max, math.min, math.floor,
+    math.abs, math.sqrt
+  local G = love and love.graphics
 
   local function rnd(seed, k) return (sin(seed * 12.9898 + k * 78.233) * 43758.5453) % 1 end
-
-  -- a flame: a teardrop pointing up, its base at (x, y), h tall
-  local function flame(G, x, y, w, h)
-    G.polygon("fill", x - w, y, x - w * 0.6, y - h * 0.45, x, y - h, x + w * 0.6, y - h * 0.45, x + w, y)
-    G.circle("fill", x, y, w, 12)
-  end
-  -- an n-point star, outer r, inner ir
-  local starPts = {}
-  local function star(G, x, y, r, ir, n, rot)
-    for i = 0, n * 2 - 1 do
-      local a = (rot or 0) + i * pi / n
-      local rr = (i % 2 == 0) and r or ir
-      starPts[i * 2 + 1], starPts[i * 2 + 2] = x + cos(a) * rr, y + sin(a) * rr
-    end
-    for i = n * 4 + 1, #starPts do starPts[i] = nil end
-    G.polygon("fill", starPts)
-  end
-  -- a jagged bolt from (x1, y1) to (x2, y2)
-  local function bolt(G, x1, y1, x2, y2, seed, jag)
-    local pts = { x1, y1 }
-    local n = 6
-    for k = 1, n - 1 do
-      local f = k / n
-      local nx, ny = -(y2 - y1), x2 - x1
-      local l = math.sqrt(nx * nx + ny * ny) + 1e-6
-      local off = (rnd(seed, k) - 0.5) * jag
-      pts[#pts + 1] = x1 + (x2 - x1) * f + nx / l * off
-      pts[#pts + 1] = y1 + (y2 - y1) * f + ny / l * off
-    end
-    pts[#pts + 1], pts[#pts + 1] = x2, y2
-    G.line(pts)
+  local function smooth(e0, e1, x)
+    local t = min(1, max(0, (x - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
   end
 
-  -- each type's effect: draw(G, u (0..1), x, y (the target's middle), s (its height), seed)
-  local DRAW = {}
-  DRAW.FIRE = function(G, u, x, y, s, seed)
-    if Fx.fireRect and Fx.fireRect(G, x - s * 0.6, y - s * 0.9, s * 1.2, s * 1.4, u * 2 + seed, seed, 1 - u * u) then return end
-    for k = 1, 9 do
-      local a = rnd(seed, k)
-      local fx = x + (a - 0.5) * s * 0.9
-      local fy = y + s * 0.4 - u * s * (0.5 + 0.6 * rnd(seed, k + 20))
-      local h = s * (0.35 + 0.3 * rnd(seed, k + 40)) * (1 - u * 0.5)
-      G.setColor(1, 0.45 + 0.3 * a, 0.1, 0.85 * (1 - u))
-      flame(G, fx, fy, h * 0.3, h)
-      G.setColor(1, 0.9, 0.4, 0.8 * (1 - u))
-      flame(G, fx, fy, h * 0.14, h * 0.55)
-    end
+  -- a world point on screen: x, y and pixels per metre there (nil behind the eye)
+  local function P(X, Y, Z)
+    if not (Sc and Sc.project) then return nil end
+    local x, y, d = Sc.project(X, Y, Z)
+    if not x then return nil end
+    return x, y, Sc.cam.F / d
   end
-  DRAW.WATER = function(G, u, x, y, s, seed)
-    G.setLineWidth(max(1, s * 0.04))
-    G.setColor(0.4, 0.7, 1, 0.8 * (1 - u))
-    G.ellipse("line", x, y + s * 0.3, s * (0.2 + 0.7 * u), s * (0.06 + 0.2 * u), 32)
-    for k = 1, 12 do
-      local a = rnd(seed, k) * 2 * pi
-      local d = s * 0.7 * u
-      local dx, dy = x + cos(a) * d, y + sin(a) * d * 0.6 - s * 0.6 * u * (1 - u) * 2
-      G.setColor(0.55, 0.8, 1, 0.9 * (1 - u))
-      G.circle("fill", dx, dy, s * 0.05 * (1 - u * 0.5), 10)
-    end
-    G.setLineWidth(1)
+  Fx.P = P
+
+  -- which layer a depth draws in (see the header)
+  local function layerOf(Z)
+    local pz = Sc and Sc.PAD and Sc.PAD.z or -9.2
+    if Z < pz - 0.6 then return "back" elseif Z < -1.6 then return "mid" end
+    return "front"
   end
-  DRAW.ELECTRIC = function(G, u, x, y, s, seed)
-    local flick = (floor(u * 14) % 2 == 0) and 1 or 0.4
-    G.setColor(1, 0.95, 0.3, 0.35 * (1 - u) * flick)
-    G.circle("fill", x, y, s * 0.6, 24)
-    G.setLineWidth(max(1.5, s * 0.035))
-    for k = 1, 4 do
-      G.setColor(1, 1, 0.55, (1 - u) * flick)
-      bolt(G, x + (rnd(seed, k) - 0.5) * s * 0.5, y - s * 0.9, x + (rnd(seed, k + 9) - 0.5) * s * 0.4, y + s * 0.4,
-        seed + floor(u * 10) + k, s * 0.25)
-    end
-    G.setLineWidth(1)
-  end
-  DRAW.GRASS = function(G, u, x, y, s, seed)
-    for k = 1, 12 do
-      local a = rnd(seed, k) * 2 * pi + u * 4
-      local d = s * (0.1 + 0.6 * u)
-      local lx, ly = x + cos(a) * d, y + sin(a) * d * 0.7
-      G.push()
-      G.translate(lx, ly)
-      G.rotate(a + u * 6)
-      G.setColor(0.35, 0.8, 0.3, 0.9 * (1 - u))
-      G.ellipse("fill", 0, 0, s * 0.09, s * 0.035, 12)
-      G.pop()
-    end
-  end
-  DRAW.ICE = function(G, u, x, y, s, seed)
-    G.setColor(0.85, 0.97, 1, 0.5 * (1 - u))
-    G.circle("fill", x, y, s * 0.5 * u + s * 0.1, 24)
-    for k = 1, 10 do
-      local a = rnd(seed, k) * 2 * pi
-      local d = s * 0.75 * u
-      local cx, cy = x + cos(a) * d, y + sin(a) * d
-      local r = s * 0.1 * (1 - u * 0.4)
-      G.setColor(0.7, 0.92, 1, 0.95 * (1 - u))
-      G.polygon("fill", cx + cos(a) * r * 1.8, cy + sin(a) * r * 1.8, cx + cos(a + 2.2) * r, cy + sin(a + 2.2) * r,
-        cx + cos(a - 2.2) * r, cy + sin(a - 2.2) * r)
-    end
-  end
-  DRAW.ROCK = function(G, u, x, y, s, seed)
-    for k = 1, 7 do
-      local fx = x + (rnd(seed, k) - 0.5) * s * 0.9
-      local land = y + s * (0.2 + 0.3 * rnd(seed, k + 3))
-      local fy = land - (1 - min(1, u * 1.8 + rnd(seed, k + 7) * 0.2)) * s * 1.6
-      local r = s * (0.08 + 0.07 * rnd(seed, k + 11))
-      G.setColor(0.55, 0.42, 0.28, u < 0.85 and 1 or (1 - u) / 0.15)
-      G.polygon("fill", fx - r, fy, fx - r * 0.4, fy - r, fx + r * 0.7, fy - r * 0.7, fx + r, fy + r * 0.2, fx + r * 0.2, fy + r)
-    end
-  end
-  DRAW.GROUND = function(G, u, x, y, s, seed)
-    for k = 1, 10 do
-      local a = (k / 10) * 2 * pi
-      local d = s * 0.6 * u
-      G.setColor(0.65, 0.5, 0.3, 0.55 * (1 - u))
-      G.circle("fill", x + cos(a) * d, y + s * 0.35 + sin(a) * d * 0.25, s * (0.12 + 0.12 * u), 16)
-    end
-    DRAW.ROCK(G, min(1, u * 1.2), x, y + s * 0.1, s * 0.6, seed + 5)
-  end
-  DRAW.POISON = function(G, u, x, y, s, seed)
-    G.setLineWidth(max(1, s * 0.02))
-    for k = 1, 10 do
-      local bx = x + (rnd(seed, k) - 0.5) * s * 0.9
-      local by = y + s * 0.4 - (u + rnd(seed, k + 5) * 0.3) * s * 0.9
-      local r = s * (0.05 + 0.06 * rnd(seed, k + 9)) * (1 + u * 0.5)
-      G.setColor(0.65, 0.3, 0.8, 0.6 * (1 - u))
-      G.circle("fill", bx, by, r, 14)
-      G.setColor(0.9, 0.7, 1, 0.8 * (1 - u))
-      G.circle("line", bx, by, r, 14)
-    end
-    G.setLineWidth(1)
-  end
-  DRAW.PSYCHIC = function(G, u, x, y, s, seed)
-    G.setLineWidth(max(1.5, s * 0.03))
-    for k = 0, 2 do
-      local f = (u * 1.4 - k * 0.2)
-      if f > 0 and f < 1 then
-        G.setColor(1, 0.4, 0.75, 0.9 * (1 - f))
-        G.ellipse("line", x, y, s * 0.8 * f, s * 0.55 * f, 32)
-      end
-    end
-    G.setLineWidth(1)
-  end
-  DRAW.DARK = function(G, u, x, y, s, seed)
-    G.setLineWidth(max(2, s * 0.06))
-    for k = 0, 2 do
-      local f = min(1, max(0, u * 2 - k * 0.25))
-      if f > 0 then
-        local ox = (k - 1) * s * 0.25
-        G.setColor(0.3, 0.1, 0.4, 0.95 * (1 - u))
-        G.arc("line", "open", x + ox - s * 0.2, y - s * 0.2, s * 0.6, -0.2, -0.2 + 1.5 * f, 20)
-      end
-    end
-    G.setLineWidth(1)
-  end
-  DRAW.GHOST = function(G, u, x, y, s, seed)
-    for k = 1, 6 do
-      local a = rnd(seed, k) * 2 * pi + u * 5
-      local d = s * (0.5 - 0.4 * u)
-      local wx, wy = x + cos(a) * d, y + sin(a) * d * 0.7
-      G.setColor(0.55, 0.35, 0.8, 0.7 * (1 - u))
-      G.circle("fill", wx, wy, s * 0.09, 14)
-      G.setColor(0.35, 0.2, 0.55, 0.5 * (1 - u))
-      G.circle("fill", wx - cos(a) * s * 0.08, wy - sin(a) * s * 0.06, s * 0.06, 12)
-    end
-  end
-  DRAW.DRAGON = function(G, u, x, y, s, seed)
-    G.setLineWidth(max(1.5, s * 0.04))
-    local pts = {}
-    for k = 0, 30 do
-      local f = k / 30
-      local a = f * 4 * pi + u * 6
-      local r = s * 0.7 * f * (0.4 + u)
-      pts[#pts + 1], pts[#pts + 2] = x + cos(a) * r, y + sin(a) * r * 0.7
-    end
-    G.setColor(0.45, 0.35, 1, 0.9 * (1 - u))
-    G.line(pts)
-    G.setColor(0.8, 0.5, 1, 0.4 * (1 - u))
-    G.circle("fill", x, y, s * 0.3 * (1 - u), 20)
-    G.setLineWidth(1)
-  end
-  DRAW.FAIRY = function(G, u, x, y, s, seed)
-    for k = 1, 10 do
-      local a = rnd(seed, k) * 2 * pi
-      local d = s * 0.65 * (0.3 + u)
-      local tw = 0.6 + 0.4 * sin(u * 20 + k)
-      G.setColor(1, 0.65, 0.85, (1 - u) * tw)
-      star(G, x + cos(a) * d, y + sin(a) * d * 0.8, s * 0.08, s * 0.025, 4, u * 3)
-    end
-  end
-  DRAW.FIGHTING = function(G, u, x, y, s, seed)
-    local r = s * (0.3 + 0.5 * u)
-    G.setColor(1, 0.55, 0.15, 0.85 * (1 - u))
-    star(G, x, y, r, r * 0.45, 8, 0.3)
-    G.setColor(1, 0.95, 0.7, 0.9 * (1 - u))
-    star(G, x, y, r * 0.55, r * 0.25, 8, 0.3)
-  end
-  DRAW.FLYING = function(G, u, x, y, s, seed)
-    G.setLineWidth(max(1.5, s * 0.03))
-    for k = 0, 3 do
-      local f = min(1, max(0, u * 1.6 - k * 0.15))
-      G.setColor(0.9, 0.95, 1, 0.85 * (1 - u))
-      G.arc("line", "open", x - s * 0.5 + f * s * 0.6, y - s * 0.3 + k * s * 0.2, s * 0.35, -1.2, 0.6, 16)
-    end
-    G.setLineWidth(1)
-  end
-  DRAW.BUG = function(G, u, x, y, s, seed)
-    G.setLineWidth(max(1, s * 0.025))
-    for k = 1, 12 do
-      local a = rnd(seed, k) * 2 * pi
-      local d0, d1 = s * 0.9 * (1 - u), s * 0.9 * (1 - u) + s * 0.18
-      G.setColor(0.6, 0.85, 0.2, 0.9 * (1 - u * 0.7))
-      G.line(x + cos(a) * d0, y + sin(a) * d0, x + cos(a) * d1, y + sin(a) * d1)
-    end
-    G.setLineWidth(1)
-  end
-  DRAW.STEEL = function(G, u, x, y, s, seed)
-    DRAW.ICE(G, u, x, y, s, seed)
-    G.setLineWidth(max(1, s * 0.03))
-    G.setColor(1, 1, 1, 0.8 * (1 - u))
-    for k = 0, 3 do
-      local a = k * pi / 4 + u
-      G.line(x - cos(a) * s * 0.6, y - sin(a) * s * 0.6, x + cos(a) * s * 0.6, y + sin(a) * s * 0.6)
-    end
-    G.setLineWidth(1)
-  end
-  DRAW.NORMAL = function(G, u, x, y, s, seed)
-    local r = s * (0.25 + 0.45 * u)
-    G.setColor(1, 1, 1, 0.9 * (1 - u))
-    star(G, x, y, r, r * 0.4, 6, u)
-  end
+  Fx.layerOf = layerOf
+
   local TINT = {
-    FIRE = { 1, 0.5, 0.15 }, WATER = { 0.3, 0.6, 1 }, ELECTRIC = { 1, 0.9, 0.2 }, GRASS = { 0.35, 0.8, 0.3 },
-    ICE = { 0.6, 0.9, 1 }, ROCK = { 0.65, 0.5, 0.3 }, GROUND = { 0.75, 0.6, 0.35 }, POISON = { 0.65, 0.3, 0.8 },
-    PSYCHIC = { 1, 0.4, 0.75 }, DARK = { 0.35, 0.2, 0.45 }, GHOST = { 0.5, 0.35, 0.8 }, DRAGON = { 0.45, 0.35, 1 },
-    FAIRY = { 1, 0.6, 0.85 }, FIGHTING = { 1, 0.5, 0.2 }, FLYING = { 0.8, 0.9, 1 }, BUG = { 0.6, 0.85, 0.2 },
-    STEEL = { 0.8, 0.85, 0.9 }, NORMAL = { 1, 1, 1 },
+    FIRE = { 1, 0.45, 0.12 }, WATER = { 0.3, 0.62, 1 }, ELECTRIC = { 1, 0.88, 0.25 }, GRASS = { 0.4, 0.85, 0.3 },
+    ICE = { 0.6, 0.9, 1 }, ROCK = { 0.72, 0.58, 0.38 }, GROUND = { 0.8, 0.62, 0.36 }, POISON = { 0.72, 0.32, 0.88 },
+    PSYCHIC = { 1, 0.38, 0.72 }, DARK = { 0.45, 0.22, 0.55 }, GHOST = { 0.55, 0.38, 0.9 }, DRAGON = { 0.45, 0.4, 1 },
+    FAIRY = { 1, 0.6, 0.85 }, FIGHTING = { 1, 0.5, 0.2 }, FLYING = { 0.8, 0.9, 1 }, BUG = { 0.65, 0.88, 0.25 },
+    STEEL = { 0.82, 0.88, 0.95 }, NORMAL = { 1, 0.96, 0.88 },
   }
   Fx.TINT = TINT
 
-  -- ------- the API
+  -- ------- shaders (made on first use; nil where the device cannot: plain shapes stand in)
 
-  local seedN = 0
-  function Fx.hit(typeName, x, y, s, big, now)
-    seedN = seedN + 1
-    live[#live + 1] = { kind = DRAW[typeName] and typeName or "NORMAL", t0 = now, x = x, y = y,
-      s = s * (big and 1.6 or 1), big = big, seed = seedN * 7.3 }
-  end
-  function Fx.charge(x, y, s, now, dur) charge = { x = x, y = y, s = s, t0 = now, dur = dur or 1.6 } end
-  function Fx.charging(now) return charge ~= nil and now - charge.t0 < charge.dur end
-  function Fx.clear() for i = #live, 1, -1 do live[i] = nil end; charge = nil end
-
-  function Fx.update(now)
-    if Fx.landMoves then Fx.landMoves(now) end
-    for i = #live, 1, -1 do
-      if now - live[i].t0 > Fx.HIT_S * (live[i].big and 1.4 or 1) then table.remove(live, i) end
-    end
-    if charge and now - charge.t0 > charge.dur then charge = nil end
-  end
-
-  -- the G-Max charge: a red wash rising, streaks pulled into the boss, sparks; under the hits
-  local function drawCharge(G, w, h, now)
-    local c = charge
-    local u = (now - c.t0) / c.dur
-    local a = sin(min(1, u) * pi)
-    G.setColor(0.55, 0.0, 0.08, 0.45 * a)
-    G.rectangle("fill", 0, 0, w, h)
-    G.setLineWidth(max(1.5, h * 0.004))
-    for k = 1, 22 do
-      local ang = rnd(c.t0, k) * 2 * pi
-      local phase = (u * 2.2 + rnd(c.t0, k + 30)) % 1
-      local d0 = max(w, h) * 0.75 * (1 - phase)
-      local d1 = d0 + h * 0.12
-      G.setColor(1, 0.25 + 0.4 * rnd(c.t0, k + 60), 0.35, 0.8 * a * (1 - phase * 0.5))
-      G.line(c.x + cos(ang) * d0, c.y + sin(ang) * d0, c.x + cos(ang) * d1, c.y + sin(ang) * d1)
-    end
-    G.setLineWidth(1)
-    G.setColor(1, 0.35, 0.45, 0.35 * a)
-    G.circle("fill", c.x, c.y, c.s * (0.3 + 0.2 * sin(now * 18)), 32)
-  end
-
-  function Fx.draw(G, w, h, now)
-    G.push("all")
-    if charge then drawCharge(G, w, h, now) end
-    G.setBlendMode("alpha")
-    for _, e in ipairs(live) do
-      local u = (now - e.t0) / (Fx.HIT_S * (e.big and 1.4 or 1))
-      if u >= 0 and u <= 1 then
-        -- a flash at the moment it lands, tinted by the type, then its effect
-        if u < 0.25 then
-          local tc = TINT[e.kind] or TINT.NORMAL
-          G.setColor(tc[1], tc[2], tc[3], 0.35 * (1 - u / 0.25))
-          G.circle("fill", e.x, e.y, e.s * 0.75, 32)
-        end
-        DRAW[e.kind](G, u, e.x, e.y, e.s, e.seed)
-      end
-    end
-    G.pop()
-  end
-
-  -- ------- what lasts
-
-  -- a G-Max field over the party: along the foot of the screen, by its type
-  function Fx.drawField(G, w, h, now, kind)
-    if not kind then return end
-    G.push("all")
-    local base = h * 0.98
-    if kind == "FIRE" and Fx.fireRect and Fx.fireRect(G, 0, base - h * 0.22, w, h * 0.24, now, 7, 0.85) then
-      -- (real fire along the party's feet)
-    elseif kind == "FIRE" then
-      for k = 0, 22 do
-        local x = (k + 0.5) / 22 * w
-        local fl = 0.75 + 0.25 * sin(now * 7 + k * 1.7)
-        local fh = h * (0.12 + 0.07 * sin(now * 3 + k)) * fl
-        G.setColor(1, 0.35, 0.08, 0.55)
-        flame(G, x, base, w / 44 * 1.6, fh)
-        G.setColor(1, 0.8, 0.3, 0.55)
-        flame(G, x, base, w / 44 * 0.7, fh * 0.55)
-      end
-    elseif kind == "WATER" then
-      G.setLineWidth(max(2, h * 0.006))
-      for k = 0, 5 do
-        local y = base - h * (0.02 + k * 0.03)
-        local pts = {}
-        for i = 0, 40 do
-          local x = i / 40 * w
-          pts[#pts + 1], pts[#pts + 2] = x, y + sin(i * 0.6 + now * (3 + k) + k) * h * 0.012
-        end
-        G.setColor(0.35, 0.65, 1, 0.5 - k * 0.06)
-        G.line(pts)
-      end
-    elseif kind == "GRASS" then
-      G.setLineWidth(max(2, h * 0.008))
-      for k = 0, 9 do
-        local x0 = (k + 0.5) / 10 * w
-        local pts = {}
-        for i = 0, 12 do
-          local f = i / 12
-          pts[#pts + 1] = x0 + sin(f * 5 + now * 2 + k) * w * 0.02
-          pts[#pts + 1] = base - f * h * (0.2 + 0.05 * sin(now + k))
-        end
-        G.setColor(0.25, 0.65, 0.2, 0.75)
-        G.line(pts)
-        G.setColor(0.4, 0.85, 0.3, 0.75)
-        G.ellipse("fill", pts[#pts - 1], pts[#pts], w * 0.012, h * 0.01, 10)
-      end
-    elseif kind == "ROCK" then
-      for k = 0, 14 do
-        local x = (k + 0.5) / 15 * w + sin(k * 3.1) * w * 0.02
-        local r = h * (0.03 + 0.02 * ((k * 7) % 3))
-        local y = base - r * 0.6 + sin(now * 2 + k) * h * 0.004
-        G.setColor(0.45, 0.35, 0.25, 0.85)
-        G.polygon("fill", x - r, y, x - r * 0.5, y - r, x + r * 0.6, y - r * 0.8, x + r, y, x, y + r * 0.4)
-      end
-    end
-    G.pop()
-  end
-
-  -- the boss's veil: a pale shimmer round it
-  function Fx.drawVeil(G, LB, now)
-    if not LB then return end
-    G.push("all")
-    G.setLineWidth(max(1.5, LB.h * 0.008))
-    for k = 0, 2 do
-      local a = 0.25 + 0.15 * sin(now * 2 + k * 2)
-      G.setColor(0.7, 0.95, 1, a)
-      G.ellipse("line", LB.x, LB.y, LB.h * (0.5 + k * 0.04), LB.h * (0.58 + k * 0.04), 48)
-    end
-    G.pop()
-  end
-
-  -- its barrier while it stands: a hexagon dome of light round it, dimmer as segments break
-  function Fx.drawBarrier(G, LB, now, left, most)
-    if not (LB and left and left > 0) then return end
-    G.push("all")
-    local share = most and most > 0 and left / most or 1
-    local rx, ry = LB.h * 0.55, LB.h * 0.62
-    G.setColor(1, 0.25, 0.45, 0.12 + 0.08 * share)
-    G.ellipse("fill", LB.x, LB.y, rx, ry, 48)
-    G.setLineWidth(max(1, LB.h * 0.005))
-    local cell = LB.h * 0.11
-    for row = -6, 6 do
-      for col = -6, 6 do
-        local cx = LB.x + (col + (row % 2) * 0.5) * cell * 1.5
-        local cy = LB.y + row * cell * 0.87
-        local nx, ny = (cx - LB.x) / rx, (cy - LB.y) / ry
-        if nx * nx + ny * ny < 1 then
-          local tw = 0.5 + 0.5 * sin(now * 3 + row + col * 1.7)
-          G.setColor(1, 0.45, 0.6, (0.15 + 0.25 * tw) * (0.5 + 0.5 * share))
-          local pts = {}
-          for i = 0, 5 do
-            pts[#pts + 1], pts[#pts + 2] = cx + cos(i * pi / 3) * cell * 0.5, cy + sin(i * pi / 3) * cell * 0.5
-          end
-          G.polygon("line", pts)
-        end
-      end
-    end
-    G.setColor(1, 0.5, 0.65, 0.6 * share)
-    G.ellipse("line", LB.x, LB.y, rx, ry, 48)
-    G.pop()
-  end
-
-  -- ------- shaders: fire (rising noise through a fire ramp, on a stretched white texel: tc 0..1 across
-  -- the rect, y down) and rock (noise on screen position over the colour drawn), made on first use;
-  -- nil where the device cannot (then the drawn shapes stand in)
-  local shaders = { tried = false }
-  local FIRE_GLSL = [[
+  local NOISE = [[
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0; float a = 0.5;
+  for (int i = 0; i < 5; i++) { v += a * vnoise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; }
+  return v;
+}
+]]
+  -- fire: flames rising off the rect's foot (tc 0..1 across it, y down)
+  local FIRE_GLSL = NOISE .. [[
 extern number time;
 extern number seed;
 extern number aspect;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float vnoise(vec2 p) {
-  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-float fbm(vec2 p) {
-  float v = 0.0; float a = 0.5;
-  for (int i = 0; i < 5; i++) { v += a * vnoise(p); p *= 2.03; a *= 0.5; }
-  return v;
-}
+extern number blaze;
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   float h = 1.0 - tc.y;
+  float side = abs(tc.x - 0.5) * 2.0;
   vec2 q = vec2(tc.x * aspect * 2.2 + seed, tc.y * 2.2 + time * 1.7);
   float n = fbm(q);
   float n2 = fbm(q * 2.1 + vec2(seed * 0.5, time * 0.9));
-  float flame = n * 1.35 + n2 * 0.45 - h * 1.55 + 0.25;
-  flame = clamp(flame, 0.0, 1.0);
+  float flame = clamp(n * 1.35 + n2 * 0.45 - h * 1.55 + 0.25 - blaze * side * side * (0.9 + 0.8 * h), 0.0, 1.0);
+  flame *= smoothstep(1.0, 0.82, side) * mix(1.0, smoothstep(1.0, 0.55, side), blaze);
   vec3 col = mix(vec3(0.45, 0.02, 0.0), vec3(1.0, 0.36, 0.04), smoothstep(0.05, 0.4, flame));
   col = mix(col, vec3(1.0, 0.78, 0.25), smoothstep(0.4, 0.72, flame));
   col = mix(col, vec3(1.0, 0.98, 0.8), smoothstep(0.78, 1.0, flame));
-  float a = smoothstep(0.02, 0.3, flame) * color.a;
-  return vec4(col, a);
+  return vec4(col, smoothstep(0.02, 0.3, flame) * color.a);
 }
 ]]
-  local ROCK_GLSL = [[
+  -- rock: noise on the screen position over the colour drawn
+  local ROCK_GLSL = NOISE .. [[
 extern number scale;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float vnoise(vec2 p) {
-  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-float fbm(vec2 p) {
-  float v = 0.0; float a = 0.5;
-  for (int i = 0; i < 5; i++) { v += a * vnoise(p); p *= 2.07; a *= 0.5; }
-  return v;
-}
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   vec2 p = sc / scale;
   float n = fbm(p);
   float pits = smoothstep(0.62, 0.7, fbm(p * 2.7 + 3.1));
-  float shade = 0.7 + 0.55 * n - 0.25 * pits;
-  return vec4(color.rgb * shade, color.a);
+  return vec4(color.rgb * (0.7 + 0.55 * n - 0.25 * pits), color.a);
 }
 ]]
+  -- an energy beam (tc.x along it, tc.y across): a white core, a turbulent body flowing along
+  local BEAM_GLSL = NOISE .. [[
+extern number time;
+extern vec3 tint;
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  float v = abs(tc.y - 0.5) * 2.0;
+  float n = fbm(vec2(tc.x * 7.0 - time * 10.0, tc.y * 2.5 + time * 1.3));
+  float n2 = fbm(vec2(tc.x * 15.0 - time * 16.0, tc.y * 5.0 - time));
+  float body = 1.0 - smoothstep(0.25 + 0.5 * n, 0.95, v);
+  float core = 1.0 - smoothstep(0.0, 0.22 + 0.12 * n2, v);
+  float streak = smoothstep(0.55, 0.8, n2) * (1.0 - v);
+  vec3 col = mix(tint * (0.6 + 0.6 * n), vec3(1.0), clamp(core + streak * 0.5, 0.0, 1.0));
+  float a = clamp(body * (0.55 + 0.45 * n) + core + streak * 0.4, 0.0, 1.0) * color.a;
+  return vec4(col, a);
+}
+]]
+  -- a glowing orb (tc 0..1 over its square): a hot core, a swirling body, a soft halo
+  local ORB_GLSL = NOISE .. [[
+extern number time;
+extern vec3 tint;
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  vec2 p = tc * 2.0 - 1.0;
+  float r = length(p);
+  float c = cos(time * 1.7); float s = sin(time * 1.7);
+  vec2 q = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+  float n = fbm(q * 2.4 + vec2(0.0, -time * 1.5));
+  float body = 1.0 - smoothstep(0.3 + 0.25 * n, 0.62 + 0.18 * n, r);
+  float core = 1.0 - smoothstep(0.0, 0.3, r);
+  float halo = 1.0 - smoothstep(0.0, 1.0, r);
+  halo = halo * halo * 0.55;
+  vec3 col = mix(tint * (0.7 + 0.6 * n), vec3(1.0), core * 0.85);
+  return vec4(col, clamp(body * (0.6 + 0.5 * n) + halo + core, 0.0, 1.0) * color.a);
+}
+]]
+  -- a puff of smoke or dust (tc 0..1 over its square, turned by the draw): a lumpy edge, lit from above
+  local PUFF_GLSL = NOISE .. [[
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  vec2 p = tc * 2.0 - 1.0;
+  float r = length(p);
+  float n = fbm(tc * 3.2);
+  float edge = r + (n - 0.5) * 0.7;
+  float a = (1.0 - smoothstep(0.3, 1.0, edge)) * color.a;
+  return vec4(color.rgb * (0.7 + 0.5 * n - 0.2 * p.y), a);
+}
+]]
+  -- a wall of water or sand rolling forward (tc.x across, tc.y top to foot): a broken crest, spray,
+  -- foam, depth darkening, glints
+  local WALL_GLSL = NOISE .. [[
+extern number time;
+extern number aspect;
+extern vec3 deep;
+extern vec3 shallow;
+extern vec3 foam;
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  float x = tc.x * aspect;
+  vec2 q = vec2(x * 2.2, tc.y * 2.0 - time * 1.1);
+  float w = fbm(q * 1.6 + vec2(time * 0.4, 0.0));
+  float n = fbm(q + vec2(0.0, w * 1.5));
+  float crest = 0.16 + 0.07 * sin(x * 4.0 + time * 4.0) + 0.05 * sin(x * 9.0 - time * 6.0) + (n - 0.5) * 0.18;
+  float body = smoothstep(crest - 0.015, crest + 0.02, tc.y);
+  float spray = (1.0 - smoothstep(0.0, 0.12, crest - tc.y)) * smoothstep(0.6, 0.85, fbm(vec2(x * 6.0, tc.y * 9.0 - time * 3.0)));
+  float d = clamp((tc.y - crest) / max(0.05, 1.0 - crest), 0.0, 1.0);
+  vec3 col = mix(shallow, deep, smoothstep(0.0, 0.8, d)) + (n - 0.5) * 0.25;
+  float fo = smoothstep(0.5, 0.75, n) * (1.0 - smoothstep(0.0, 0.35, d)) + (1.0 - smoothstep(0.0, 0.06, d)) * body;
+  float glint = pow(max(0.0, n - 0.55) * 2.2, 3.0);
+  col = mix(col, foam, clamp(fo, 0.0, 1.0)) + glint * 0.6;
+  return vec4(col, max(body * (0.82 + 0.18 * d), spray) * color.a);
+}
+]]
+  local shaders = { tried = false }
+  local SOURCES = { fire = FIRE_GLSL, rock = ROCK_GLSL, beam = BEAM_GLSL, orb = ORB_GLSL, puff = PUFF_GLSL,
+    wall = WALL_GLSL }
   local function shader(name)
     if not shaders.tried then
       shaders.tried = true
-      local ok1, f = pcall(love.graphics.newShader, FIRE_GLSL)
-      if ok1 then shaders.fire = f end
-      local ok2, r = pcall(love.graphics.newShader, ROCK_GLSL)
-      if ok2 then shaders.rock = r end
-      local okI, img = pcall(function()
-        local d = love.image.newImageData(1, 1)
-        d:setPixel(0, 0, 1, 1, 1, 1)
-        return love.graphics.newImage(d)
-      end)
-      if okI then shaders.texel = img end
+      if G then
+        for k, src in pairs(SOURCES) do
+          local ok, s = pcall(G.newShader, src)
+          if ok then shaders[k] = s end
+        end
+        local okI, img = pcall(function()
+          local d = love.image.newImageData(1, 1)
+          d:setPixel(0, 0, 1, 1, 1, 1)
+          return G.newImage(d)
+        end)
+        if okI then shaders.texel = img end
+        -- a soft round sprite (a glow, a spark's head)
+        local okS, soft = pcall(function()
+          local d = love.image.newImageData(64, 64)
+          d:mapPixel(function(x, y)
+            local dx, dy = (x + 0.5) / 32 - 1, (y + 0.5) / 32 - 1
+            local a = max(0, 1 - sqrt(dx * dx + dy * dy))
+            return 1, 1, 1, a * a * (3 - 2 * a)
+          end)
+          local im = G.newImage(d)
+          im:setFilter("linear", "linear")
+          return im
+        end)
+        if okS then shaders.soft = soft end
+      end
     end
     return shaders[name]
   end
   Fx.shader = shader
 
-  -- real fire in a rect (x, y top-left, w, h): flames rising off its foot; false when the shader is out
-  local function fireRect(G, x, y, w, h, now, seed, alpha)
+  -- real fire in a rect (x, y top-left, w, h); false when the shader is out
+  local function fireRect(G2, x, y, w, h, now, seed, alpha, blaze)
     local sh, tx = shader("fire"), shaders.texel
     if not (sh and tx) then return false end
     sh:send("time", now)
     sh:send("seed", seed or 0)
-    sh:send("aspect", w / math.max(1, h))
-    G.setShader(sh)
-    G.setColor(1, 1, 1, alpha or 1)
-    G.draw(tx, x, y, 0, w, h)
-    G.setShader()
+    sh:send("aspect", w / max(1, h))
+    sh:send("blaze", blaze or 0)
+    G2.setShader(sh)
+    G2.setColor(1, 1, 1, alpha or 1)
+    G2.draw(tx, x, y, 0, w, h)
+    G2.setShader()
     return true
   end
   Fx.fireRect = fireRect
 
-  -- a filled polygon shaded as rock (noise over its colour); plain without the shader
-  local function rockPoly(G, pts, scale)
+  -- a filled polygon shaded as rock; plain without the shader
+  local function rockPoly(G2, pts, scale)
     local sh = shader("rock")
     if sh then
-      sh:send("scale", math.max(1, scale or 20))
-      G.setShader(sh)
+      sh:send("scale", max(1, scale or 20))
+      G2.setShader(sh)
     end
-    G.polygon("fill", pts)
-    G.setShader()
+    G2.polygon("fill", pts)
+    G2.setShader()
   end
   Fx.rockPoly = rockPoly
 
+  -- a soft glow at (x, y), r px out (the caller sets the blend)
+  local function glowAt(G2, x, y, r, cr, cg, cb, a)
+    if a <= 0 or r <= 0 then return end
+    local img = shader("soft")
+    G2.setColor(cr, cg, cb, a)
+    if img then G2.draw(img, x, y, 0, r / 32, r / 32, 32, 32)
+    else G2.circle("fill", x, y, r * 0.5, 20) end
+  end
+
+  -- an orb of energy r px out at (x, y); its soft glow without the shader
+  local function orbAt(G2, x, y, r, tc, a, now)
+    if a <= 0 or r <= 0 then return end
+    local sh, tx = shader("orb"), shaders.texel
+    if sh and tx then
+      sh:send("time", now)
+      sh:send("tint", tc)
+      G2.setShader(sh)
+      G2.setColor(1, 1, 1, a)
+      G2.draw(tx, x - r, y - r, 0, r * 2, r * 2)
+      G2.setShader()
+    else
+      glowAt(G2, x, y, r * 1.4, tc[1], tc[2], tc[3], a * 0.7)
+      glowAt(G2, x, y, r * 0.6, 1, 1, 1, a)
+    end
+  end
+
+  -- ------- a strip mesh, filled each draw (beams, rings, walls, claw strokes)
+
+  local STRIP_MAX = 160
+  local strip = { mesh = nil, v = {} }
+  local function stripReady()
+    if strip.mesh == nil then
+      local ok, m = pcall(G.newMesh, STRIP_MAX, "strip", "stream")
+      strip.mesh = ok and m or false
+      for i = 1, STRIP_MAX do strip.v[i] = { 0, 0, 0, 0, 1, 1, 1, 1 } end
+      shader("soft")
+      if strip.mesh and shaders.texel then strip.mesh:setTexture(shaders.texel) end
+    end
+    return strip.mesh or nil
+  end
+  local function sv(i, x, y, u, v, r, g, b, a)
+    local t = strip.v[i]
+    t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8] = x, y, u, v, r, g, b, a
+  end
+  local function stripDraw(G2, n)
+    local m = strip.mesh
+    if not m or n < 3 then return end
+    m:setVertices(strip.v, 1, n)
+    m:setDrawRange(1, n)
+    G2.draw(m)
+  end
+
+  -- a tapered band from (x1, y1) w1 px across to (x2, y2) w2 px across, tc.x along, tc.y across
+  local function band(G2, x1, y1, w1, x2, y2, w2, r, g, b, a)
+    if not stripReady() then return false end
+    local dx, dy = x2 - x1, y2 - y1
+    local l = sqrt(dx * dx + dy * dy) + 1e-6
+    local nx, ny = -dy / l, dx / l
+    sv(1, x1 + nx * w1 * 0.5, y1 + ny * w1 * 0.5, 0, 0, r, g, b, a)
+    sv(2, x1 - nx * w1 * 0.5, y1 - ny * w1 * 0.5, 0, 1, r, g, b, a)
+    sv(3, x2 + nx * w2 * 0.5, y2 + ny * w2 * 0.5, 1, 0, r, g, b, a)
+    sv(4, x2 - nx * w2 * 0.5, y2 - ny * w2 * 0.5, 1, 1, r, g, b, a)
+    stripDraw(G2, 4)
+    return true
+  end
+
+  -- a soft ring on screen (rx, ry its radii, w px thick): bright along its middle, faded both sides
+  local RING_N = 40
+  local function screenRing(G2, x, y, rx, ry, w, cr, cg, cb, a)
+    if a <= 0 or rx <= 0 or not stripReady() then return end
+    for half = 0, 1 do
+      local n = 0
+      for k = 0, RING_N do
+        local th = 2 * pi * k / RING_N
+        local c, s = cos(th), sin(th)
+        local ri = half == 0 and -w * 0.5 or 0
+        local ro = half == 0 and 0 or w * 0.5
+        local ai = half == 0 and 0 or a
+        local ao = half == 0 and a or 0
+        n = n + 1; sv(n, x + c * (rx + ri), y + s * (ry + ri * ry / rx), 0, 0, cr, cg, cb, ai)
+        n = n + 1; sv(n, x + c * (rx + ro), y + s * (ry + ro * ry / rx), 0, 0, cr, cg, cb, ao)
+      end
+      stripDraw(G2, n)
+    end
+  end
+
+  -- a soft ring on the ground about (X, Z) at height Y, R metres out, W metres wide
+  local function groundRing(G2, X, Y, Z, R, W, cr, cg, cb, a)
+    if a <= 0 or R <= 0 or not stripReady() then return end
+    for half = 0, 1 do
+      local n = 0
+      local ok = true
+      for k = 0, RING_N do
+        local th = 2 * pi * k / RING_N
+        local c, s = cos(th), sin(th)
+        local r1 = half == 0 and max(0, R - W * 0.5) or R
+        local r2 = half == 0 and R or R + W * 0.5
+        local x1, y1 = P(X + c * r1, Y, Z + s * r1)
+        local x2, y2 = P(X + c * r2, Y, Z + s * r2)
+        if not (x1 and x2) then ok = false; break end
+        n = n + 1; sv(n, x1, y1, 0, 0, cr, cg, cb, half == 0 and 0 or a)
+        n = n + 1; sv(n, x2, y2, 0, 0, cr, cg, cb, half == 0 and a or 0)
+      end
+      if ok then stripDraw(G2, n) end
+    end
+  end
+
+  -- a filled patch on the ground (an uneven disc), as a fan of projected points
+  local patch = {}
+  local function groundPatch(G2, X, Y, Z, R, seed, cr, cg, cb, a)
+    if a <= 0 then return end
+    local n = 0
+    for k = 0, 17 do
+      local th = 2 * pi * k / 18
+      local rr = R * (0.75 + 0.45 * rnd(seed, k))
+      local x, y = P(X + cos(th) * rr, Y, Z + sin(th) * rr)
+      if not x then return end
+      patch[n + 1], patch[n + 2] = x, y
+      n = n + 2
+    end
+    for i = n + 1, #patch do patch[i] = nil end
+    G2.setColor(cr, cg, cb, a)
+    pcall(G2.polygon, "fill", patch)
+  end
+
+  -- ------- particles in the world
+
+  local KINDS = {
+    spark = { g = 7, drag = 1.2, bounce = 0.35, add = true },
+    inspark = { g = 0, drag = 0, add = true },
+    ember = { g = -1.4, drag = 1.6, add = true },
+    glow = { g = 0, drag = 3, add = true },
+    light = { g = 0, drag = 0, add = true },
+    dust = { g = -0.25, drag = 2.2, puff = true },
+    smoke = { g = -0.9, drag = 1.6, puff = true },
+    wisp = { g = -0.7, drag = 1.2, puff = true },
+    debris = { g = 9.8, drag = 0.2, bounce = 0.3 },
+    chunk = { g = 9.8, drag = 0.1, bounce = 0.2 },
+    drop = { g = 9.8, drag = 0.4 },
+    leaf = { g = 1.2, drag = 2.5 },
+    shard = { g = 9.8, drag = 0.3, bounce = 0.25 },
+    bubble = { g = -0.8, drag = 1.5 },
+    twinkle = { g = -0.2, drag = 1.5, add = true },
+    ring = { g = 0, drag = 0, add = true },
+    gring = { g = 0, drag = 0, add = true, ground = true },
+    streak = { g = 0, drag = 0.3, add = true },
+    heart = { g = -0.4, drag = 1.5 },
+    coin = { g = 9.8, drag = 0.3, bounce = 0.45 },
+  }
+  local parts, pool = {}, {}
+  Fx.MAX_PARTS = 900
+  local seedN = 0
+  local function emit(kind, X, Y, Z, vx, vy, vz, life, size, cr, cg, cb, a)
+    if #parts >= Fx.MAX_PARTS then return nil end
+    local p = table.remove(pool) or {}
+    seedN = seedN + 1
+    p.kind, p.X, p.Y, p.Z, p.vx, p.vy, p.vz = kind, X, Y, Z, vx or 0, vy or 0, vz or 0
+    p.age, p.life, p.size = 0, life or 1, size or 0.1
+    p.r, p.g, p.b, p.a = cr or 1, cg or 1, cb or 1, a or 1
+    p.seed = seedN * 7.31
+    p.rot = rnd(p.seed, 1) * 2 * pi
+    p.spin = (rnd(p.seed, 2) - 0.5) * 12
+    p.floor, p.home, p.w, p.grow = 0, nil, nil, nil
+    parts[#parts + 1] = p
+    return p
+  end
+  Fx.emit = emit
+
+  -- n particles burst from (X, Y, Z): speed sp (+- half), mostly up by up (0..1), spread all round
+  local function burstOf(kind, n, X, Y, Z, sp, up, life, size, cr, cg, cb, a, floorY)
+    for k = 1, n do
+      seedN = seedN + 1
+      local s = seedN * 3.7
+      local th = rnd(s, 1) * 2 * pi
+      local el = (rnd(s, 2) * 2 - 1) * (1 - up) + up * (0.3 + 0.7 * rnd(s, 3))
+      local hor = sqrt(max(0, 1 - el * el))
+      local v = sp * (0.5 + rnd(s, 4))
+      local p = emit(kind, X, Y, Z, cos(th) * hor * v, el * v, sin(th) * hor * v * 0.8 + sp * 0.15,
+        life * (0.6 + 0.8 * rnd(s, 5)), size * (0.6 + 0.8 * rnd(s, 6)), cr, cg, cb, a)
+      if p then p.floor = floorY or 0 end
+    end
+  end
+
+  local function stepParts(dt)
+    for i = #parts, 1, -1 do
+      local p = parts[i]
+      p.age = p.age + dt
+      if p.age >= p.life then
+        parts[i] = parts[#parts]
+        parts[#parts] = nil
+        pool[#pool + 1] = p
+      else
+        local K = KINDS[p.kind]
+        if p.home then
+          -- drawn in to an anchor, faster as it goes
+          local A = p.home
+          local dx, dy, dz = A.X - p.X, A.Y - p.Y, A.Z - p.Z
+          local d = sqrt(dx * dx + dy * dy + dz * dz) + 1e-3
+          local sp = 4 + 14 * p.age
+          local k = min(1, dt * 5)
+          p.vx = p.vx + (dx / d * sp - p.vx) * k
+          p.vy = p.vy + (dy / d * sp - p.vy) * k
+          p.vz = p.vz + (dz / d * sp - p.vz) * k
+          if d < 0.35 then p.age = p.life end
+        else
+          local dr = max(0, 1 - K.drag * dt)
+          p.vx, p.vy, p.vz = p.vx * dr, p.vy * dr - K.g * dt, p.vz * dr
+        end
+        p.X, p.Y, p.Z = p.X + p.vx * dt, p.Y + p.vy * dt, p.Z + p.vz * dt
+        if K.bounce and p.Y < p.floor then
+          p.Y = p.floor
+          if p.vy < 0 then
+            p.vy = -p.vy * K.bounce
+            p.vx, p.vz = p.vx * 0.55, p.vz * 0.55
+            p.spin = p.spin * 0.5
+          end
+        end
+        p.rot = p.rot + p.spin * dt
+      end
+    end
+  end
+
+  local chunkPts = {}
+  local function drawPart(G2, p, x, y, k)
+    local u = p.age / p.life
+    local kind = p.kind
+    local s = p.size * k
+    if kind == "spark" or kind == "inspark" then
+      local x2, y2 = P(p.X - p.vx * 0.04, p.Y - p.vy * 0.04, p.Z - p.vz * 0.04)
+      if not x2 then return end
+      local a = p.a * (1 - u)
+      local heat = 1 - u
+      G2.setLineWidth(max(1, s))
+      G2.setColor(p.r + (1 - p.r) * heat * 0.8, p.g + (1 - p.g) * heat * 0.6, p.b + (1 - p.b) * heat * 0.3, a)
+      G2.line(x, y, x2, y2)
+      if s > 1.5 then glowAt(G2, x, y, s * 4, p.r, p.g, p.b, a * 0.35) end
+    elseif kind == "ember" then
+      local fl = 0.6 + 0.4 * sin(p.age * 30 + p.seed)
+      glowAt(G2, x, y, s * 3 * (1 - u * 0.5), p.r, p.g, p.b, p.a * (1 - u) * fl)
+      glowAt(G2, x, y, s * 1.1, 1, 0.95, 0.7, p.a * (1 - u) * fl)
+    elseif kind == "glow" or kind == "light" then
+      local g = 1 + (p.grow or 0.6) * u
+      glowAt(G2, x, y, s * g, p.r, p.g, p.b, p.a * (1 - u) * (1 - u))
+    elseif kind == "twinkle" then
+      local tw = (0.55 + 0.45 * sin(p.age * 22 + p.seed)) * p.a * (1 - u)
+      glowAt(G2, x, y, s * 2.5, p.r, p.g, p.b, tw * 0.6)
+      G2.setColor(1, 1, 1, tw)
+      G2.push()
+      G2.translate(x, y)
+      G2.rotate(p.rot * 0.2)
+      G2.ellipse("fill", 0, 0, s * 1.6, s * 0.18, 10)
+      G2.ellipse("fill", 0, 0, s * 0.18, s * 1.6, 10)
+      G2.pop()
+    elseif kind == "ring" then
+      local e = 1 - (1 - u) * (1 - u)
+      local r = s * (0.15 + 0.85 * e)
+      screenRing(G2, x, y, r, r * (p.flat or 1), max(1, (p.w or 0.2) * k * (1 - u)), p.r, p.g, p.b, p.a * (1 - u))
+    elseif kind == "gring" then
+      local e = 1 - (1 - u) * (1 - u)
+      groundRing(G2, p.X, p.Y, p.Z, p.size * (0.1 + 0.9 * e), (p.w or 0.3) * (1 - u * 0.6), p.r, p.g, p.b, p.a * (1 - u))
+    elseif kind == "streak" then
+      local x2, y2 = P(p.X - p.vx * 0.09, p.Y - p.vy * 0.09, p.Z - p.vz * 0.09)
+      if not x2 then return end
+      G2.setLineWidth(max(1, s))
+      G2.setColor(p.r, p.g, p.b, p.a * sin(u * pi))
+      G2.line(x, y, x2, y2)
+    elseif KINDS[kind].puff then
+      local sz = s * (1 + 1.8 * u)
+      local a = p.a * (1 - u) ^ 1.4 * min(1, p.age / 0.06)
+      local sh, tx = shader("puff"), shaders.texel
+      if sh and tx then
+        G2.setShader(sh)
+        G2.setColor(p.r, p.g, p.b, a)
+        G2.draw(tx, x, y, p.rot * 0.15, sz * 2, sz * 2, 0.5, 0.5)
+        G2.setShader()
+      else
+        glowAt(G2, x, y, sz * 1.6, p.r, p.g, p.b, a)
+      end
+    elseif kind == "debris" or kind == "chunk" or kind == "shard" then
+      local n = kind == "shard" and 3 or 6
+      for j = 0, n - 1 do
+        local th = p.rot + j * 2 * pi / n
+        local rr = s * (kind == "shard" and (j == 0 and 1.8 or 0.55) or (0.65 + 0.45 * rnd(p.seed, j)))
+        chunkPts[j * 2 + 1], chunkPts[j * 2 + 2] = x + cos(th) * rr, y + sin(th) * rr * 0.85
+      end
+      for j = n * 2 + 1, #chunkPts do chunkPts[j] = nil end
+      local a = p.a * min(1, (1 - u) * 4)
+      if kind == "shard" then
+        G2.setColor(p.r, p.g, p.b, a * 0.8)
+        G2.polygon("fill", chunkPts)
+        G2.setColor(1, 1, 1, a)
+        G2.setLineWidth(1)
+        G2.polygon("line", chunkPts)
+      else
+        G2.setColor(p.r, p.g, p.b, a)
+        rockPoly(G2, chunkPts, max(2, s * 0.6))
+        G2.setColor(min(1, p.r * 1.35), min(1, p.g * 1.35), min(1, p.b * 1.35), a * 0.8)
+        G2.polygon("fill", chunkPts[1], chunkPts[2], chunkPts[3], chunkPts[4], x, y)
+      end
+    elseif kind == "drop" then
+      local x2, y2 = P(p.X - p.vx * 0.025, p.Y - p.vy * 0.025, p.Z - p.vz * 0.025)
+      if not x2 then return end
+      local a = p.a * (1 - u * u)
+      G2.setLineWidth(max(1, s))
+      G2.setColor(p.r, p.g, p.b, a * 0.75)
+      G2.line(x, y, x2, y2)
+      G2.setColor(1, 1, 1, a * 0.8)
+      G2.circle("fill", x, y, max(0.6, s * 0.35), 8)
+    elseif kind == "leaf" then
+      G2.push()
+      G2.translate(x, y)
+      G2.rotate(p.rot)
+      local fl = abs(cos(p.age * 7 + p.seed))
+      local a = p.a * (1 - u * u)
+      G2.setColor(p.r * 0.75, p.g * 0.75, p.b * 0.75, a)
+      G2.ellipse("fill", 0, 0, s, s * 0.42 * (0.3 + 0.7 * fl), 12)
+      G2.setColor(min(1, p.r * 1.2), min(1, p.g * 1.15), p.b, a)
+      G2.ellipse("fill", -s * 0.1, -s * 0.06 * fl, s * 0.7, s * 0.2 * (0.3 + 0.7 * fl), 12)
+      G2.pop()
+    elseif kind == "bubble" then
+      local a = p.a * (1 - u)
+      local r = s * (1 + 0.1 * sin(p.age * 14 + p.seed))
+      G2.setColor(p.r, p.g, p.b, a * 0.25)
+      G2.circle("fill", x, y, r, 16)
+      G2.setColor(min(1, p.r + 0.3), min(1, p.g + 0.3), min(1, p.b + 0.3), a * 0.8)
+      G2.setLineWidth(max(1, r * 0.12))
+      G2.circle("line", x, y, r, 16)
+      G2.setColor(1, 1, 1, a)
+      G2.circle("fill", x - r * 0.35, y - r * 0.35, r * 0.22, 8)
+    elseif kind == "heart" then
+      local a = p.a * (1 - u)
+      G2.setColor(p.r, p.g, p.b, a)
+      G2.circle("fill", x - s * 0.42, y, s * 0.5, 12)
+      G2.circle("fill", x + s * 0.42, y, s * 0.5, 12)
+      G2.polygon("fill", x - s * 0.9, y + s * 0.15, x + s * 0.9, y + s * 0.15, x, y + s * 1.1)
+    elseif kind == "coin" then
+      local a = p.a * min(1, (1 - u) * 4)
+      local sx = abs(cos(p.rot))
+      G2.setColor(0.75, 0.55, 0.12, a)
+      G2.ellipse("fill", x, y, max(0.8, s * sx), s, 16)
+      G2.setColor(1, 0.85, 0.3, a)
+      G2.ellipse("fill", x - s * 0.1 * sx, y - s * 0.08, max(0.6, s * 0.75 * sx), s * 0.78, 16)
+      if sx > 0.85 then glowAt(G2, x - s * 0.3, y - s * 0.4, s * 1.4, 1, 1, 0.8, a * 0.7) end
+    end
+  end
+
+  local function drawParts(G2, layer)
+    -- the alpha-blended first, the added after
+    for pass = 1, 2 do
+      G2.setBlendMode(pass == 1 and "alpha" or "add")
+      for i = 1, #parts do
+        local p = parts[i]
+        local K = KINDS[p.kind]
+        if (K.add and 2 or 1) == pass and ((K.ground and "back") or layerOf(p.Z)) == layer then
+          local x, y, k = P(p.X, p.Y, p.Z)
+          if x then drawPart(G2, p, x, y, k) end
+        end
+      end
+    end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+
+  -- ------- the ground's marks: scorch, cracks, frost, wet (they fade over their last 40%)
+
+  local decals = {}
+  function Fx.decal(kind, X, Y, Z, R, now, life)
+    decals[#decals + 1] = { kind = kind, X = X, Y = (Y or 0) + 0.012, Z = Z, R = R, t0 = now, life = life or 3.5,
+      seed = now * 11.3 + #decals }
+  end
+  local crackPts = {}
+  local function drawDecals(G2, now)
+    for _, d in ipairs(decals) do
+      local u = (now - d.t0) / d.life
+      if u >= 0 and u < 1 then
+        local a = u < 0.6 and 1 or (1 - (u - 0.6) / 0.4)
+        local grow = min(1, (now - d.t0) / 0.12)
+        if d.kind == "scorch" then
+          groundPatch(G2, d.X, d.Y, d.Z, d.R * grow, d.seed, 0.06, 0.035, 0.02, 0.62 * a)
+          groundPatch(G2, d.X, d.Y, d.Z, d.R * 0.5 * grow, d.seed + 1, 0.02, 0.01, 0.0, 0.5 * a)
+          G2.setBlendMode("add")
+          groundPatch(G2, d.X, d.Y, d.Z, d.R * 0.35 * grow, d.seed + 2, 0.9, 0.3, 0.05, 0.5 * a * max(0, 1 - u * 3))
+          G2.setBlendMode("alpha")
+        elseif d.kind == "wet" then
+          groundPatch(G2, d.X, d.Y, d.Z, d.R * grow, d.seed, 0.05, 0.08, 0.12, 0.45 * a)
+        elseif d.kind == "frost" then
+          groundPatch(G2, d.X, d.Y, d.Z, d.R * grow, d.seed, 0.8, 0.92, 1, 0.42 * a)
+          groundPatch(G2, d.X, d.Y, d.Z, d.R * 0.55 * grow, d.seed + 1, 0.95, 1, 1, 0.35 * a)
+        elseif d.kind == "crack" then
+          groundPatch(G2, d.X, d.Y, d.Z, d.R * 0.4 * grow, d.seed, 0.08, 0.06, 0.05, 0.55 * a)
+          G2.setColor(0.05, 0.04, 0.03, 0.85 * a)
+          for j = 1, 9 do
+            local th = rnd(d.seed, j) * 2 * pi
+            local n = 0
+            local okC = true
+            local cx, cz = d.X, d.Z
+            for s = 0, 5 do
+              local rr = d.R * grow * s / 5 * (0.7 + 0.5 * rnd(d.seed, j + 20))
+              local jit = (rnd(d.seed, j * 7 + s) - 0.5) * 0.5
+              local x, y = P(cx + cos(th + jit) * rr, d.Y, cz + sin(th + jit) * rr)
+              if not x then okC = false; break end
+              crackPts[n + 1], crackPts[n + 2] = x, y
+              n = n + 2
+            end
+            for q = n + 1, #crackPts do crackPts[q] = nil end
+            if okC and n >= 4 then
+              local _, _, k = P(d.X, d.Y, d.Z)
+              G2.setLineWidth(max(1, (k or 40) * 0.035))
+              G2.line(crackPts)
+            end
+          end
+          G2.setLineWidth(1)
+        end
+      end
+    end
+  end
+
+  -- ------- short effects at a point: an impact's bloom, fire, electric arcs
+
+  local spots = {}
+  local function spot(kind, X, Y, Z, s, now, dur, tc, power)
+    seedN = seedN + 1
+    spots[#spots + 1] = { kind = kind, X = X, Y = Y, Z = Z, s = s, t0 = now, dur = dur, tc = tc, p = power or 0.5,
+      seed = seedN * 5.1 }
+  end
+
+  -- a jagged line between two world points (midpoint displacement), projected into pts
+  local boltW = {}
+  local function jagged(out, x1, y1, z1, x2, y2, z2, seed, rough, levels)
+    -- world points first
+    local W = boltW
+    W[1], W[2], W[3], W[4], W[5], W[6] = x1, y1, z1, x2, y2, z2
+    local n = 2
+    for lv = 1, levels do
+      local m = {}
+      local idx = 0
+      for i = 1, n - 1 do
+        local a, b = (i - 1) * 3, i * 3
+        local ax, ay, az, bx, by, bz = W[a + 1], W[a + 2], W[a + 3], W[b + 1], W[b + 2], W[b + 3]
+        local len = sqrt((bx - ax) ^ 2 + (by - ay) ^ 2 + (bz - az) ^ 2)
+        local off = len * rough
+        m[idx + 1], m[idx + 2], m[idx + 3] = ax, ay, az
+        m[idx + 4] = (ax + bx) / 2 + (rnd(seed, lv * 31 + i) - 0.5) * off
+        m[idx + 5] = (ay + by) / 2 + (rnd(seed, lv * 37 + i) - 0.5) * off * 0.5
+        m[idx + 6] = (az + bz) / 2 + (rnd(seed, lv * 41 + i) - 0.5) * off
+        idx = idx + 6
+      end
+      local e = (n - 1) * 3
+      m[idx + 1], m[idx + 2], m[idx + 3] = W[e + 1], W[e + 2], W[e + 3]
+      n = n * 2 - 1
+      for i = 1, n * 3 do W[i] = m[i] end
+    end
+    local c = 0
+    for i = 1, n do
+      local x, y = P(W[i * 3 - 2], W[i * 3 - 1], W[i * 3])
+      if not x then return 0 end
+      out[c + 1], out[c + 2] = x, y
+      c = c + 2
+    end
+    for i = c + 1, #out do out[i] = nil end
+    return c
+  end
+  -- a lightning line drawn glowing (three passes, the caller's blend "add")
+  local function glowLine(G2, pts, w, tc, a)
+    G2.setLineJoin("bevel")
+    G2.setLineWidth(w * 5)
+    G2.setColor(tc[1], tc[2], tc[3], 0.12 * a)
+    G2.line(pts)
+    G2.setLineWidth(w * 2.2)
+    G2.setColor(tc[1], tc[2], tc[3], 0.45 * a)
+    G2.line(pts)
+    G2.setLineWidth(max(1, w * 0.8))
+    G2.setColor(1, 1, 1, a)
+    G2.line(pts)
+  end
+
+  local arcPts = {}
+  local function drawSpot(G2, e, now)
+    local u = (now - e.t0) / e.dur
+    if u < 0 or u > 1 then return end
+    local x, y, k = P(e.X, e.Y, e.Z)
+    if not x then return end
+    local tc = e.tc
+    if e.kind == "bloom" then
+      -- the impact's light: a hard white core, the type's orb swelling, a ring
+      G2.setBlendMode("add")
+      local r = e.s * k * (0.18 + 0.42 * (1 - (1 - u) ^ 3)) * (0.8 + 0.5 * e.p)
+      orbAt(G2, x, y, r, tc, (1 - u) ^ 2 * 0.85, now)
+      glowAt(G2, x, y, r * 0.55, 1, 1, 1, (1 - u) ^ 4 * 0.7)
+      G2.setBlendMode("alpha")
+    elseif e.kind == "fire" then
+      local w, h = e.s * k * 1.2 * (0.7 + 0.5 * u), e.s * k * 1.5 * (1 - u * 0.4)
+      if not fireRect(G2, x - w / 2, y - h * 0.8, w, h, now * 1.3 + e.seed, e.seed, (1 - u) ^ 0.7, 1) then
+        G2.setBlendMode("add")
+        glowAt(G2, x, y, w, 1, 0.45, 0.1, 1 - u)
+        G2.setBlendMode("alpha")
+      end
+    elseif e.kind == "arcs" then
+      G2.setBlendMode("add")
+      local flick = floor(now * 24)
+      for j = 1, 4 do
+        if rnd(e.seed + flick, j) > 0.25 then
+          local s1, s2 = e.seed + flick * 3 + j, e.seed + flick * 5 + j * 2
+          local r = e.s * 0.6
+          local a1, a2 = rnd(s1, 1) * 2 * pi, rnd(s2, 1) * 2 * pi
+          local n = jagged(arcPts, e.X + cos(a1) * r, e.Y + (rnd(s1, 2) - 0.5) * r * 1.6, e.Z + sin(a1) * r * 0.3,
+            e.X + cos(a2) * r, e.Y + (rnd(s2, 2) - 0.5) * r * 1.6, e.Z + sin(a2) * r * 0.3, s1, 0.5, 3)
+          if n >= 4 then glowLine(G2, arcPts, max(1, k * 0.03), tc, 1 - u) end
+        end
+      end
+      G2.setBlendMode("alpha")
+    elseif e.kind == "psy" then
+      G2.setBlendMode("add")
+      for j = 0, 2 do
+        local f = u * 1.3 - j * 0.15
+        if f > 0 and f < 1 then
+          local r = e.s * k * (0.3 + 1.0 * f)
+          screenRing(G2, x, y, r, r * 0.8, max(1, k * 0.08 * (1 - f)), tc[1], tc[2], tc[3], 0.8 * (1 - f))
+          screenRing(G2, x + r * 0.03, y, r * 1.02, r * 0.82, max(1, k * 0.04 * (1 - f)), 0.5, 0.8, 1, 0.4 * (1 - f))
+        end
+      end
+      G2.setBlendMode("alpha")
+    elseif e.kind == "lines" then
+      -- speed lines closing on the point (a blow about to land)
+      G2.setBlendMode("add")
+      G2.setLineWidth(max(1, k * 0.02))
+      for j = 1, 16 do
+        local th = rnd(e.seed, j) * 2 * pi
+        local r1 = e.s * k * (1.6 - 1.1 * u) * (0.8 + 0.4 * rnd(e.seed, j + 9))
+        local r0 = r1 + e.s * k * (0.5 + 0.3 * rnd(e.seed, j + 4))
+        G2.setColor(1, 1, 1, 0.55 * sin(u * pi))
+        G2.line(x + cos(th) * r0, y + sin(th) * r0, x + cos(th) * r1, y + sin(th) * r1)
+      end
+      G2.setBlendMode("alpha")
+    end
+  end
+
+  -- ------- a type's hit at an anchor (power 0..1+)
+
+  local function hitPoint(T)
+    -- on the side it is struck from: toward the camera
+    return T.X, T.Y, T.Z + (T.boss and min(1.4, T.h * 0.2) or 0.3)
+  end
+  function Fx.hit(typeName, T, power, now, big)
+    local tc = TINT[typeName] or TINT.NORMAL
+    local X, Y, Z = hitPoint(T)
+    local s = min(T.h, 3.2) * (big and 1.25 or 1)
+    local p = power or 0.5
+    local foot = T.foot or 0
+    spot("bloom", X, Y, Z, s, now, 0.32 + 0.12 * p, tc, p)
+    local rg = emit("ring", X, Y, Z, 0, 0, 0, 0.3 + 0.1 * p, s * (0.55 + 0.5 * p), tc[1], tc[2], tc[3], 0.75)
+    if rg then rg.w = s * 0.07 end
+    local gr = emit("gring", T.X, foot + 0.02, T.Z, 0, 0, 0, 0.55, s * (1.2 + 1.2 * p), tc[1], tc[2], tc[3], 0.6)
+    if gr then gr.w = s * 0.25 end
+    burstOf("spark", floor(10 + 22 * p), X, Y, Z, 3.5 + 4 * p, 0.25, 0.45, 0.025 * s, tc[1], tc[2], tc[3], 1, foot)
+    local t = typeName
+    if t == "FIRE" then
+      spot("fire", X, Y - s * 0.1, Z, s * 0.8, now, 0.85, tc, p)
+      burstOf("ember", 22, X, Y, Z, 2.2, 0.6, 1.1, 0.03 * s, 1, 0.45, 0.1, 1, foot)
+      burstOf("smoke", 6, X, Y + s * 0.3, Z, 0.7, 0.8, 1.4, 0.25 * s, 0.18, 0.15, 0.14, 0.55, foot)
+      Fx.decal("scorch", T.X, foot, T.Z, s * 0.55, now)
+    elseif t == "WATER" then
+      burstOf("drop", 34, X, Y, Z, 4.5, 0.55, 1.0, 0.035 * s, 0.55, 0.8, 1, 0.9, foot)
+      burstOf("dust", 7, X, Y, Z, 1.2, 0.3, 0.8, 0.22 * s, 0.75, 0.88, 1, 0.45, foot)
+      Fx.decal("wet", T.X, foot, T.Z, s * 0.6, now)
+    elseif t == "ELECTRIC" then
+      spot("arcs", X, Y, Z, s, now, 0.5, tc, p)
+      burstOf("spark", 18, X, Y, Z, 6, 0.2, 0.35, 0.02 * s, 1, 0.95, 0.5, 1, foot)
+      emit("light", X, Y, Z, 0, 0, 0, 0.18, s * 6, 1, 0.95, 0.6, 0.35)
+    elseif t == "GRASS" or t == "BUG" then
+      burstOf("leaf", 16, X, Y, Z, 3, 0.4, 1.3, 0.09 * s, tc[1] * 0.8, tc[2], tc[3] * 0.6, 1, foot)
+      burstOf("twinkle", 8, X, Y, Z, 1.4, 0.3, 0.8, 0.04 * s, 0.7, 1, 0.5, 0.8, foot)
+    elseif t == "ICE" then
+      burstOf("shard", 18, X, Y, Z, 4.5, 0.4, 1.0, 0.06 * s, 0.75, 0.92, 1, 1, foot)
+      burstOf("dust", 8, X, Y, Z, 1.2, 0.2, 1.0, 0.24 * s, 0.85, 0.95, 1, 0.5, foot)
+      Fx.decal("frost", T.X, foot, T.Z, s * 0.6, now)
+    elseif t == "ROCK" or t == "GROUND" then
+      burstOf("debris", 14, X, Y, Z, 4, 0.55, 1.6, 0.06 * s, 0.52, 0.42, 0.32, 1, foot)
+      burstOf("dust", t == "GROUND" and 14 or 8, T.X, foot + s * 0.15, T.Z, 1.6, 0.4, 1.4, 0.3 * s,
+        0.6, 0.5, 0.38, 0.6, foot)
+      Fx.decal("crack", T.X, foot, T.Z, s * 0.7, now)
+    elseif t == "POISON" then
+      burstOf("bubble", 16, X, Y, Z, 1.5, 0.7, 1.3, 0.05 * s, 0.75, 0.35, 0.9, 0.9, foot)
+      burstOf("smoke", 8, X, Y, Z, 0.9, 0.5, 1.3, 0.25 * s, 0.5, 0.2, 0.6, 0.5, foot)
+    elseif t == "PSYCHIC" then
+      spot("psy", X, Y, Z, s, now, 0.7, tc, p)
+      burstOf("twinkle", 10, X, Y, Z, 1.8, 0.2, 0.8, 0.04 * s, 1, 0.5, 0.8, 0.8, foot)
+    elseif t == "DARK" or t == "GHOST" then
+      burstOf("wisp", 12, X, Y, Z, 1.3, 0.4, 1.3, 0.22 * s, t == "DARK" and 0.12 or 0.25, 0.05, t == "DARK" and 0.18 or 0.35,
+        0.65, foot)
+      burstOf("ember", 10, X, Y, Z, 1.6, 0.5, 0.9, 0.03 * s, tc[1], tc[2], tc[3], 1, foot)
+    elseif t == "DRAGON" then
+      burstOf("ember", 18, X, Y, Z, 3, 0.3, 0.9, 0.035 * s, 0.55, 0.45, 1, 1, foot)
+      spot("psy", X, Y, Z, s * 0.8, now, 0.5, tc, p)
+    elseif t == "FAIRY" then
+      burstOf("twinkle", 20, X, Y, Z, 2.4, 0.4, 1.1, 0.05 * s, 1, 0.65, 0.88, 1, foot)
+    elseif t == "FLYING" then
+      burstOf("streak", 14, X, Y, Z, 7, 0.1, 0.35, 0.02 * s, 0.9, 0.95, 1, 0.9, foot)
+      burstOf("dust", 6, T.X, foot + 0.1, T.Z, 2.2, 0.1, 0.8, 0.22 * s, 0.85, 0.85, 0.82, 0.4, foot)
+    elseif t == "STEEL" then
+      burstOf("spark", 22, X, Y, Z, 7, 0.3, 0.6, 0.022 * s, 1, 0.92, 0.6, 1, foot)
+    else
+      -- fighting, normal: a blast of dust at the feet
+      burstOf("dust", 8, T.X, foot + 0.1, T.Z, 2, 0.15, 0.9, 0.26 * s, 0.7, 0.62, 0.52, 0.5, foot)
+    end
+  end
+
+  -- ------- the screen's flash, the G-Max charge
+
+  local flashes = {}
+  local function flash(tc, a, dur, now)
+    flashes[#flashes + 1] = { r = tc[1], g = tc[2], b = tc[3], a = a, dur = dur, t0 = now }
+  end
+  Fx.flash = flash
+
+  local charge = nil
+  function Fx.charge(A, now, dur) if A then charge = { A = A, t0 = now, dur = dur or 1.6, acc = 0 } end end
+  function Fx.charging(now) return charge ~= nil and now - charge.t0 < charge.dur end
+
+  local RED = { 1, 0.15, 0.3 }
+  local function stepCharge(now, dt)
+    local c = charge
+    if not c then return end
+    local u = (now - c.t0) / c.dur
+    if u > 1 then charge = nil; return end
+    local A = c.A
+    -- red energy streaking in from all round
+    c.acc = c.acc + dt * (60 + 120 * u)
+    while c.acc >= 1 do
+      c.acc = c.acc - 1
+      seedN = seedN + 1
+      local s = seedN * 1.37
+      local th, el = rnd(s, 1) * 2 * pi, (rnd(s, 2) - 0.3) * 1.2
+      local d = A.h * (1.2 + 0.8 * rnd(s, 3))
+      local dx, dy, dz = cos(th) * cos(el), sin(el), sin(th) * cos(el) * 0.6
+      local sp = d / (0.25 + 0.2 * rnd(s, 4))
+      local hot = rnd(s, 5) > 0.7
+      emit("inspark", A.X + dx * d, A.Y + dy * d, A.Z + dz * d, -dx * sp, -dy * sp, -dz * sp, d / sp, 0.03 * A.h,
+        1, hot and 0.7 or 0.12, hot and 0.8 or 0.3, 0.9)
+    end
+    if rnd(now, 3) > 0.9 then spot("arcs", A.X, A.Y, A.Z + 0.5, A.h * 0.9, now, 0.12, RED, 0.5) end
+  end
+  local function drawCharge(G2, w, h, now)
+    local c = charge
+    local u = (now - c.t0) / c.dur
+    local a = sin(min(1, u) * pi)
+    G2.setColor(0.4, 0.0, 0.05, 0.4 * a)
+    G2.rectangle("fill", 0, 0, w, h)
+  end
+  local function drawChargeOrb(G2, now)
+    local c = charge
+    local u = (now - c.t0) / c.dur
+    local x, y, k = P(c.A.X, c.A.Y, c.A.Z + 0.6)
+    if not x then return end
+    G2.setBlendMode("add")
+    local r = c.A.h * k * (0.12 + 0.35 * u) * (1 + 0.08 * sin(now * 30))
+    orbAt(G2, x, y, r, RED, min(1, u * 2) * (u > 0.92 and (1 - u) / 0.08 or 1), now)
+    G2.setBlendMode("alpha")
+  end
+
   -- ------- moves acted out (data/raid_move_fx.lua): Fx.move(spec, typeName, from, targets, now, big)
-  -- from = { x, y, s } (the user's middle and height), targets = { { x, y, s }, ... }. Each kind has a
-  -- length and an impact (seconds): at the impact every target gets its type's hit (Fx.hit). Returns
-  -- impact, length.
+  -- Each kind has a length and an impact (seconds): at the impact the targets take its type's hit
+  -- (multi strikes, shots, a wave pass each in turn). Returns impact, length.
 
   Fx.KIND = {
-    beam = { 0.9, 0.35 }, shot = { 0.85, 0.55 }, drop = { 1.0, 0.65 }, slab = { 1.5, 0.95 }, slam = { 0.7, 0.4 },
-    slash = { 0.6, 0.3 }, bite = { 0.65, 0.35 }, bolt = { 0.7, 0.18 }, wave = { 1.1, 0.6 }, rings = { 0.9, 0.5 },
-    powder = { 1.1, 0.6 }, self = { 0.9, nil }, drain = { 1.2, 0.3 }, spikes = { 0.85, 0.4 }, multi = { 0.35, 0.18 },
+    beam = { 0.95, 0.35 }, shot = { 0.85, 0.55 }, drop = { 1.0, 0.65 }, slab = { 1.7, 0.95 }, slam = { 0.75, 0.4 },
+    slash = { 0.65, 0.3 }, bite = { 0.7, 0.35 }, bolt = { 0.75, 0.2 }, wave = { 1.25, 0.7 }, rings = { 0.9, 0.5 },
+    powder = { 1.1, 0.6 }, self = { 0.9, nil }, drain = { 1.3, 0.3 }, spikes = { 0.9, 0.42 }, multi = { 0.35, 0.18 },
   }
   Fx.GMAX_K = 1.35          -- a G-Max move plays this much longer
   local moves = {}
@@ -536,419 +915,1083 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       len, impact = K[1] * n + 0.2, K[2]
     end
     local k = big and Fx.GMAX_K or 1
-    local m = { spec = spec, kind = kind, key = key, type = typeName or "NORMAL", from = from, targets = targets,
-      t0 = now, len = len * k, impact = impact and impact * k or nil, big = big or spec.big, hits = 0, seed = now * 13.7 }
+    seedN = seedN + 1
+    local m = { spec = spec, kind = kind, key = key, type = TINT[typeName] and typeName or "NORMAL", from = from,
+      targets = targets or {}, t0 = now, len = len * k, impact = impact and impact * k or nil, big = big or spec.big,
+      gmax = big, landed = {}, acc = 0, seed = seedN * 13.7 + now }
+    m.tc = TINT[m.type]
     moves[#moves + 1] = m
     return m.impact, m.len
   end
 
-  -- a shape at (x, y), r across, in the type's colour
-  local function shapeAt(G, shape, x, y, r, rot, tc, a)
-    G.push()
-    G.translate(x, y)
-    G.rotate(rot or 0)
-    if shape == "star" or shape == "shuriken" then
-      if shape == "star" then G.setColor(1, 0.95, 0.4, a) else G.setColor(tc[1], tc[2], tc[3], a) end
-      star(G, 0, 0, r, r * 0.42, shape == "star" and 5 or 4, 0)
-    elseif shape == "coin" then
-      G.setColor(1, 0.82, 0.25, a)
-      G.ellipse("fill", 0, 0, r * 0.8, r, 16)
-      G.setColor(0.8, 0.6, 0.1, a)
-      G.ellipse("line", 0, 0, r * 0.55, r * 0.75, 16)
-    elseif shape == "leaf" then
-      G.setColor(0.35, 0.8, 0.3, a)
-      G.ellipse("fill", 0, 0, r, r * 0.38, 14)
-    elseif shape == "blade" then
-      G.setColor(0.9, 0.97, 1, a)
-      G.arc("fill", "pie", 0, 0, r, -0.5, 0.5, 10)
-    elseif shape == "apple" then
-      G.setColor(0.85, 0.2, 0.2, a)
-      G.circle("fill", 0, 0, r, 24)
-      G.setColor(0.3, 0.6, 0.2, a)
-      G.ellipse("fill", r * 0.3, -r * 1.05, r * 0.35, r * 0.15, 10)
-    elseif shape == "rock" then
-      G.setColor(0.55, 0.43, 0.3, a)
-      G.polygon("fill", -r, 0, -r * 0.5, -r, r * 0.6, -r * 0.8, r, r * 0.1, r * 0.3, r, -r * 0.6, r * 0.8)
-    else
-      G.setColor(tc[1], tc[2], tc[3], a)
-      G.circle("fill", 0, 0, r, 24)
-      G.setColor(min(1, tc[1] + 0.35), min(1, tc[2] + 0.35), min(1, tc[3] + 0.35), a)
-      G.circle("fill", -r * 0.3, -r * 0.3, r * 0.4, 16)
-    end
-    G.pop()
+  -- a target takes the blow: its type's hit, a flash, the raid's impact
+  local function land(m, T, share, now, quiet)
+    local p = (T.frac and min(1, 0.3 + T.frac * 1.8) or 0.18) * (share or 1) + (m.gmax and 0.3 or (m.big and 0.12 or 0))
+    p = min(1.3, p)
+    if not quiet then Fx.hit(m.type, T, p, now, m.big) end
+    -- (one flash a move, however many it falls on)
+    if p > 0.4 and not quiet and not m.flashed then
+      m.flashed = true
+      flash(m.tc, 0.12 + 0.18 * min(1, p), 0.1 + 0.12 * p, now) end
+    if Fx.onImpact then pcall(Fx.onImpact, T, p, m.type, m.big) end
+  end
+  local function landOnce(m, key, T, share, now)
+    if m.landed[key] then return end
+    m.landed[key] = true
+    land(m, T, share, now)
   end
 
-  -- what falls from above: a rock, an apple, a fist, a foot, a body, coins, or a great slab
-  local function fallingThing(G, shape, x, y, s, tc, a)
-    if shape == "slab" then
-      -- a great slab of rock, tilted, its underside dark
-      local w, h = s * 1.5, s * 0.75
-      G.push()
-      G.translate(x, y)
-      G.rotate(0.12)
-      G.setColor(0.42, 0.33, 0.24, a)
-      G.polygon("fill", -w / 2, -h / 2, w / 2, -h * 0.62, w * 0.55, h / 2, -w * 0.52, h * 0.55)
-      G.setColor(0.6, 0.5, 0.36, a)
-      G.polygon("fill", -w / 2, -h / 2, w / 2, -h * 0.62, w * 0.4, -h * 0.3, -w * 0.42, -h * 0.22)
-      G.setColor(0.3, 0.23, 0.16, a)
-      G.setLineWidth(max(1, s * 0.02))
-      G.line(-w * 0.2, -h * 0.4, -w * 0.05, 0, -w * 0.18, h * 0.4)
-      G.line(w * 0.25, -h * 0.5, w * 0.15, h * 0.1)
-      G.setLineWidth(1)
-      G.pop()
-    elseif shape == "fist" or shape == "foot" or shape == "body" or shape == "kick" or shape == "claw" or shape == "horn" then
-      local r = s * (shape == "fist" and 0.45 or 0.55)
-      G.setColor(tc[1] * 0.7 + 0.3, tc[2] * 0.7 + 0.3, tc[3] * 0.7 + 0.3, a * 0.9)
-      G.ellipse("fill", x, y, r, r * (shape == "foot" and 0.55 or 0.85), 28)
-      G.setColor(1, 1, 1, a * 0.35)
-      G.ellipse("fill", x - r * 0.25, y - r * 0.3, r * 0.4, r * 0.25, 16)
-    else
-      shapeAt(G, shape, x, y, s * 0.18, 0, tc, a)
-    end
+  -- where a move leaves its user: a little in front of its middle, toward the targets
+  local function mouth(m)
+    local f = m.from
+    if f.boss then return f.X, f.Y + f.h * 0.12, f.Z + min(1.5, f.h * 0.25) end
+    return f.X, f.Y + f.h * 0.1, f.Z - 0.25
   end
+  -- a target's point to aim at
+  local function aimAt(T) return hitPoint(T) end
 
-  -- a great slab of rock over everyone it falls on (Max Rockfall's): its shadow spreading, then it
-  -- drops (fast at the end), lands with a dust cloud and cracks, sinks and fades
-  function Fx.drawSlab(G, m, u, imp, now)
-    local x0, x1, ys, s = math.huge, -math.huge, 0, 0
-    for _, t in ipairs(m.targets) do
-      x0, x1 = min(x0, t.x - t.s * 0.5), max(x1, t.x + t.s * 0.5)
-      ys, s = ys + t.y + t.s * 0.45, max(s, t.s)
-    end
-    local land = ys / #m.targets
-    local cx, w = (x0 + x1) / 2, (x1 - x0) * 1.15 + s * 0.4
-    local thick = s * 0.75
-    local fall = min(1, u / imp)
-    G.setColor(0, 0, 0, 0.45 * fall)
-    G.ellipse("fill", cx, land, w * 0.55 * (0.4 + 0.6 * fall), s * 0.16 * (0.4 + 0.6 * fall), 40)
-    local after = u >= imp and (u - imp) / (1 - imp) or 0
-    local top = land - s * 3.2
-    local y = u < imp and (top + (land - top) * fall * fall * fall) or (land + thick * 0.25 * after)
-    local a = u < imp and 1 or max(0, 1 - after * 1.4)
-    if a > 0 then
-      local lean = 0.06
-      -- its front face and its top, a lighter band along the edge
-      local fx0, fx1 = cx - w / 2, cx + w / 2
-      G.setColor(0.36, 0.29, 0.22, a)
-      Fx.rockPoly(G, { fx0, y - thick, fx1, y - thick - w * lean, fx1, y - w * lean, fx0, y }, s * 0.18)
-      G.setColor(0.55, 0.46, 0.35, a)
-      Fx.rockPoly(G, { fx0, y - thick, fx0 + w * 0.08, y - thick * 1.45, fx1 + w * 0.06, y - thick * 1.45 - w * lean,
-        fx1, y - thick - w * lean }, s * 0.18)
-      G.setColor(0.22, 0.17, 0.12, a)
-      G.setLineWidth(max(1, s * 0.025))
-      G.line(fx0 + w * 0.3, y - thick * 0.95, fx0 + w * 0.34, y - thick * 0.5, fx0 + w * 0.28, y - thick * 0.1)
-      G.line(fx0 + w * 0.68, y - thick - w * lean * 0.7, fx0 + w * 0.64, y - thick * 0.4)
-      G.setLineWidth(1)
-    end
-    if u >= imp then
-      -- the dust cloud rolling out from under it, rocks thrown up
-      for k = 1, 14 do
-        local d = (k / 14 - 0.5) * w * (1 + after * 0.6)
-        G.setColor(0.62, 0.53, 0.42, 0.55 * (1 - after))
-        G.circle("fill", cx + d, land - s * 0.1 - after * s * 0.3 * rnd(m.seed, k), s * (0.12 + 0.3 * after) * (0.7 + 0.5 * rnd(m.seed, k + 3)), 16)
+  -- a shot's place: the k-th of n in flight (g 0..1 along), a little arc
+  local function shotPos(m, T, g, k)
+    local x1, y1, z1 = mouth(m)
+    local x2, y2, z2 = aimAt(T)
+    local d = sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2 + (z2 - z1) ^ 2)
+    local side = (rnd(m.seed, k) - 0.5) * d * 0.15 * sin(g * pi)
+    return x1 + (x2 - x1) * g + side, y1 + (y2 - y1) * g + d * 0.12 * sin(g * pi), z1 + (z2 - z1) * g
+  end
+  local SHOT_GAP = 0.09
+
+  -- the wall's depth now (wave): from in front of the boss to past the party
+  local function wallZ(m, t)
+    local pz = Sc and Sc.PAD.z or -9.2
+    local z0, z1 = pz + 2.5, 0.9
+    local imp = m.impact or m.len
+    if t <= imp then return z0 + (z1 - z0) * (t / imp) end
+    return z1 + (t - imp) / (m.len - imp) * 1.8
+  end
+  local function wallH(m) return (m.big and 3.3 or 2.5) end
+  local WALL = {
+    water = { deep = { 0.02, 0.17, 0.4 }, shallow = { 0.35, 0.75, 1 }, foam = { 0.95, 0.98, 1 } },
+    ground = { deep = { 0.3, 0.22, 0.14 }, shallow = { 0.72, 0.6, 0.42 }, foam = { 0.86, 0.8, 0.68 } },
+  }
+
+  local dropPos   -- (below: what falls, its place now)
+
+  -- each frame: what a move sets off (particles, its hits)
+  local function stepMove(m, now, dt)
+    local t = now - m.t0
+    local imp = m.impact or m.len
+    local kind, spec, tc = m.kind, m.spec, m.tc
+    local fx, fy, fz = mouth(m)
+    m.acc = m.acc + dt
+    local tick = m.acc >= 1 / 60
+    if tick then m.acc = 0 end
+    if kind == "beam" then
+      if t < imp then
+        if tick then emit("glow", fx, fy, fz, 0, 0, 0, 0.25, m.from.h * 0.12, tc[1], tc[2], tc[3], 0.6) end
+      elseif t < m.len * 0.8 then
+        for ti, T in ipairs(m.targets) do
+          landOnce(m, ti, T, 1, now)
+          local X, Y, Z = aimAt(T)
+          if tick then
+            burstOf("spark", 2, X, Y, Z, 5, 0.3, 0.35, 0.025 * min(3, T.h), tc[1], tc[2], tc[3], 1, T.foot)
+            if rnd(now, ti) > 0.7 then burstOf("smoke", 1, X, Y, Z, 1, 0.6, 0.8, 0.18 * min(3, T.h), 0.3, 0.28, 0.27, 0.4, T.foot) end
+          end
+        end
       end
-    end
-  end
-
-  local function drawMove(G, m, now)
-    local u = (now - m.t0) / m.len
-    if u < 0 or u > 1 then return end
-    local tc = TINT[m.type] or TINT.NORMAL
-    local f, imp = m.from, (m.impact or m.len) / m.len
-    local spec = m.spec
-    local scale = m.big and 1.5 or 1
-    if m.kind == "drop" and spec.shape == "slab" and #m.targets > 0 then
-      return Fx.drawSlab(G, m, u, imp, now)
-    end
-    for ti, t in ipairs(m.targets) do
-      local seed = m.seed + ti * 3.1
-      if m.kind == "beam" then
-        -- a stream from the user's middle to the target, growing to it, flickering, fading
-        local grow = min(1, u / imp)
-        local fade = u > 0.75 and (1 - (u - 0.75) / 0.25) or 1
-        local ex, ey = f.x + (t.x - f.x) * grow, f.y + (t.y - f.y) * grow
-        local wdt = t.s * 0.16 * scale * (0.85 + 0.15 * sin(now * 40 + ti))
-        G.setLineWidth(wdt * 2.2)
-        G.setColor(tc[1], tc[2], tc[3], 0.35 * fade)
-        G.line(f.x, f.y, ex, ey)
-        G.setLineWidth(wdt)
-        G.setColor(tc[1], tc[2], tc[3], 0.9 * fade)
-        G.line(f.x, f.y, ex, ey)
-        G.setLineWidth(wdt * 0.35)
-        G.setColor(1, 1, 1, 0.9 * fade)
-        G.line(f.x, f.y, ex, ey)
-        G.setLineWidth(1)
-      elseif m.kind == "shot" then
-        local n = spec.n or 1
+    elseif kind == "shot" then
+      local n = spec.n or 1
+      local fly = max(0.15, imp - (n - 1) * SHOT_GAP)
+      for ti, T in ipairs(m.targets) do
         for k = 1, n do
-          local delay = (k - 1) * 0.08
-          local g = (u - delay) / max(0.05, imp - delay * 0.5)
-          if g > 0 and g < 1 then
-            local x = f.x + (t.x - f.x) * g + (rnd(seed, k) - 0.5) * t.s * 0.4 * sin(g * pi)
-            local y = f.y + (t.y - f.y) * g - t.s * 0.5 * sin(g * pi)
-            local r = t.s * 0.1 * scale * (spec.big and 2 or 1) * (0.7 + 0.6 * g)
-            shapeAt(G, spec.shape or "ball", x, y, r, now * 8 + k, tc, 1)
+          local g = (t - (k - 1) * SHOT_GAP) / fly
+          if g >= 1 then landOnce(m, ti * 100 + k, T, 1 / sqrt(n), now)
+          elseif g > 0 and tick then
+            local x, y, z = shotPos(m, T, g, k)
+            local sh = spec.shape or "ball"
+            if sh == "rock" then emit("dust", x, y, z, 0, 0, 0, 0.5, 0.12, 0.55, 0.47, 0.38, 0.4)
+            elseif m.type == "FIRE" then emit("ember", x, y, z, 0, 0.3, 0, 0.5, 0.05, 1, 0.5, 0.1, 1)
+            elseif sh ~= "coin" and sh ~= "apple" then emit("glow", x, y, z, 0, 0, 0, 0.3, 0.25, tc[1], tc[2], tc[3], 0.5) end
           end
         end
-      elseif m.kind == "drop" then
-        -- a shadow growing under the target, then the thing falling onto it, a dust ring as it lands
-        local land = t.y + t.s * 0.45
-        local fall = min(1, u / imp)
-        local n = (spec.shape == "rock" or spec.shape == "coin") and (spec.n or 3) or 1
-        G.setColor(0, 0, 0, 0.35 * fall)
-        G.ellipse("fill", t.x, land, t.s * 0.6 * fall * scale, t.s * 0.14 * fall * scale, 24)
-        for k = 1, n do
-          local ox = n > 1 and (rnd(seed, k) - 0.5) * t.s * 0.9 or 0
-          local lag = n > 1 and rnd(seed, k + 7) * 0.12 or 0
-          local ff = min(1, max(0, (u - lag) / imp))
-          if u < imp + 0.15 then
-            local top = t.y - t.s * 2.6
-            local y = top + (t.y - top) * ff * ff
-            fallingThing(G, spec.shape or "rock", t.x + ox, y, t.s * scale, tc, 1)
-          end
-        end
-        if u >= imp then
-          local v = (u - imp) / (1 - imp)
-          G.setColor(0.7, 0.6, 0.45, 0.6 * (1 - v))
-          G.setLineWidth(max(1, t.s * 0.04))
-          G.ellipse("line", t.x, land, t.s * (0.4 + 1.1 * v) * scale, t.s * (0.1 + 0.25 * v) * scale, 32)
-          G.setLineWidth(1)
-          if spec.shape == "slab" and v < 0.6 then
-            fallingThing(G, "slab", t.x, t.y + t.s * 0.05, t.s * scale, tc, 1 - v / 0.6)
-          end
-        end
-      elseif m.kind == "slam" or m.kind == "multi" then
-        -- the strikes land on it: the striking shape closing in, then an impact star
-        local n = m.kind == "multi" and (spec.n or 3) or 1
-        for k = 1, n do
-          local at = m.kind == "multi" and ((k - 1) / n * 0.85 + 0.05) or imp
-          local v = (u - at) / 0.25
-          if v >= -0.6 and v <= 1 then
-            local jx = n > 1 and (rnd(seed, k) - 0.5) * t.s * 0.5 or 0
-            local jy = n > 1 and (rnd(seed, k + 3) - 0.5) * t.s * 0.4 or 0
-            if v < 0 then
-              local c = 1 + v / 0.6
-              fallingThing(G, spec.shape or "fist", t.x + jx + (f.x - t.x) * (1 - c) * 0.3,
-                t.y + jy + (f.y - t.y) * (1 - c) * 0.3, t.s * 0.55 * scale, tc, c * 0.8)
+      end
+    elseif kind == "drop" and m.key ~= "slab" then
+      local n = (spec.shape == "rock" or spec.shape == "coin") and (spec.n or 3) or 1
+      for ti, T in ipairs(m.targets) do
+        if t >= imp then
+          if not m.landed[ti] then
+            local foot = T.foot or 0
+            if spec.shape == "coin" then
+              burstOf("coin", 24, T.X, foot + 0.3, T.Z, 3.5, 0.6, 1.6, 0.09, 1, 1, 1, 1, foot)
             else
-              G.setColor(1, 1, 1, 0.9 * (1 - v))
-              star(G, t.x + jx, t.y + jy, t.s * (0.3 + 0.35 * v) * scale, t.s * 0.12 * scale, 8, 0.4)
+              burstOf("chunk", 10, T.X, foot + 0.3, T.Z, 4, 0.6, 1.5, 0.12 * min(2, T.h), 0.5, 0.41, 0.32, 1, foot)
+            end
+            burstOf("dust", 12, T.X, foot + 0.15, T.Z, 2.4, 0.15, 1.4, 0.32 * min(2, T.h), 0.62, 0.53, 0.42, 0.6, foot)
+            Fx.decal("crack", T.X, foot, T.Z, min(2.5, T.h) * 0.8, now)
+          end
+          landOnce(m, ti, T, 1, now)
+        elseif tick and t > imp * 0.3 then
+          -- a trail behind what falls
+          for k = 1, n do
+            local x, y, z = dropPos(m, T, t, k)
+            if spec.shape == "rock" or spec.shape == "slab" then emit("dust", x, y + 0.3, z, 0, 0.5, 0, 0.4, 0.15, 0.5, 0.45, 0.38, 0.3)
+            elseif spec.shape ~= "coin" and spec.shape ~= "apple" then
+              emit("glow", x, y + 0.2, z, 0, 0, 0, 0.3, 0.4, tc[1], tc[2], tc[3], 0.5)
             end
           end
         end
-      elseif m.kind == "slash" then
-        G.setLineWidth(max(2, t.s * 0.045 * scale))
-        for k = 0, 2 do
-          local g = min(1, max(0, (u - k * 0.06) / imp))
-          if g > 0 and u < 0.85 then
-            local x0, y0 = t.x - t.s * 0.5 + k * t.s * 0.22, t.y - t.s * 0.55
-            local x1, y1 = x0 + t.s * 0.5, y0 + t.s * 1.0
-            G.setColor(1, 1, 1, 0.95 * (1 - max(0, u - 0.5) / 0.35))
-            G.line(x0, y0, x0 + (x1 - x0) * g, y0 + (y1 - y0) * g)
-            G.setColor(tc[1], tc[2], tc[3], 0.5 * (1 - u))
-            G.line(x0 + 3, y0, x0 + 3 + (x1 - x0) * g, y0 + (y1 - y0) * g)
+      end
+    elseif m.key == "slab" then
+      if t >= imp and not m.slabLanded then
+        m.slabLanded = true
+        for ti, T in ipairs(m.targets) do land(m, T, 1, now, true) end
+        flash({ 0.9, 0.75, 0.55 }, 0.22, 0.25, now)
+        local b = m.box
+        if b then
+          for j = 1, 26 do
+            local xx = b.x0 + (b.x1 - b.x0) * rnd(m.seed, j)
+            emit("dust", xx, 0.2, b.z1 + 0.2, (rnd(m.seed, j + 3) - 0.5) * 6, 0.5 + rnd(m.seed, j + 5), 2 + 3 * rnd(m.seed, j + 7),
+              1.8, 0.45 + 0.3 * rnd(m.seed, j + 9), 0.6, 0.52, 0.42, 0.7)
+          end
+          for j = 1, 3 do
+            Fx.decal("crack", b.x0 + (b.x1 - b.x0) * (j - 0.5) / 3, 0, (b.z0 + b.z1) / 2 + 1, 2.2, now, 4)
+          end
+          local gr = emit("gring", (b.x0 + b.x1) / 2, 0.03, (b.z0 + b.z1) / 2, 0, 0, 0, 0.8, (b.x1 - b.x0) * 0.8, 0.9, 0.75, 0.55, 0.7)
+          if gr then gr.w = 1.2 end
+        end
+      end
+      if t >= imp + 0.38 and not m.shattered then
+        -- it breaks up
+        m.shattered = true
+        local b = m.box
+        if b then
+          for j = 1, 30 do
+            local xx = b.x0 + (b.x1 - b.x0) * rnd(m.seed, j + 40)
+            local zz = b.z0 + (b.z1 - b.z0) * rnd(m.seed, j + 50)
+            local p = emit("chunk", xx, b.h * rnd(m.seed, j + 60), zz, (rnd(m.seed, j + 70) - 0.5) * 5, 2 + 4 * rnd(m.seed, j + 80),
+              1 + 3 * rnd(m.seed, j + 90), 1.6, 0.18 + 0.25 * rnd(m.seed, j + 100), 0.5, 0.42, 0.33, 1)
+            if p then p.floor = 0 end
+          end
+          for j = 1, 14 do
+            emit("dust", b.x0 + (b.x1 - b.x0) * rnd(m.seed, j + 120), b.h * 0.5, b.z1, (rnd(m.seed, j + 130) - 0.5) * 3, 1, 1.5,
+              2, 0.6, 0.62, 0.55, 0.45, 0.6)
           end
         end
-        G.setLineWidth(1)
-      elseif m.kind == "bite" then
-        -- fangs: an upper and a lower row closing on it
-        local c = min(1, u / imp)
-        local gap = t.s * 0.55 * (1 - c) * scale
-        local wdt = t.s * 0.9 * scale
-        local a = u < 0.8 and 1 or (1 - (u - 0.8) / 0.2)
-        G.setColor(0.98, 0.98, 1, a)
-        for k = 0, 3 do
-          local x0 = t.x - wdt / 2 + k * wdt / 4
-          G.polygon("fill", x0, t.y - gap - t.s * 0.25, x0 + wdt / 4, t.y - gap - t.s * 0.25, x0 + wdt / 8, t.y - gap)
-          G.polygon("fill", x0, t.y + gap + t.s * 0.25, x0 + wdt / 4, t.y + gap + t.s * 0.25, x0 + wdt / 8, t.y + gap)
-        end
-      elseif m.kind == "bolt" then
-        local flick = (floor(u * 16) % 2 == 0) and 1 or 0.45
-        local a = (u < 0.75 and 1 or (1 - (u - 0.75) / 0.25)) * flick
-        G.setColor(1, 1, 0.6, 0.25 * a)
-        G.rectangle("fill", t.x - t.s * 0.25 * scale, -10, t.s * 0.5 * scale, t.y + 10)
-        G.setLineWidth(max(2, t.s * 0.05 * scale))
-        G.setColor(1, 0.95, 0.35, a)
-        bolt(G, t.x + (rnd(seed, 1) - 0.5) * t.s * 0.3, -10, t.x, t.y, seed + floor(u * 8), t.s * 0.45)
-        G.setLineWidth(max(1, t.s * 0.02 * scale))
-        G.setColor(1, 1, 1, a)
-        bolt(G, t.x + (rnd(seed, 1) - 0.5) * t.s * 0.3, -10, t.x, t.y, seed + floor(u * 8), t.s * 0.45)
-        G.setLineWidth(1)
-      elseif m.kind == "rings" then
-        G.setLineWidth(max(1.5, t.s * 0.035 * scale))
-        for k = 0, 3 do
-          local g = u * 1.3 - k * 0.12
-          if g > 0 and g < 1 then
-            local x, y = f.x + (t.x - f.x) * g, f.y + (t.y - f.y) * g
-            local r = t.s * (0.2 + 0.4 * g) * scale
-            if spec.shape == "eye" then
-              G.setColor(1, 0.3, 0.3, 0.9 * (1 - g))
-              G.ellipse("line", x, y, r, r * 0.45, 24)
-              G.circle("fill", x, y, r * 0.18, 12)
-            else
-              G.setColor(tc[1], tc[2], tc[3], 0.9 * (1 - g))
-              G.ellipse("line", x, y, r, r * 0.8, 28)
-            end
+      end
+    elseif kind == "slam" or kind == "multi" then
+      local n = kind == "multi" and (spec.n or 3) or 1
+      for k = 1, n do
+        local at = kind == "multi" and ((k - 1) / n * m.len * 0.85 + m.len * 0.05 + 0.1) or imp
+        for ti, T in ipairs(m.targets) do
+          if t >= at - 0.14 and not m.landed["l" .. ti .. k] then
+            m.landed["l" .. ti .. k] = true
+            local X, Y, Z = aimAt(T)
+            spot("lines", X, Y, Z, min(3, T.h), now, 0.16, tc, 0.5)
           end
+          if t >= at then landOnce(m, ti * 100 + k, T, n > 1 and 0.6 or 1, now) end
         end
-        G.setLineWidth(1)
-      elseif m.kind == "powder" then
-        for k = 1, 16 do
-          local g = min(1, u / imp + rnd(seed, k) * 0.2)
-          local x = f.x + (t.x - f.x) * g + (rnd(seed, k + 5) - 0.5) * t.s * (0.4 + 0.8 * g)
-          local y = f.y + (t.y - f.y) * g + (rnd(seed, k + 9) - 0.5) * t.s * 0.6 * g + sin(now * 3 + k) * t.s * 0.05
-          local a = 0.75 * (u < 0.7 and 1 or (1 - (u - 0.7) / 0.3))
-          if spec.shape == "heart" then
-            G.setColor(1, 0.5, 0.7, a)
-            G.circle("fill", x - t.s * 0.03, y, t.s * 0.035, 10)
-            G.circle("fill", x + t.s * 0.03, y, t.s * 0.035, 10)
-            G.polygon("fill", x - t.s * 0.065, y + t.s * 0.01, x + t.s * 0.065, y + t.s * 0.01, x, y + t.s * 0.08)
+      end
+    elseif kind == "slash" or kind == "bite" or kind == "rings" or kind == "bolt" or kind == "powder" or kind == "spikes" then
+      for ti, T in ipairs(m.targets) do
+        if kind == "spikes" and t >= imp * 0.6 and not m.landed["e" .. ti] then
+          m.landed["e" .. ti] = true
+          local foot = T.foot or 0
+          burstOf("debris", 12, T.X, foot + 0.1, T.Z, 3.5, 0.75, 1.2, 0.07 * min(2.5, T.h), 0.5, 0.42, 0.32, 1, foot)
+          burstOf("dust", 10, T.X, foot + 0.1, T.Z, 1.8, 0.3, 1.2, 0.28 * min(2.5, T.h), 0.6, 0.52, 0.42, 0.55, foot)
+          Fx.decal("crack", T.X, foot, T.Z, min(2.5, T.h) * 0.75, now)
+        end
+        if kind == "powder" and t < imp and tick then
+          local g = t / imp
+          local X, Y, Z = aimAt(T)
+          local x, y, z = fx + (X - fx) * g, fy + (Y - fy) * g, fz + (Z - fz) * g
+          local sh = spec.shape
+          if sh == "heart" then
+            emit("heart", x, y, z, (rnd(now, ti) - 0.5), 0.3, 0.5, 1.0, 0.07, 1, 0.45, 0.65, 0.95)
           else
-            local c
-            if spec.shape == "sand" then c = { 0.8, 0.68, 0.45 }
-            elseif spec.shape == "smoke" then c = { 0.45, 0.45, 0.5 }
-            elseif spec.shape == "gas" then c = { 0.6, 0.35, 0.75 }
-            else c = { 0.85, 0.85, 0.6 } end
-            G.setColor(c[1], c[2], c[3], a)
-            G.circle("fill", x, y, t.s * (0.05 + 0.06 * rnd(seed, k + 13)) * scale, 12)
+            local c = sh == "sand" and { 0.8, 0.68, 0.45 } or sh == "smoke" and { 0.32, 0.32, 0.36 }
+              or sh == "gas" and { 0.6, 0.3, 0.75 } or { 0.85, 0.85, 0.55 }
+            emit("dust", x, y, z, (rnd(now, ti) - 0.5) * 1.5, (rnd(now, ti + 2) - 0.5), 1, 1.3,
+              0.25 + 0.25 * rnd(now, ti + 3), c[1], c[2], c[3], 0.6)
+            if sh == "spore" or not sh then emit("twinkle", x, y, z, 0, 0.2, 0.4, 0.8, 0.03, 0.9, 1, 0.5, 0.7) end
           end
         end
-      elseif m.kind == "drain" then
-        -- a hit, then orbs drawn from the target back into the user
-        for k = 1, 8 do
-          local g = (u - 0.3 - k * 0.05) / 0.55
-          if g > 0 and g < 1 then
-            local x = t.x + (f.x - t.x) * g + sin(g * pi * 2 + k) * t.s * 0.2
-            local y = t.y + (f.y - t.y) * g - sin(g * pi) * t.s * 0.4
-            G.setColor(0.5, 1, 0.5, 0.9 * (1 - g * 0.5))
-            G.circle("fill", x, y, t.s * 0.05, 12)
-          end
+        if kind == "bolt" and t >= imp and not m.landed[ti] then
+          emit("light", T.X, T.Y + 2, T.Z, 0, 0, 0, 0.25, 9, 1, 0.95, 0.65, 0.5)
+          flash({ 1, 1, 0.85 }, 0.2, 0.1, now)
+          Fx.decal("scorch", T.X, T.foot or 0, T.Z, min(2.5, T.h) * 0.5, now)
         end
-      elseif m.kind == "spikes" then
-        local base = t.y + t.s * 0.45
-        local g = min(1, max(0, (u - imp * 0.6) / (imp * 0.4)))
-        local a = u < 0.8 and 1 or (1 - (u - 0.8) / 0.2)
-        for k = -3, 3 do
-          local x = t.x + k * t.s * 0.16
-          local hgt = t.s * (0.5 + 0.35 * rnd(seed, k + 4)) * g * scale
-          if spec.shape == "root" then G.setColor(0.45, 0.32, 0.18, a)
-          elseif spec.shape == "steel" then G.setColor(0.75, 0.8, 0.88, a)
-          else G.setColor(0.58, 0.46, 0.32, a) end
-          G.polygon("fill", x - t.s * 0.07, base, x + t.s * 0.07, base, x + (rnd(seed, k) - 0.5) * t.s * 0.1, base - hgt)
+        if t >= imp then landOnce(m, ti, T, 1, now) end
+      end
+    elseif kind == "drain" then
+      for ti, T in ipairs(m.targets) do
+        if t >= imp then
+          if not m.landed[ti] then
+            local X, Y, Z = aimAt(T)
+            for j = 1, 10 do
+              local p = emit("glow", X, Y, Z, (rnd(m.seed, j) - 0.5) * 4, 1 + 2 * rnd(m.seed, j + 1), (rnd(m.seed, j + 2) - 0.5) * 3,
+                2, 0.22, 0.45, 1, 0.45, 0.9)
+              if p then p.home = m.from; p.grow = 0 end
+            end
+          end
+          landOnce(m, ti, T, 1, now)
         end
       end
-    end
-    -- round the user alone: an aura rising (a stat raised); a wave over the whole party
-    if m.kind == "self" then
-      local a = sin(u * pi)
-      G.setColor(tc[1], tc[2], tc[3], 0.3 * a)
-      G.ellipse("fill", f.x, f.y, f.s * 0.6, f.s * 0.7, 32)
-      G.setLineWidth(max(1.5, f.s * 0.02))
-      for k = 1, 6 do
-        local x = f.x + (k - 3.5) * f.s * 0.15
-        local y = f.y + f.s * 0.4 - ((u * 1.5 + k * 0.17) % 1) * f.s
-        G.setColor(1, 1, 1, 0.8 * a)
-        G.line(x, y, x, y - f.s * 0.12)
-        G.line(x - f.s * 0.04, y - f.s * 0.08, x, y - f.s * 0.12, x + f.s * 0.04, y - f.s * 0.08)
+      if t > m.len * 0.7 and not m.healed then
+        m.healed = true
+        burstOf("twinkle", 12, m.from.X, m.from.Y, m.from.Z + 0.3, 1.2, 0.6, 1, 0.05 * min(3, m.from.h), 0.5, 1, 0.5, 1, m.from.foot)
+        emit("glow", m.from.X, m.from.Y, m.from.Z + 0.3, 0, 0, 0, 0.5, m.from.h * 0.6, 0.4, 1, 0.4, 0.4)
       end
-      G.setLineWidth(1)
-    elseif m.kind == "wave" then
-      local W, H = G.getWidth(), G.getHeight()
-      local a = u < 0.8 and 1 or (1 - (u - 0.8) / 0.2)
-      if spec.shape == "sound" or spec.shape == "light" then
-        G.setLineWidth(max(2, H * 0.006))
-        for k = 0, 3 do
-          local g = u * 1.4 - k * 0.15
-          if g > 0 and g < 1 then
-            G.setColor(tc[1], tc[2], tc[3], 0.8 * (1 - g) * a)
-            G.ellipse("line", f.x, f.y, W * 0.9 * g, H * 0.6 * g, 48)
+    elseif kind == "self" then
+      local f = m.from
+      if not m.started then
+        m.started = true
+        local gr = emit("gring", f.X, (f.foot or 0) + 0.02, f.Z, 0, 0, 0, 0.7, f.h * 0.9, tc[1], tc[2], tc[3], 0.8)
+        if gr then gr.w = f.h * 0.2 end
+      end
+      if tick and t < m.len * 0.75 then
+        seedN = seedN + 1
+        local th = rnd(seedN, 1) * 2 * pi
+        local r = f.h * 0.35
+        emit("glow", f.X + cos(th) * r, (f.foot or 0) + 0.05, f.Z + sin(th) * r * 0.6, 0, f.h * 1.6, 0, 0.6, f.h * 0.07,
+          tc[1], tc[2], tc[3], 0.8)
+        if rnd(seedN, 2) > 0.6 then
+          emit("twinkle", f.X + cos(th) * r * 0.8, f.Y, f.Z + 0.3, 0, f.h * 0.8, 0, 0.6, f.h * 0.03, 1, 1, 1, 0.8)
+        end
+      end
+    elseif kind == "wave" then
+      local sh = spec.shape
+      if sh == "water" or sh == "ground" or sh == "fire" or not sh then
+        local z = wallZ(m, t)
+        -- spray along the crest
+        if tick and t < m.len * 0.85 then
+          local H = wallH(m)
+          for j = 1, 3 do
+            seedN = seedN + 1
+            local x = (rnd(seedN, 1) - 0.5) * 16
+            if sh == "fire" then emit("ember", x, H * (0.2 + 0.7 * rnd(seedN, 4)), z, (rnd(seedN, 5) - 0.5) * 1.5, 1 + 2 * rnd(seedN, 6), 1, 0.9, 0.05, 1, 0.5, 0.1, 1)
+            elseif sh == "ground" then emit("dust", x, H, z + 0.2, 0, 0.6, 1.5, 1, 0.45, 0.62, 0.5, 0.36, 0.5)
+            else emit("drop", x, H, z + 0.1, (rnd(seedN, 2) - 0.5), 2 + rnd(seedN, 3) * 2, 2.5, 0.8, 0.05, 0.6, 0.85, 1, 0.9) end
           end
         end
-        G.setLineWidth(1)
+        for ti, T in ipairs(m.targets) do
+          if z >= T.Z then
+            if not m.landed[ti] and sh ~= "fire" and sh ~= "ground" then
+              burstOf("drop", 30, T.X, 1.2, T.Z + 0.3, 5, 0.75, 1, 0.06, 0.6, 0.85, 1, 0.9, 0)
+            end
+            landOnce(m, ti, T, 1, now)
+          end
+        end
+      elseif sh == "wind" then
+        if tick and t < m.len * 0.8 then
+          for j = 1, 4 do
+            seedN = seedN + 1
+            local pz = Sc and Sc.PAD.z or -9.2
+            local z = pz + 2 + rnd(seedN, 1) * 9
+            emit("streak", -9, 0.2 + rnd(seedN, 2) * 3, z, 18 + rnd(seedN, 3) * 8, (rnd(seedN, 4) - 0.5) * 2, 1, 1.1, 0.02,
+              0.92, 0.96, 1, 0.7)
+          end
+          if rnd(now, 5) > 0.6 then emit("dust", (rnd(now, 6) - 0.5) * 8, 0.2, -2 + rnd(now, 7) * 2, 6, 0.3, 0.5, 1, 0.4, 0.8, 0.78, 0.72, 0.35) end
+        end
+        for ti, T in ipairs(m.targets) do if t >= imp then landOnce(m, ti, T, 1, now) end end
       else
-        local c
-        if spec.shape == "fire" then c = { 1, 0.45, 0.1 }
-        elseif spec.shape == "ground" then c = { 0.6, 0.45, 0.3 }
-        elseif spec.shape == "wind" then c = { 0.85, 0.92, 1 }
-        else c = { 0.3, 0.6, 1 } end
-        local ylead = H * (0.3 + 0.8 * min(1, u / imp))
-        local depth = H * 0.22
-        if spec.shape == "fire" and Fx.fireRect(G, 0, ylead - depth * 2.6, W, depth * 2.8, now, m.seed, a) then
-          -- (a wall of real fire rolling toward the camera)
-        elseif spec.shape == "fire" then
-          -- a wall of flames rolling toward the camera, a glow behind it
-          G.setColor(1, 0.4, 0.1, 0.3 * a)
-          G.rectangle("fill", 0, ylead - depth * 1.4, W, depth * 1.4)
-          for i = 0, 30 do
-            local x = (i + 0.5) / 30 * W
-            local fh = depth * (1 + 0.45 * sin(now * 9 + i * 1.9))
-            G.setColor(1, 0.35 + 0.2 * sin(i), 0.08, 0.8 * a)
-            flame(G, x, ylead, W / 50, fh)
-            G.setColor(1, 0.85, 0.35, 0.8 * a)
-            flame(G, x, ylead, W / 110, fh * 0.55)
-          end
-        elseif spec.shape == "wind" then
-          G.setLineWidth(max(2, H * 0.005))
-          for i = 1, 26 do
-            local y = ylead - depth * (rnd(m.seed, i))
-            local x0 = ((rnd(m.seed, i + 40) + u * 1.5) % 1.2 - 0.2) * W
-            G.setColor(0.9, 0.95, 1, 0.7 * a)
-            G.line(x0, y, x0 + W * 0.18, y + sin(i) * H * 0.01)
-          end
-        else
-          -- a body of water (or a front of dust) with a curling crest and foam
-          local c
-          if spec.shape == "ground" then c = { 0.55, 0.42, 0.28 } else c = { 0.25, 0.55, 1 } end
-          local n = 40
-          for i = 0, n - 1 do
-            local x0, x1 = i / n * W, (i + 1) / n * W
-            local y0 = ylead + sin(i * 0.45 + now * 7) * H * 0.025
-            local y1 = ylead + sin((i + 1) * 0.45 + now * 7) * H * 0.025
-            G.setColor(c[1], c[2], c[3], 0.65 * a)
-            G.polygon("fill", x0, y0 - depth, x1, y1 - depth, x1, y1, x0, y0)
-            G.setColor(c[1] * 0.7, c[2] * 0.7, c[3] * 0.8, 0.5 * a)
-            G.polygon("fill", x0, y0 - depth * 0.35, x1, y1 - depth * 0.35, x1, y1, x0, y0)
-          end
-          for i = 1, 24 do
-            local x = rnd(m.seed, i) * W
-            local y = ylead - depth + sin(now * 6 + i) * H * 0.02
-            G.setColor(1, 1, 1, 0.7 * a)
-            G.circle("fill", x, y, H * (0.008 + 0.01 * rnd(m.seed, i + 9)), 10)
-          end
-          G.setColor(1, 1, 1, 0.75 * a)
-          G.setLineWidth(max(2, H * 0.006))
-          local crest = {}
-          for i = 0, n do crest[#crest + 1] = i / n * W; crest[#crest + 1] = ylead - depth + sin(i * 0.45 + now * 7) * H * 0.025 end
-          G.line(crest)
+        -- sound, light: rings rolling out of the user
+        if t < imp and (m.lastRing or -1) + 0.12 <= t then
+          m.lastRing = t
+          local rg = emit("ring", fx, fy, fz, 0, 0, 0, 0.7, 7, tc[1], tc[2], tc[3], sh == "light" and 0.45 or 0.5)
+          if rg then rg.w = 0.35; rg.flat = 0.75 end
+          local gr = emit("gring", m.from.X, (m.from.foot or 0) + 0.03, m.from.Z, 0, 0, 0, 0.9, 11, tc[1], tc[2], tc[3], 0.5)
+          if gr then gr.w = 0.7 end
         end
-        G.setLineWidth(1)
+        if sh == "light" and t >= imp and not m.lit then
+          m.lit = true
+          emit("light", fx, fy, fz, 0, 0, 0, 0.5, 14, 1, 0.97, 0.85, 0.35)
+          flash({ 1, 1, 0.92 }, 0.3, 0.25, now)
+        end
+        for ti, T in ipairs(m.targets) do if t >= imp then landOnce(m, ti, T, 1, now) end end
       end
     end
   end
 
-  -- each move's hits at its impact (from Fx.update)
-  local function landMoves(now)
-    for i = #moves, 1, -1 do
-      local m = moves[i]
-      if m.impact and m.hits == 0 and now - m.t0 >= m.impact then
-        m.hits = 1
-        for _, t in ipairs(m.targets) do Fx.hit(m.type, t.x, t.y, t.s, m.big, now) end
+  -- ------- drawing a move (in a layer)
+
+  local function drawBeam(G2, m, t, now, layer)
+    local imp = m.impact or m.len
+    for _, T in ipairs(m.targets) do
+      if (T.boss and "mid" or "front") == layer then
+        local x1, y1, z1 = mouth(m)
+        local x2, y2, z2 = aimAt(T)
+        local grow = smooth(0, 1, t / imp)
+        local thin = t > m.len * 0.7 and max(0, 1 - (t - m.len * 0.7) / (m.len * 0.3)) or 1
+        local ex, ey, ez = x1 + (x2 - x1) * grow, y1 + (y2 - y1) * grow, z1 + (z2 - z1) * grow
+        local a1, b1, k1 = P(x1, y1, z1)
+        local a2, b2, k2 = P(ex, ey, ez)
+        if a1 and a2 then
+          local W = (m.from.boss and 0.55 or 0.22) * (m.big and 1.6 or 1) * thin * (1 + 0.06 * sin(now * 45))
+          G2.setBlendMode("add")
+          local sh = shader("beam")
+          if sh and stripReady() then
+            sh:send("time", now)
+            sh:send("tint", m.tc)
+            G2.setShader(sh)
+            G2.setColor(1, 1, 1, 1)
+            band(G2, a1, b1, W * k1 * 2.4, a2, b2, W * k2 * 2.4, 1, 1, 1, 0.35)
+            band(G2, a1, b1, W * k1, a2, b2, W * k2, 1, 1, 1, 1)
+            G2.setShader()
+          else
+            G2.setLineWidth(max(2, W * k2))
+            G2.setColor(m.tc[1], m.tc[2], m.tc[3], 0.7)
+            G2.line(a1, b1, a2, b2)
+            G2.setLineWidth(max(1, W * k2 * 0.35))
+            G2.setColor(1, 1, 1, 1)
+            G2.line(a1, b1, a2, b2)
+            G2.setLineWidth(1)
+          end
+          orbAt(G2, a1, b1, W * k1 * 1.6 * (0.9 + 0.1 * sin(now * 30)), m.tc, thin, now)
+          if grow >= 1 then orbAt(G2, a2, b2, W * k2 * 2.6 * (0.85 + 0.15 * sin(now * 37)), m.tc, thin, now) end
+          G2.setBlendMode("alpha")
+        end
       end
-      if now - m.t0 > m.len then table.remove(moves, i) end
     end
   end
-  Fx.landMoves = landMoves
-  function Fx.drawMoves(G, now)
-    G.push("all")
-    for _, m in ipairs(moves) do drawMove(G, m, now) end
-    G.pop()
+
+  local function drawShots(G2, m, t, now, layer)
+    local spec = m.spec
+    local n = spec.n or 1
+    local imp = m.impact or m.len
+    local fly = max(0.15, imp - (n - 1) * SHOT_GAP)
+    local sh = spec.shape or "ball"
+    for _, T in ipairs(m.targets) do
+      for k = 1, n do
+        local g = (t - (k - 1) * SHOT_GAP) / fly
+        if g > 0 and g < 1 then
+          local X, Y, Z = shotPos(m, T, g, k)
+          if layerOf(Z) == layer then
+            local x, y, kk = P(X, Y, Z)
+            if x then
+              local R = (m.from.boss and 0.4 or 0.18) * (spec.big and 1.8 or 1) * (m.big and 1.4 or 1)
+              local r = R * kk
+              if sh == "rock" then
+                for j = 0, 5 do
+                  local th = now * 6 + k + j * pi / 3
+                  local rr = r * (0.7 + 0.4 * rnd(m.seed + k, j))
+                  chunkPts[j * 2 + 1], chunkPts[j * 2 + 2] = x + cos(th) * rr, y + sin(th) * rr
+                end
+                for j = 13, #chunkPts do chunkPts[j] = nil end
+                G2.setColor(0.5, 0.41, 0.32, 1)
+                rockPoly(G2, chunkPts, max(2, r * 0.5))
+              elseif sh == "apple" then
+                G2.setColor(0.55, 0.08, 0.08, 1)
+                G2.circle("fill", x, y, r, 24)
+                G2.setColor(0.85, 0.2, 0.15, 1)
+                G2.circle("fill", x - r * 0.15, y - r * 0.15, r * 0.8, 24)
+                G2.setColor(1, 0.9, 0.85, 0.8)
+                G2.circle("fill", x - r * 0.4, y - r * 0.4, r * 0.18, 10)
+                G2.setColor(0.3, 0.6, 0.2, 1)
+                G2.ellipse("fill", x + r * 0.3, y - r * 1.05, r * 0.35, r * 0.14, 10)
+              elseif sh == "coin" then
+                local sx = abs(cos(now * 12 + k))
+                G2.setColor(0.75, 0.55, 0.12, 1)
+                G2.ellipse("fill", x, y, max(1, r * sx), r, 16)
+                G2.setColor(1, 0.85, 0.3, 1)
+                G2.ellipse("fill", x - r * 0.1 * sx, y - r * 0.08, max(0.8, r * 0.75 * sx), r * 0.78, 16)
+              elseif sh == "leaf" then
+                G2.push()
+                G2.translate(x, y)
+                G2.rotate(now * 10 + k)
+                G2.setColor(0.25, 0.6, 0.2, 1)
+                G2.ellipse("fill", 0, 0, r * 1.3, r * 0.45, 14)
+                G2.setColor(0.5, 0.9, 0.35, 1)
+                G2.ellipse("fill", -r * 0.15, -r * 0.08, r * 0.9, r * 0.2, 14)
+                G2.pop()
+              elseif sh == "blade" then
+                -- a crescent of air
+                G2.setBlendMode("add")
+                G2.push()
+                G2.translate(x, y)
+                G2.rotate(now * 3 + k)
+                G2.setLineWidth(max(1, r * 0.35))
+                G2.setColor(0.85, 0.95, 1, 0.45)
+                G2.arc("line", "open", 0, 0, r * 1.5, -1.1, 1.1, 18)
+                G2.setLineWidth(max(1, r * 0.12))
+                G2.setColor(1, 1, 1, 0.95)
+                G2.arc("line", "open", 0, 0, r * 1.5, -0.9, 0.9, 18)
+                G2.pop()
+                G2.setBlendMode("alpha")
+              else
+                G2.setBlendMode("add")
+                orbAt(G2, x, y, r * 1.6, m.tc, 1, now + k)
+                if sh == "star" or sh == "shuriken" then
+                  G2.push()
+                  G2.translate(x, y)
+                  G2.rotate(now * 9 + k)
+                  G2.setColor(1, 1, 1, 0.9)
+                  for j = 0, (sh == "star" and 4 or 3) do
+                    G2.rotate(2 * pi / (sh == "star" and 5 or 4))
+                    G2.ellipse("fill", r * 0.6, 0, r * 0.7, r * 0.12, 10)
+                  end
+                  G2.pop()
+                end
+                G2.setBlendMode("alpha")
+              end
+            end
+          end
+        end
+      end
+    end
   end
+
+  -- what falls (drop): its place now
+  function dropPos(m, T, t, k)
+    local spec = m.spec
+    local n = (spec.shape == "rock" or spec.shape == "coin") and (spec.n or 3) or 1
+    local imp = m.impact or m.len
+    local lag = n > 1 and rnd(m.seed, k + 7) * 0.12 or 0
+    local ff = min(1, max(0, (t - lag) / (imp - lag * 0.5)))
+    local ox = n > 1 and (rnd(m.seed, k) - 0.5) * min(3, T.h) * 0.9 or 0
+    local oz = n > 1 and (rnd(m.seed, k + 3) - 0.5) * 0.6 or 0
+    local foot = T.foot or 0
+    local top = foot + 9
+    local land = T.boss and T.Y or foot + 0.35
+    return T.X + ox, top + (land - top) * ff * ff, T.Z + oz + 0.3, ff
+  end
+  local function drawDrops(G2, m, t, now, layer)
+    local spec = m.spec
+    local n = (spec.shape == "rock" or spec.shape == "coin") and (spec.n or 3) or 1
+    local imp = m.impact or m.len
+    for _, T in ipairs(m.targets) do
+      local foot = T.foot or 0
+      if layer == "back" and t < imp + 0.1 then
+        -- its shadow, gathering
+        local f = min(1, t / imp)
+        groundPatch(G2, T.X, foot + 0.01, T.Z, min(3, T.h) * 0.5 * (0.4 + 0.6 * f) * (m.big and 1.4 or 1), m.seed, 0, 0, 0, 0.45 * f)
+      end
+      if t < imp then
+        for k = 1, n do
+          local X, Y, Z = dropPos(m, T, t, k)
+          if layerOf(Z) == layer then
+            local x, y, kk = P(X, Y, Z)
+            if x then
+              local R = min(3, T.h) * (n > 1 and 0.22 or 0.42) * (m.big and 1.4 or 1)
+              local r = R * kk
+              local sh = spec.shape
+              if sh == "rock" or sh == "slab" then
+                for j = 0, 6 do
+                  local th = now * 2 + j * 2 * pi / 7
+                  local rr = r * (0.7 + 0.45 * rnd(m.seed + k, j))
+                  chunkPts[j * 2 + 1], chunkPts[j * 2 + 2] = x + cos(th) * rr, y + sin(th) * rr * 0.9
+                end
+                for j = 15, #chunkPts do chunkPts[j] = nil end
+                G2.setColor(0.48, 0.4, 0.31, 1)
+                rockPoly(G2, chunkPts, max(2, r * 0.35))
+                G2.setColor(0.7, 0.6, 0.48, 0.6)
+                G2.polygon("fill", chunkPts[1], chunkPts[2], chunkPts[3], chunkPts[4], chunkPts[5], chunkPts[6], x, y)
+              elseif sh == "coin" then
+                local sx = abs(cos(now * 12 + k))
+                G2.setColor(0.75, 0.55, 0.12, 1)
+                G2.ellipse("fill", x, y, max(1, r * 0.6 * sx), r * 0.6, 16)
+                G2.setColor(1, 0.85, 0.3, 1)
+                G2.ellipse("fill", x, y - r * 0.05, max(0.8, r * 0.45 * sx), r * 0.45, 16)
+              elseif sh == "apple" then
+                G2.setColor(0.55, 0.08, 0.08, 1)
+                G2.circle("fill", x, y, r, 28)
+                G2.setColor(0.85, 0.2, 0.15, 1)
+                G2.circle("fill", x - r * 0.15, y - r * 0.15, r * 0.8, 28)
+                G2.setColor(1, 0.9, 0.85, 0.8)
+                G2.circle("fill", x - r * 0.4, y - r * 0.4, r * 0.16, 10)
+              else
+                -- a fist, a foot, a body coming down: a falling star of the type's energy, its streak above it
+                G2.setBlendMode("add")
+                local x0, y0 = P(X, Y + 2.5, Z)
+                if x0 then band(G2, x0, y0, r * 0.3, x, y, r * 1.6, m.tc[1], m.tc[2], m.tc[3], 0.35) end
+                orbAt(G2, x, y, r * 1.5, m.tc, 1, now)
+                G2.setBlendMode("alpha")
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- the slab: one great block of rock over everyone it falls on
+  local slabPts = {}
+  local function face(G2, pts, cr, cg, cb, a, scale)
+    G2.setColor(cr, cg, cb, a)
+    rockPoly(G2, pts, scale)
+  end
+  local function drawSlab(G2, m, t, now, layer)
+    local imp = m.impact or m.len
+    if not m.box then
+      local x0, x1, zs, hmax = math.huge, -math.huge, 0, 0
+      for _, T in ipairs(m.targets) do
+        x0, x1 = min(x0, T.X), max(x1, T.X)
+        zs, hmax = zs + T.Z, max(hmax, T.h)
+      end
+      if #m.targets == 0 then return end
+      local cz = zs / #m.targets
+      local pad = 1.2 + hmax * 0.5
+      m.box = { x0 = x0 - pad, x1 = x1 + pad, z0 = cz - 1.4, z1 = cz + 1.1, h = (m.big and 2.1 or 1.7) }
+    end
+    local b = m.box
+    if layer == "back" and t < imp then
+      -- its shadow spreading
+      local f = min(1, t / imp)
+      local a = 0.55 * f * f
+      local cx, cz = (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2
+      local hw, hd = (b.x1 - b.x0) / 2 * (0.5 + 0.5 * f), (b.z1 - b.z0) / 2 * (0.5 + 0.5 * f)
+      local p1x, p1y = P(cx - hw, 0.01, cz - hd)
+      local p2x, p2y = P(cx + hw, 0.01, cz - hd)
+      local p3x, p3y = P(cx + hw, 0.01, cz + hd)
+      local p4x, p4y = P(cx - hw, 0.01, cz + hd)
+      if p1x and p2x and p3x and p4x then
+        G2.setColor(0, 0, 0, a)
+        G2.polygon("fill", p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y)
+      end
+    end
+    if layer ~= "front" or m.shattered then return end
+    -- its height: falling (faster as it comes), then a jolt as it bites into the ground
+    local top = 11
+    local yb
+    if t < imp then
+      local f = t / imp
+      yb = top * (1 - f * f * f)
+    else
+      local v = t - imp
+      yb = -0.12 * min(1, v / 0.08) + 0.04 * sin(v * 40) * max(0, 1 - v / 0.3)
+    end
+    local x0, x1, z0, z1, y0, y1 = b.x0, b.x1, b.z0, b.z1, yb, yb + b.h
+    local eye = Sc and Sc.eye or { 0, 1, 6 }
+    local _, _, kk = P((x0 + x1) / 2, y1, z1)
+    local scale = max(4, (kk or 40) * 0.55)
+    local function pt(i, X, Y, Z)
+      local x, y = P(X, Y, Z)
+      if not x then return false end
+      slabPts[i * 2 - 1], slabPts[i * 2] = x, y
+      return true
+    end
+    for i = 9, #slabPts do slabPts[i] = nil end
+    local RC = { 0.4, 0.34, 0.28 }
+    -- (only the faces turned to the eye)
+    if eye[2] > y1 and pt(1, x0, y1, z0) and pt(2, x1, y1, z0) and pt(3, x1, y1, z1) and pt(4, x0, y1, z1) then
+      face(G2, slabPts, RC[1] * 1.15, RC[2] * 1.15, RC[3] * 1.15, 1, scale)
+    end
+    if eye[1] > x1 and pt(1, x1, y1, z1) and pt(2, x1, y1, z0) and pt(3, x1, y0, z0) and pt(4, x1, y0, z1) then
+      face(G2, slabPts, RC[1] * 0.55, RC[2] * 0.55, RC[3] * 0.55, 1, scale)
+    end
+    if eye[1] < x0 and pt(1, x0, y1, z0) and pt(2, x0, y1, z1) and pt(3, x0, y0, z1) and pt(4, x0, y0, z0) then
+      face(G2, slabPts, RC[1] * 0.55, RC[2] * 0.55, RC[3] * 0.55, 1, scale)
+    end
+    if pt(1, x0, y1, z1) and pt(2, x1, y1, z1) and pt(3, x1, y0, z1) and pt(4, x0, y0, z1) then
+      face(G2, slabPts, RC[1] * 0.8, RC[2] * 0.8, RC[3] * 0.8, 1, scale)
+      -- its top edge catching the light, and cracks across its face (opening once it has landed)
+      G2.setColor(0.85, 0.78, 0.66, 0.7)
+      G2.setLineWidth(max(1, scale * 0.15))
+      G2.line(slabPts[1], slabPts[2], slabPts[3], slabPts[4])
+      local open = t >= imp and min(1, (t - imp) / 0.3) or 0.15
+      G2.setColor(0.12, 0.09, 0.07, 0.9)
+      G2.setLineWidth(max(1, scale * (0.12 + 0.2 * open)))
+      for j = 1, 4 do
+        local fx0 = x0 + (x1 - x0) * (j / 5 + (rnd(m.seed, j) - 0.5) * 0.08)
+        local n = 0
+        local ok = true
+        for s = 0, 4 do
+          local yy = y1 - (y1 - y0) * (s / 4) * open
+          local xx = fx0 + (rnd(m.seed, j * 10 + s) - 0.5) * (x1 - x0) * 0.06
+          local x, y = P(xx, yy, z1 + 0.001)
+          if not x then ok = false; break end
+          crackPts[n + 1], crackPts[n + 2] = x, y
+          n = n + 2
+        end
+        for q = n + 1, #crackPts do crackPts[q] = nil end
+        if ok and n >= 4 then G2.line(crackPts) end
+      end
+      G2.setLineWidth(1)
+    end
+  end
+
+  -- claw strokes raked across the target
+  local function drawSlash(G2, m, t, now, layer)
+    local imp = m.impact or m.len
+    for _, T in ipairs(m.targets) do
+      local X, Y, Z = aimAt(T)
+      if layerOf(Z) == layer and stripReady() then
+        local x, y, k = P(X, Y, Z)
+        if x then
+          local S = min(3, T.h) * k * (m.big and 1.3 or 1)
+          G2.setBlendMode("add")
+          for j = 0, 2 do
+            local g = smooth(0, 1, (t - j * 0.05) / imp)
+            local fade = t > imp + 0.05 and max(0, 1 - (t - imp - 0.05) / 0.3) or 1
+            if g > 0 and fade > 0 then
+              local ax, ay = x - S * 0.45 + j * S * 0.22, y - S * 0.55
+              local bx, by = ax + S * 0.55, ay + S * 1.05
+              local cx, cy = (ax + bx) / 2 + S * 0.18, (ay + by) / 2 - S * 0.05
+              for pass = 1, 2 do
+                local W = pass == 1 and S * 0.09 or S * 0.03
+                local cr, cg, cb = pass == 1 and m.tc[1] or 1, pass == 1 and m.tc[2] or 1, pass == 1 and m.tc[3] or 1
+                local n = 0
+                local N = 14
+                for q = 0, N do
+                  local s = q / N * g
+                  local u1 = 1 - s
+                  local px = u1 * u1 * ax + 2 * u1 * s * cx + s * s * bx
+                  local py = u1 * u1 * ay + 2 * u1 * s * cy + s * s * by
+                  local s2 = min(1, s + 0.01)
+                  local v1 = 1 - s2
+                  local qx = v1 * v1 * ax + 2 * v1 * s2 * cx + s2 * s2 * bx
+                  local qy = v1 * v1 * ay + 2 * v1 * s2 * cy + s2 * s2 * by
+                  local dx, dy = qx - px, qy - py
+                  local l = sqrt(dx * dx + dy * dy) + 1e-6
+                  local nx, ny = -dy / l, dx / l
+                  local w = W * sin(pi * (q / N)) + 0.5
+                  local a = (pass == 1 and 0.6 or 1) * fade * (0.35 + 0.65 * q / N)
+                  n = n + 1; sv(n, px + nx * w, py + ny * w, 0, 0, cr, cg, cb, a)
+                  n = n + 1; sv(n, px - nx * w, py - ny * w, 0, 1, cr, cg, cb, a)
+                end
+                G2.setColor(1, 1, 1, 1)
+                stripDraw(G2, n)
+              end
+            end
+          end
+          G2.setBlendMode("alpha")
+        end
+      end
+    end
+  end
+
+  -- fangs closing on it
+  local function drawBite(G2, m, t, now, layer)
+    local imp = m.impact or m.len
+    for _, T in ipairs(m.targets) do
+      local X, Y, Z = aimAt(T)
+      if layerOf(Z) == layer then
+        local x, y, k = P(X, Y, Z)
+        if x then
+          local S = min(3, T.h) * k * (m.big and 1.3 or 1)
+          local c = min(1, t / imp)
+          c = c * c
+          local gap = S * 0.5 * (1 - c)
+          local a = t < m.len * 0.75 and 1 or max(0, 1 - (t - m.len * 0.75) / (m.len * 0.25))
+          local shake = t > imp and sin(t * 70) * S * 0.02 * max(0, 1 - (t - imp) / 0.2) or 0
+          G2.setBlendMode("add")
+          glowAt(G2, x, y - gap - S * 0.15, S * 0.9, m.tc[1], m.tc[2], m.tc[3], 0.35 * a)
+          glowAt(G2, x, y + gap + S * 0.15, S * 0.9, m.tc[1], m.tc[2], m.tc[3], 0.35 * a)
+          G2.setBlendMode("alpha")
+          local W = S * 0.95
+          for row = -1, 1, 2 do
+            local base = y + row * (gap + S * 0.3) + shake
+            for j = 0, 4 do
+              local fx0 = x - W / 2 + j * W / 5
+              local fw = W / 5
+              local len = S * (0.26 + ((j == 0 or j == 4) and 0.06 or 0)) * (1 - abs(j - 2) * 0.12)
+              local tipX, tipY = fx0 + fw * 0.5 + row * fw * 0.08, base - row * len
+              G2.setColor(0.72, 0.7, 0.68, a)
+              G2.polygon("fill", fx0, base, fx0 + fw, base, tipX, tipY)
+              G2.setColor(0.98, 0.97, 0.95, a)
+              G2.polygon("fill", fx0 + fw * 0.15, base, fx0 + fw * 0.62, base, tipX, tipY)
+            end
+            G2.setColor(0.35, 0.08, 0.1, a * 0.85)
+            G2.rectangle("fill", x - W / 2, base + (row < 0 and -S * 0.06 or 0), W, S * 0.06)
+          end
+        end
+      end
+    end
+  end
+
+  -- lightning from the sky
+  local skyPts = {}
+  local function drawBolt(G2, m, t, now, layer)
+    if layer ~= "front" then return end
+    local imp = m.impact or m.len
+    if t < imp - 0.06 then
+      -- the air charging: a flicker high above
+      return
+    end
+    local v = t - imp
+    local flick = (floor(now * 22) % 3 ~= 1) and 1 or 0.35
+    local a = (v < 0.35 and 1 or max(0, 1 - (v - 0.35) / 0.25)) * flick
+    if a <= 0 then return end
+    G2.setBlendMode("add")
+    for ti, T in ipairs(m.targets) do
+      local seed = m.seed + ti * 9 + floor(now * 18)
+      local X, Y, Z = aimAt(T)
+      local _, _, k = P(X, Y, Z)
+      local w = max(1.2, (k or 40) * 0.05 * (m.big and 1.5 or 1))
+      local n = jagged(skyPts, X + (rnd(seed, 1) - 0.5) * 3, Y + 16, Z - 2, X, Y, Z, seed, 0.38, 5)
+      if n >= 4 then glowLine(G2, skyPts, w, m.tc, a) end
+      for b = 1, 2 do
+        local i = 2 + floor(rnd(seed, b + 3) * (#skyPts / 2 - 4))
+        local bx0, by0 = skyPts[i * 2 - 1], skyPts[i * 2]
+        if bx0 then
+          -- a short fork off it, on screen
+          local ex, ey = bx0 + (rnd(seed, b + 7) - 0.5) * w * 40, by0 + w * (12 + 18 * rnd(seed, b + 9))
+          G2.setLineWidth(max(1, w * 0.5))
+          G2.setColor(m.tc[1], m.tc[2], m.tc[3], 0.6 * a)
+          G2.line(bx0, by0, (bx0 + ex) / 2 + (rnd(seed, b + 11) - 0.5) * w * 10, (by0 + ey) / 2, ex, ey)
+        end
+      end
+      local x, y = P(X, Y, Z)
+      if x then glowAt(G2, x, y, w * 30, m.tc[1], m.tc[2], m.tc[3], 0.6 * a) end
+    end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+
+  -- rings sent at it
+  local function drawRings(G2, m, t, now, layer)
+    local imp = m.impact or m.len
+    local fx, fy, fz = mouth(m)
+    local sh = m.spec.shape
+    for _, T in ipairs(m.targets) do
+      local X, Y, Z = aimAt(T)
+      for j = 0, 3 do
+        local g = (t / imp) * 1.0 - j * 0.14
+        if g > 0 and g < 1.15 then
+          local gg = min(1, g)
+          local px, py, pz = fx + (X - fx) * gg, fy + (Y - fy) * gg, fz + (Z - fz) * gg
+          if layerOf(pz) == layer then
+            local x, y, k = P(px, py, pz)
+            if x then
+              local R = min(3, T.h) * (0.3 + 0.35 * gg) * k
+              local a = (g > 1 and max(0, 1 - (g - 1) / 0.15) or 1) * (0.5 + 0.5 * gg)
+              if sh == "dark" then
+                screenRing(G2, x, y, R, R * 0.85, max(1, R * 0.25), 0.1, 0.02, 0.15, 0.7 * a)
+                G2.setBlendMode("add")
+                screenRing(G2, x, y, R, R * 0.85, max(1, R * 0.06), 0.5, 0.2, 0.7, 0.6 * a)
+              elseif sh == "eye" then
+                G2.setBlendMode("add")
+                screenRing(G2, x, y, R, R * 0.45, max(1, R * 0.12), 1, 0.3, 0.35, a)
+                glowAt(G2, x, y, R * 0.5, 1, 0.25, 0.3, a)
+              else
+                G2.setBlendMode("add")
+                screenRing(G2, x, y, R, R * 0.85, max(1, R * 0.16), m.tc[1], m.tc[2], m.tc[3], 0.8 * a)
+                screenRing(G2, x, y, R * 1.04, R * 0.89, max(1, R * 0.05), 1, 1, 1, 0.5 * a)
+              end
+              G2.setBlendMode("alpha")
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- points erupting from the ground round it
+  local function drawSpikes(G2, m, t, now, layer)
+    local imp = m.impact or m.len
+    local sh = m.spec.shape
+    local up = smooth(imp * 0.6, imp, t)
+    local sink = t > m.len * 0.75 and smooth(m.len * 0.75, m.len, t) or 0
+    if up <= 0 then return end
+    for ti, T in ipairs(m.targets) do
+      local foot = T.foot or 0
+      local S = min(2.5, T.h) * (m.big and 1.3 or 1)
+      for j = 1, 7 do
+        local th = (j / 7) * 2 * pi + rnd(m.seed + ti, j)
+        local rr = S * (0.25 + 0.3 * rnd(m.seed + ti, j + 10))
+        local X, Z = T.X + cos(th) * rr, T.Z + sin(th) * rr * 0.7
+        if layerOf(Z) == layer then
+          local H = S * (0.6 + 0.5 * rnd(m.seed + ti, j + 20)) * up
+          local base = foot - H * sink
+          local r = S * 0.11
+          local lean = (rnd(m.seed + ti, j + 30) - 0.5) * S * 0.25 + cos(th) * S * 0.12
+          local ax, ay = P(X + lean, base + H, Z)
+          local lx, ly = P(X - r, base, Z)
+          local rx, ry = P(X + r, base, Z)
+          local fx, fy, k = P(X, base, Z + r * 0.8)
+          if ax and lx and rx and fx then
+            local c1, c2
+            if sh == "steel" then c1, c2 = { 0.82, 0.86, 0.92 }, { 0.42, 0.46, 0.52 }
+            elseif sh == "root" then c1, c2 = { 0.5, 0.36, 0.2 }, { 0.28, 0.19, 0.1 }
+            else c1, c2 = { 0.62, 0.52, 0.4 }, { 0.36, 0.29, 0.22 } end
+            local sc = max(2, k * 0.08)
+            G2.setColor(c1[1], c1[2], c1[3], 1)
+            rockPoly(G2, { lx, ly, fx, fy, ax, ay }, sc)
+            G2.setColor(c2[1], c2[2], c2[3], 1)
+            rockPoly(G2, { fx, fy, rx, ry, ax, ay }, sc)
+            if sh == "steel" then
+              G2.setBlendMode("add")
+              G2.setColor(1, 1, 1, 0.6)
+              G2.setLineWidth(max(1, k * 0.015))
+              G2.line(fx, fy, ax, ay)
+              G2.setBlendMode("alpha")
+              G2.setLineWidth(1)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- a wall rolling over the party (water, sand, fire)
+  local function drawWall(G2, m, t, now, layer)
+    local sh = m.spec.shape or "water"
+    local z = wallZ(m, t)
+    if layerOf(z) ~= layer then return end
+    local imp = m.impact or m.len
+    local a = t <= imp and min(1, t / 0.15) or max(0, 1 - (t - imp) / (m.len - imp))
+    if a <= 0 or not stripReady() then return end
+    local H = wallH(m) * (0.85 + 0.15 * min(1, t / imp))
+    local XW = 10
+    local N = 20
+    local n = 0
+    for i = 0, N do
+      local X = -XW + 2 * XW * i / N
+      local zz = z + sin(i * 0.9 + now * 3) * 0.12
+      local tx, ty = P(X, H, zz)
+      local bx, by = P(X, 0, zz)
+      if not (tx and bx) then return end
+      n = n + 1; sv(n, tx, ty, i / N, 0, 1, 1, 1, 1)
+      n = n + 1; sv(n, bx, by, i / N, 1, 1, 1, 1, 1)
+    end
+    local S
+    if sh == "fire" then
+      S = shader("fire")
+      if S then
+        S:send("time", now)
+        S:send("seed", m.seed % 10)
+        S:send("aspect", 2 * XW / H)
+        S:send("blaze", 0)
+      end
+    else
+      S = shader("wall")
+      if S then
+        local C = WALL[sh] or WALL.water
+        S:send("time", now)
+        S:send("aspect", 2 * XW / H * 0.35)
+        S:send("deep", C.deep)
+        S:send("shallow", C.shallow)
+        S:send("foam", C.foam)
+      end
+    end
+    if S then
+      G2.setShader(S)
+      G2.setColor(1, 1, 1, a)
+      stripDraw(G2, n)
+      G2.setShader()
+    else
+      for i = 1, n do strip.v[i][5], strip.v[i][6], strip.v[i][7] = sh == "fire" and 1 or 0.3, sh == "fire" and 0.45 or 0.6, sh == "fire" and 0.1 or 1 end
+      G2.setColor(1, 1, 1, 0.7 * a)
+      stripDraw(G2, n)
+    end
+  end
+
+  -- the user's aura (a stat raised): a column of light
+  local function drawSelf(G2, m, t, now, layer)
+    local f = m.from
+    if layerOf(f.Z + 0.3) ~= layer then return end
+    local a = sin(min(1, t / m.len) * pi)
+    local x1, y1, k1 = P(f.X, f.foot or 0, f.Z + 0.3)
+    local x2, y2, k2 = P(f.X, (f.foot or 0) + f.h * 1.5, f.Z + 0.3)
+    if not (x1 and x2) then return end
+    G2.setBlendMode("add")
+    local sh = shader("beam")
+    if sh and stripReady() then
+      sh:send("time", now * 0.5)
+      sh:send("tint", m.tc)
+      G2.setShader(sh)
+      band(G2, x1, y1, f.h * 0.9 * k1, x2, y2, f.h * 0.5 * k2, 1, 1, 1, 0.35 * a)
+      G2.setShader()
+    end
+    local x, y, k = P(f.X, f.Y, f.Z + 0.3)
+    if x then glowAt(G2, x, y, f.h * k * 0.9, m.tc[1], m.tc[2], m.tc[3], 0.35 * a) end
+    G2.setBlendMode("alpha")
+  end
+
+  local function drawMove(G2, m, now, layer)
+    local t = now - m.t0
+    if t < 0 or t > m.len then return end
+    local kind = m.kind
+    if kind == "beam" then drawBeam(G2, m, t, now, layer)
+    elseif kind == "shot" then drawShots(G2, m, t, now, layer)
+    elseif kind == "drop" and m.key ~= "slab" then drawDrops(G2, m, t, now, layer)
+    elseif m.key == "slab" then drawSlab(G2, m, t, now, layer)
+    elseif kind == "slash" then drawSlash(G2, m, t, now, layer)
+    elseif kind == "bite" then drawBite(G2, m, t, now, layer)
+    elseif kind == "bolt" then drawBolt(G2, m, t, now, layer)
+    elseif kind == "rings" then drawRings(G2, m, t, now, layer)
+    elseif kind == "spikes" then drawSpikes(G2, m, t, now, layer)
+    elseif kind == "self" then drawSelf(G2, m, t, now, layer)
+    elseif kind == "wave" then
+      local sh = m.spec.shape
+      if sh == "water" or sh == "ground" or sh == "fire" or not sh then drawWall(G2, m, t, now, layer) end
+    end
+  end
+
+  -- ------- the clock
+
+  local last = nil
+  function Fx.update(now)
+    local dt = last and min(0.05, max(0, now - last)) or 0
+    last = now
+    if dt > 0 then
+      stepCharge(now, dt)
+      for i = 1, #moves do
+        local m = moves[i]
+        stepMove(m, now, dt)
+      end
+      stepParts(dt)
+    end
+    for i = #moves, 1, -1 do
+      if now - moves[i].t0 > moves[i].len + 0.05 then table.remove(moves, i) end
+    end
+    for i = #spots, 1, -1 do if now - spots[i].t0 > spots[i].dur then table.remove(spots, i) end end
+    for i = #decals, 1, -1 do if now - decals[i].t0 > decals[i].life then table.remove(decals, i) end end
+    for i = #flashes, 1, -1 do if now - flashes[i].t0 > flashes[i].dur then table.remove(flashes, i) end end
+  end
+
+  function Fx.clear()
+    for i = #moves, 1, -1 do moves[i] = nil end
+    for i = #parts, 1, -1 do pool[#pool + 1] = parts[i]; parts[i] = nil end
+    for i = #spots, 1, -1 do spots[i] = nil end
+    for i = #decals, 1, -1 do decals[i] = nil end
+    for i = #flashes, 1, -1 do flashes[i] = nil end
+    charge, last = nil, nil
+  end
+
   function Fx.busy(now)
     for _, m in ipairs(moves) do if now - m.t0 <= m.len then return true end end
     return false
   end
-  local clearHits = Fx.clear
-  function Fx.clear() clearHits(); for i = #moves, 1, -1 do moves[i] = nil end end
+  function Fx.stats() return { parts = #parts, moves = #moves, spots = #spots, decals = #decals } end
+
+  -- ------- drawing by layer
+
+  function Fx.drawLayer(G2, layer, now)
+    if not Sc then return end
+    G2.push("all")
+    if layer == "back" then drawDecals(G2, now) end
+    for _, m in ipairs(moves) do drawMove(G2, m, now, layer) end
+    if layer == "mid" and charge then drawChargeOrb(G2, now) end
+    for _, e in ipairs(spots) do
+      if layerOf(e.Z) == layer then drawSpot(G2, e, now) end
+    end
+    drawParts(G2, layer)
+    G2.pop()
+  end
+
+  -- the front layer, then the screen's own: the G-Max charge's wash, the flashes
+  function Fx.draw(G2, w, h, now)
+    if not Sc then return end
+    Fx.drawLayer(G2, "front", now)
+    G2.push("all")
+    if charge then drawCharge(G2, w, h, now) end
+    G2.setBlendMode("add")
+    for _, f in ipairs(flashes) do
+      local u = (now - f.t0) / f.dur
+      if u >= 0 and u < 1 then
+        G2.setColor(f.r, f.g, f.b, f.a * (1 - u) * (1 - u))
+        G2.rectangle("fill", 0, 0, w, h)
+      end
+    end
+    G2.pop()
+  end
+  -- (the raid's first pass drew the moves here; they are in the layers now)
+  function Fx.drawMoves() end
+
+  -- ------- what lasts
+
+  -- a G-Max field over the party: along the foot of the screen, by its type
+  local function flame(G2, x, y, w, h)
+    G2.polygon("fill", x - w, y, x - w * 0.6, y - h * 0.45, x, y - h, x + w * 0.6, y - h * 0.45, x + w, y)
+    G2.circle("fill", x, y, w, 12)
+  end
+  function Fx.drawField(G2, w, h, now, kind)
+    if not kind then return end
+    G2.push("all")
+    local base = h * 0.98
+    if kind == "FIRE" and fireRect(G2, 0, base - h * 0.22, w, h * 0.24, now, 7, 0.85) then
+      -- (real fire along the party's feet)
+    elseif kind == "FIRE" then
+      for k = 0, 22 do
+        local x = (k + 0.5) / 22 * w
+        local fl = 0.75 + 0.25 * sin(now * 7 + k * 1.7)
+        local fh = h * (0.12 + 0.07 * sin(now * 3 + k)) * fl
+        G2.setColor(1, 0.35, 0.08, 0.55)
+        flame(G2, x, base, w / 44 * 1.6, fh)
+        G2.setColor(1, 0.8, 0.3, 0.55)
+        flame(G2, x, base, w / 44 * 0.7, fh * 0.55)
+      end
+    elseif kind == "WATER" then
+      G2.setLineWidth(max(2, h * 0.006))
+      for k = 0, 5 do
+        local y = base - h * (0.02 + k * 0.03)
+        local pts = {}
+        for i = 0, 40 do
+          local x = i / 40 * w
+          pts[#pts + 1], pts[#pts + 2] = x, y + sin(i * 0.6 + now * (3 + k) + k) * h * 0.012
+        end
+        G2.setColor(0.35, 0.65, 1, 0.5 - k * 0.06)
+        G2.line(pts)
+      end
+    elseif kind == "GRASS" then
+      G2.setLineWidth(max(2, h * 0.008))
+      for k = 0, 9 do
+        local x0 = (k + 0.5) / 10 * w
+        local pts = {}
+        for i = 0, 12 do
+          local f = i / 12
+          pts[#pts + 1] = x0 + sin(f * 5 + now * 2 + k) * w * 0.02
+          pts[#pts + 1] = base - f * h * (0.2 + 0.05 * sin(now + k))
+        end
+        G2.setColor(0.25, 0.65, 0.2, 0.75)
+        G2.line(pts)
+        G2.setColor(0.4, 0.85, 0.3, 0.75)
+        G2.ellipse("fill", pts[#pts - 1], pts[#pts], w * 0.012, h * 0.01, 10)
+      end
+    elseif kind == "ROCK" then
+      for k = 0, 14 do
+        local x = (k + 0.5) / 15 * w + sin(k * 3.1) * w * 0.02
+        local r = h * (0.03 + 0.02 * ((k * 7) % 3))
+        local y = base - r * 0.6 + sin(now * 2 + k) * h * 0.004
+        G2.setColor(0.45, 0.35, 0.25, 0.85)
+        rockPoly(G2, { x - r, y, x - r * 0.5, y - r, x + r * 0.6, y - r * 0.8, x + r, y, x, y + r * 0.4 }, max(2, r * 0.4))
+      end
+    end
+    G2.pop()
+  end
+
+  -- the boss's veil: a pale shimmer round it
+  function Fx.drawVeil(G2, LB, now)
+    if not LB then return end
+    G2.push("all")
+    G2.setLineWidth(max(1.5, LB.h * 0.008))
+    for k = 0, 2 do
+      local a = 0.25 + 0.15 * sin(now * 2 + k * 2)
+      G2.setColor(0.7, 0.95, 1, a)
+      G2.ellipse("line", LB.x, LB.y, LB.h * (0.5 + k * 0.04), LB.h * (0.58 + k * 0.04), 48)
+    end
+    G2.pop()
+  end
+
+  -- its barrier while it stands: a hexagon dome of light round it, dimmer as segments break
+  function Fx.drawBarrier(G2, LB, now, left, most)
+    if not (LB and left and left > 0) then return end
+    G2.push("all")
+    local share = most and most > 0 and left / most or 1
+    local rx, ry = LB.h * 0.55, LB.h * 0.62
+    G2.setColor(1, 0.25, 0.45, 0.12 + 0.08 * share)
+    G2.ellipse("fill", LB.x, LB.y, rx, ry, 48)
+    G2.setLineWidth(max(1, LB.h * 0.005))
+    local cell = LB.h * 0.11
+    for row = -6, 6 do
+      for col = -6, 6 do
+        local cx = LB.x + (col + (row % 2) * 0.5) * cell * 1.5
+        local cy = LB.y + row * cell * 0.87
+        local nx, ny = (cx - LB.x) / rx, (cy - LB.y) / ry
+        if nx * nx + ny * ny < 1 then
+          local tw = 0.5 + 0.5 * sin(now * 3 + row + col * 1.7)
+          G2.setColor(1, 0.45, 0.6, (0.15 + 0.25 * tw) * (0.5 + 0.5 * share))
+          local pts = {}
+          for i = 0, 5 do
+            pts[#pts + 1], pts[#pts + 2] = cx + cos(i * pi / 3) * cell * 0.5, cy + sin(i * pi / 3) * cell * 0.5
+          end
+          G2.polygon("line", pts)
+        end
+      end
+    end
+    G2.setColor(1, 0.5, 0.65, 0.6 * share)
+    G2.ellipse("line", LB.x, LB.y, rx, ry, 48)
+    G2.pop()
+  end
 
   return Fx
 end

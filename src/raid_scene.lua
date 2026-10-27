@@ -159,7 +159,31 @@ return function(mod, deps)
   function Sc.shotDone() return move.dur <= 0 or clock - move.t0 >= move.dur end
 
   local shake = { amp = 0, t0 = 0, dur = 0 }
-  function Sc.shake(amp, dur) shake.amp, shake.t0, shake.dur = amp or 0.15, clock, dur or 0.6 end
+  function Sc.shake(amp, dur)
+    -- (a stronger shake takes over; a weaker one under way is left be)
+    local st = clock - shake.t0
+    local now = shake.amp > 0 and st < shake.dur and shake.amp * (1 - st / shake.dur) or 0
+    if (amp or 0.15) < now then return end
+    shake.amp, shake.t0, shake.dur = amp or 0.15, clock, dur or 0.6
+  end
+  -- a blow's jab: the view narrows by deg degrees at once and eases back over dur
+  local kick = { deg = 0, t0 = 0, dur = 0 }
+  function Sc.kick(deg, dur) kick.deg, kick.t0, kick.dur = deg or 3, clock, dur or 0.35 end
+  -- a battler struck ("boss" or a member's place): it flashes white and is knocked back, by power
+  local struck = {}
+  function Sc.hit(which, power) struck[which] = { t0 = clock, p = power or 0.5 } end
+  Sc.HIT_FLASH_S, Sc.KNOCK_S = 0.16, 0.4
+  -- white 0..1, knock 0..1 (out and back) for a battler now
+  local function struckNow(which)
+    local h = struck[which]
+    if not h then return 0, 0, 0 end
+    local st = clock - h.t0
+    if st < 0 or st > Sc.KNOCK_S then return 0, 0, 0 end
+    local white = st < Sc.HIT_FLASH_S and (1 - st / Sc.HIT_FLASH_S) or 0
+    local u = st / Sc.KNOCK_S
+    local knock = (u < 0.15 and u / 0.15 or (1 - (u - 0.15) / 0.85) ^ 2) * h.p
+    return white * min(1, 0.5 + h.p), knock, st
+  end
 
   local rect = { 0, 0, 256, 192 }
   local function place()
@@ -170,6 +194,11 @@ return function(mod, deps)
       cur.look[j] = from.look[j] + (to.look[j] - from.look[j]) * k
     end
     cur.fov = from.fov + (to.fov - from.fov) * k
+    local kt = clock - kick.t0
+    local kf = 0
+    if kick.deg > 0 and kt >= 0 and kt < kick.dur then
+      kf = kick.deg * (kt < 0.03 and kt / 0.03 or (1 - (kt - 0.03) / (kick.dur - 0.03)) ^ 2)
+    end
     -- the sway: a slow drift side to side and a breath up and down
     local sx, sy = 0.12 * sin(clock * 0.21), 0.05 * sin(clock * 0.33)
     -- the shake: a quick jitter dying away
@@ -184,7 +213,7 @@ return function(mod, deps)
     lookAt(cam, ex, ey, ez, cur.look[1] + sx * 0.3 + hx, cur.look[2] + hy, cur.look[3])
     -- a 3:2 view fitted to the rect: by its height on a wider rect, by its width on a taller one
     local ew, eh = rect[3], rect[4]
-    local tv = tan(rad(cur.fov) / 2)
+    local tv = tan(rad(max(10, cur.fov - kf)) / 2)
     if ew / eh > Sc.ASPECT then cam.F = (eh / 2) / tv else cam.F = (ew / 2) / (tv * Sc.ASPECT) end
     cam.CX, cam.CY = rect[1] + ew / 2, rect[2] + eh / 2
   end
@@ -747,6 +776,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       k = k * (1 + 0.1 * lunge)
       y = y + hpx * 0.04 * lunge
     end
+    -- struck: knocked back (smaller, a jolt aside), flashing white over its sprite below
+    local white, knock, kst = struckNow("boss")
+    if knock > 0 then
+      k = k * (1 - 0.05 * knock)
+      x = x + sin(kst * 80) * hpx * 0.025 * knock
+      y = y - hpx * 0.02 * knock
+    end
     -- where it stands on screen, for the raid's throw (its middle and height)
     Sc.lastBoss = Sc.lastBoss or {}
     Sc.lastBoss.x, Sc.lastBoss.y, Sc.lastBoss.h = x, y - bh * k * 0.5, bh * k
@@ -786,6 +822,14 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
     G2.setColor(1, 1, 1, 1)
     drawPixel(pic.image, pic.quad, x, y, 0, k, k, ox, oy)
+    if white > 0 and s then
+      G2.setShader(s)
+      G2.setBlendMode("add")
+      G2.setColor(1, 1, 1, 0.55 * white)
+      G2.draw(pic.image, pic.quad, x, y, 0, k, k, ox, oy)
+      G2.setBlendMode("alpha")
+      G2.setShader()
+    end
     -- red wisps curling over its head
     local hx, hy = x, y - bh * k
     for w = 1, 2 do
@@ -843,9 +887,29 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G2.ellipse("fill", x, y, bw * k * 0.42, bw * k * 0.1, 24)
     -- a slow breath
     local b = 1 + 0.015 * sin(t * 2.4 + i * 1.3)
+    -- struck: thrown back toward the camera (larger, lower, a jolt aside), flashing white
+    local white, knock, kst = struckNow(i)
+    local kx, kb = k, k * b
+    local sx, sy = x, y
+    if knock > 0 then
+      kx, kb = kx * (1 + 0.06 * knock), kb * (1 - 0.06 * knock)
+      sx = sx + sin(kst * 90) * hpx * 0.05 * knock
+      sy = sy + hpx * 0.05 * knock
+    end
     G2.setColor(1, 1, 1, 1)
-    if pic.quad then drawPixel(pic.image, pic.quad, x, y, 0, k, k * b, (box[1] + box[3]) / 2, box[4])
-    else drawPixel(pic.image, x, y, 0, k, k * b, (box[1] + box[3]) / 2, box[4]) end
+    local ox, oy = (box[1] + box[3]) / 2, box[4]
+    if pic.quad then drawPixel(pic.image, pic.quad, sx, sy, 0, kx, kb, ox, oy)
+    else drawPixel(pic.image, sx, sy, 0, kx, kb, ox, oy) end
+    local s = white > 0 and sil()
+    if s then
+      G2.setShader(s)
+      G2.setBlendMode("add")
+      G2.setColor(1, 1, 1, 0.9 * white)
+      if pic.quad then G2.draw(pic.image, pic.quad, sx, sy, 0, kx, kb, ox, oy)
+      else G2.draw(pic.image, sx, sy, 0, kx, kb, ox, oy) end
+      G2.setBlendMode("alpha")
+      G2.setShader()
+    end
   end
 
   -- the roar: a white flash, streaks of energy bursting out of the boss's middle, a shockwave
@@ -949,7 +1013,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       place()
     end
     shaft(G2, ex, ey, ew, eh)
+    -- (the move effects' back layer: the ground and what stands behind the boss; their middle layer
+    -- between the boss and the party: Sc.onBack / Sc.onMid, set by the raid)
+    if Sc.onBack then Sc.onBack(G2) end
     if boss then drawBoss(G2, boss, boss.size, clock) end
+    if Sc.onMid then Sc.onMid(G2) end
     for i = 1, #Sc.MEMBERS do
       if members and members[i] then drawMember(G2, i, members[i], clock) end
     end
