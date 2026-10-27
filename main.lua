@@ -49,6 +49,9 @@ return function(mod)
   local makeRender3d = loadSibling(mod, "src/render3d.lua")
   local makeScene = loadSibling(mod, "src/raid_scene.lua")
   local makePad = loadSibling(mod, "src/pad.lua")
+  local makeBattlerHud = loadSibling(mod, "src/battler_hud.lua")
+  local makeBattle = loadSibling(mod, "src/battle.lua")
+  local Sim = loadSibling(mod, "src/raid_sim.lua")
   local makeRaid = loadSibling(mod, "src/raid.lua")
   local makePadHide = loadSibling(mod, "src/pad_hide.lua")
   local makeDens = loadSibling(mod, "src/dens.lua")
@@ -64,6 +67,17 @@ return function(mod)
     if ok and type(sc) == "table" then Scene = sc else mod.log:warn("the den failed to build: %s", tostring(sc)) end
   end
   local Pad = makePad(mod, {})
+  local Battle = nil
+  if makeBattle then
+    -- (the National Dex's exports: what its newer moves do besides their damage)
+    local function dex()
+      local ok, d = pcall(mod.find, mod, "national_dex_gen3")
+      return ok and type(d) == "table" and d.exports or nil
+    end
+    local ok, bt = pcall(makeBattle, mod, { N = N, Bosses = Bosses, Sprites = Sprites, dex = dex })
+    if ok and type(bt) == "table" then Battle = bt else mod.log:warn("the raid's battle failed to build: %s", tostring(bt)) end
+  end
+  local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil }) or nil
   local PadHide = makePadHide and makePadHide(mod) or nil
 
   local function padOnSecond()
@@ -78,6 +92,7 @@ return function(mod)
   if not (okStack and type(Stack) == "table") then Stack = nil end
   local LAYER_ID = "max_raids"
   local Raid
+  local Dens = nil
   local Layer = { isMenu = true }
   function Layer.handleInput(input) if Raid then Raid.input(input) end end
   function Layer.update(dt) if Raid then Raid.update(dt) end end
@@ -91,6 +106,11 @@ return function(mod)
   end
 
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
+    BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil,
+    -- a won raid: its den is done for the day
+    onEnd = function(den, outcome)
+      if outcome == "win" and den and Dens and Dens.finish then pcall(Dens.finish, den) end
+    end,
     padOnSecond = padOnSecond,
     onOpen = function()
       if Stack then
@@ -104,7 +124,6 @@ return function(mod)
   })
 
   -- ------- dens on the routes: A on one opens its den screen (src/dens.lua)
-  local Dens = nil
   if makeDens then
     local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, open = function(den) return Raid.openDen(den) end })
     if ok and type(dn) == "table" then
@@ -120,7 +139,8 @@ return function(mod)
   -- the raid over the whole window, after the engine's own HUD
   mod.hooks:wrap("render.hud", function(next, game, viewport)
     local res = next(game, viewport)
-    local up = Raid.active()
+    -- (the game's summary over the raid: it draws itself, with the engine's touch pad)
+    local up = Raid.active() and not Raid.summaryUp()
     if PadHide then pcall(PadHide.apply, PadHide, up and not padOnSecond(), game) end
     if up then
       local G = love.graphics
@@ -140,7 +160,7 @@ return function(mod)
 
   -- taps and clicks on the battle pad (the main window's)
   mod.hooks:wrap("input.pointer", function(next, game, ev)
-    if Raid.active() and type(ev) == "table" and Raid.pointer(ev) then return true end
+    if Raid.active() and not Raid.summaryUp() and type(ev) == "table" and Raid.pointer(ev) then return true end
     return next(game, ev)
   end)
 
@@ -184,6 +204,6 @@ return function(mod)
   mod.exports.state = function() return Raid.state() end
   mod.exports.bosses = function() return Bosses.ORDER end
   mod.exports.dens = Dens
-  mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens }
+  mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end

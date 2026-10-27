@@ -58,9 +58,48 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
     breaks Android. The opaque box is read back once through a dpiscale-1 canvas, also in update.
   - **The intro** timeline is `Rd.INTRO`, fired through `once()`. Music is the first of `Rd.SONGS` the
     game has (`Audio.songs()`, `fadeOutAndPlay`); `Audio.restoreMapSong()` on close.
-  - **The HUD:** boss name, shape-drawn stars (the default font has no ★), HP bar, and a Gen 5 dialogue
-    box that types out and keeps clear of the pad.
-  - **Input:** `Rd.input` (B flees), `Rd.pointer`.
+  - **The battle** (`setupBattle` in `begin`): each member's `m.b` is its battler (src/battle.lua, a
+    deep copy) and `m.mon` the copy from then on; `r.boss`, `r.adapter`, `r.sim` (src/raid_sim.lua).
+  - **The commands** (after the intro, `Rd.startCommand`): `r.cmd = { actor, cursor, chosen, menu }`;
+    each member the sim lets act (`sim:canAct`) chooses in party order (`Rd.choose(id)`: Run leaves,
+    Pokemon opens the summary, Fight opens the moves - `menu` "moves", `Rd.moveList` fills
+    `r.cmd.moveList` in the update step (effectiveness on the boss) - and a move "moveN" (PP left) is
+    taken, `chosen[i] = { move = N }`, the next member's turn beginning, the camera easing over its
+    shoulder in `SWAP_S`; Bag is greyed until the pouch exists). B (`Rd.back`): the moves back to the
+    commands, else the member before, its pick undone. Up / down move `cursor`, A picks; a press on a
+    pill moves the selection there and letting go picks it. All in: `Rd.fight()` runs the turn
+    (`sim:turn`) and phase "battle" plays its events. No one able to choose (all sitting out): the
+    boss's turn at once. `Rd.state()` gives `turn`, `actor`, `cursor`, `chosen` (a count), `menu`,
+    `summary`.
+  - **The turn's events** (`Rd.playEvents`, `Rd.EVENT`): one at a time - words typed in the band and
+    held `HOLD_S` (A hurries them once typed); a "use" cuts the camera to the member (`member` shot) or
+    the boss (`boss` shot); an event with `hp` sets that battler's `dispTarget`, and the bars ease there
+    (`dispHp`, `HP_S`), with a shake. A hit lands with no words: the band steps aside while the bar
+    drains. What shows, from Wooble's capture "battle reference UI-flow.mp4" (2026-10-26; Sword /
+    Shield): none of the command UI (order list, panel, pad) in the turn; `showFor(e)` - the boss's
+    block (`r.bossShow`, faded through `r.bossA` at `FADE`) while the words are about the boss (its
+    moves, a member's move at it, a hit on it, its status, the end), else that member's row alone at
+    the top left (`r.rows`, `Bh.drawRows`: its icon, its action's mark `r.actions[i]`, its HP draining) -
+    a member's move on itself (Work Up) is about the member; "fail" keeps what was shown.
+    The last event done: the next turn, or (`sim.over`)
+    `deps.onEnd(den, outcome)` - main marks a won den done (`Dens.finish`) - and the raid closes.
+    Not yet: the catch and rewards on a win.
+  - **The summary** (`Rd.summary`, Wooble 2026-10-26): the game's own (`SummaryMenu.openMenu`, which
+    hands Emerald / R/S their own screens) on the four, from the one choosing, so L / R step through
+    them; `context = "factory"` keeps it read only (that context is the only one the engine checks
+    before swapping moves). It pushes its own layer ("summary") over ours; while `r.summary` the raid
+    draws nothing, takes no input or pointer, and the engine's touch pad comes back (main's
+    `render.hud` / `input.pointer` ask `Raid.summaryUp()`). Its `onClose` sets `r.skipInput`, so the B
+    that closed it does not also step the commands back.
+  - **The HUD:** the boss's block (`Rd.BOSS_HUD`, sizes in the window's height off the capture): the
+    name large, white with a pink glow, a status tag after it (`STATUS_TAG`: BURNED orange, PARALYZED
+    yellow, POISONED purple, ASLEEP grey, FROZEN cyan, each with a drawn sign), the HP bar (green /
+    yellow / red) on a dark track; no stars or turn count in battle (the game shows neither). The message
+    band (`Rd.MSG`, Wooble 2026-10-26, from a Sword / Shield capture: dark gray across the whole width
+    near the foot, slanted lighter ends, white words typed out at `CPS` 40; sizes in the screen's
+    height). The pad is not
+    drawn, nor tapped, while a message shows: the commands come once it has gone, as in the game.
+  - **Input:** `Rd.input` (the den screen; the commands: up / down, A, B back; the turn: A hurries the words), `Rd.pointer` (the pad's pills, from its last draw).
 - `src/dens.lua` (Dn), dens on the routes.
   - **Pure parts** (tested headless by `tests/dens_test.lua`):
     - `Dn.pick(view, seed)`: 1–2 spots, `DENS.EDGE` in from the border, `WARP_GAP` from warps and
@@ -153,11 +192,46 @@ out of PlayNav (`~\Documents\GitHub\g1r-ds-touch`) on 2026-10-26 (Wooble); the p
     `data/raid_rules.lua` SIZE). Pad at z −9.2, r 3.4. Members in an arc at z −0.75 / −1.25.
 - `src/render3d.lua` + `src/g3d/` (copied from PlayNav; g3d is MIT). A colour+depth canvas per size,
   `prepare(scene, setup)` in update, `draw` places the picture.
-- `src/pad.lua`, the battle pad.
-  - FIGHT / ITEM / FLEE, Gen 5 colours. FIGHT and ITEM are greyed until the battle exists.
-  - `Pad.draw(G, w, h, r)` draws it in the lower right and returns its rect. `Pad.drawFull` fills a
-    whole screen, for the second-screen path. `Pad.hit(x, y)` tests against the last draw;
-    `Pad.where`.
+- `src/pad.lua`, the battle pad (Wooble 2026-10-26, from a Sword / Shield capture): `Pad.ITEMS` Fight /
+  Pokemon / Bag / Run as pills down the lower right (`Pad.LOOK`, sizes in the window's height: 0.326 x
+  0.092 on a 0.108 pitch, 0.012 from the edge and foot). White with black words, each emblem drawn in
+  lines in its colour at the right end (Fight a burst round a ball, Pokemon a ball, Bag a backpack, Run
+  a runner); the selected one black with white words, a thin rim in its colour (ours: it vanished
+  against the dark den) and a white chevron edged black at its left. Pokemon opens the summary
+  (no switching in a raid). `Pad.draw(G, w, h, r)` (the selection is `r.cmd.cursor`) returns
+  the stack's rect; `Pad.drawFull` fills a whole screen for the second-screen path; `Pad.hit(x, y)` ->
+  an id, "panel" or nil, against the last draw; `Pad.where` (`where.flee` = `where.run`).
+- `src/battle.lua` (Bt), the battle on the engine: `Bt.member(mon)` (a deep copy through
+  `State.makeBattler`, its four moves with their PP), `Bt.boss(key, rng)` (the pack's Giga base stats
+  at a level in its tier's band, the tier's IVs, HP x `hpMult`, its types by name, ability none),
+  `Bt.move(ref)` (the engine's record via `Moves.get`; name title-cased, type, power, accuracy,
+  priority, `spread` from the target bits 8 / 32, and `side`: what it does besides damage), and
+  `Bt.adapter(rng)` for the sim - `damage` (the engine's `Damage.calc` with an `Adapter.new` over a
+  minimal st: `badges = {}` so no badge boosts, `wild`; the National Dex's ability and move-rule wraps
+  apply; the immunity abilities Levitate / Volt Absorb / Water Absorb / Flash Fire / Wonder Guard
+  checked first; `info.effectiveness` set to the chart's multiplier - the engine's is a scaled
+  product), `hits` (Gen 3's accuracy with `Rules.ACCURACY_STAGE`), `speed` (stage, paralysis),
+  `effectiveness`. A move's `side`: the National Dex's `extra` first (`exports.moveExtra`, through
+  `deps.dex`; `Bt.extraSide`: foe / self stages, ailment + chance, heal, drain / recoil), else its Gen 3
+  effect by name (`EffectIds`: `X_UP` / `_DOWN` / `_2` / `_HIT`, Bulk Up and kin, sleep, poison,
+  toxic, paralysis, Will-O-Wisp, the burn / freeze / paralysis / poison hits, Recover).
+- `src/raid_sim.lua` (Sim), the turns, pure (`tests/raid_sim_test.lua`, a fake adapter): priority then
+  speed, a random tie-break; the boss once a turn, a random move, a spread move on every member on the
+  field, else one at random; sleep 2-5 turns, freeze thaws 1 in 5, paralysis 1 in 4; poison / burn
+  1/8, toxic n/16 at the turn's end; stat stages held to +-6; Gen 3's status immunities by type; a
+  knocked-out member sits the next turn out and comes back at full HP (`down` 2), every knock-out
+  counted; `over` "win" | "faints" (`RAID.FAINTS`) | "storm" (`RAID.TURNS`). Its events carry their
+  words (English).
+- `src/battler_hud.lua` (Bh), the command phase's HUD, same capture: `Bh.drawOrder` - the four down the
+  top left in choosing order (`Bh.ORDER`), white boxes with a dark edge, the party icon, a thought
+  bubble while waiting (its dots ripple on the one choosing, which is wider with a pink stripe) or,
+  once its command is in, the mark of its action (Wooble: as the game; `Bh.actionOf`, `Bh.actionIcon`:
+  a target with a burst for a move that hits, a yin-yang for a status move), its HP bar;
+  `Bh.drawRows` - the same rows during the turn, only the members the words are about; `Bh.drawPanel` - the one choosing in the lower left
+  (`Bh.PANEL`): a white panel with a slanted right edge, icon, name, gender drawn as a sign (the
+  default face has none), "Lv." + level, HP bar (green / yellow / red), "hp/max", the EXP bar.
+  Fed by `m.info` (raid.lua `memberInfo`, the update step: `Pokemon.displayName`, `SummaryData.gender`,
+  `Pokemon.monIcon`, `mon.hp / maxHp / level`, `SummaryData.expProgress`).
 - `src/hd.lua`: `HD.drawPixel` draws nearest or sharp-bilinear pixel art at any scale (from PlayNav).
 - `src/pad_hide.lua`: hides the engine's TouchControls while a raid's pad is on the main screen, and
   restores **exactly the previous `enabled`**. The PlayNav original re-read the options, which left a
@@ -243,13 +317,14 @@ timeout -k 5 300 "/c/Program Files/LOVE/love.exe" . 2>&1 | grep -E "^\[driver\]|
 ```
 
 Close Wooble's game first: two engine instances share caches. The probe opens a raid from the field
-(`exports.open`, `PROBE_BOSS`), shoots the intro, taps FLEE, and checks the layer, the sheet and the
+(`exports.open`, `PROBE_BOSS`), shoots the intro, walks the commands (a pick, the selection moving, B back, all four in, the next turn; r07-r10; the summary and B out of it, r11-r12), taps Run (`where.flee`), and checks the layer, the sheet and the
 engine pad are back as they were.
 
 The dens have a headless test and an engine probe:
 
 ```sh
 cd ~/Documents/GitHub/max-raids && luajit tests/dens_test.lua    # placement and the daily roll
+luajit tests/raid_sim_test.lua   # the turns: order, faints, the storm, statuses, extras
 # in gen1recomp: POKEPORT_DRIVER=mods/max_raids/tests/drivers/dens_probe.lua (same env as above)
 ```
 
@@ -279,10 +354,16 @@ with `require`. The beam used `package.loaded["src.core.game3.map"]`, got nil, a
     the Kanto Gear stand-down, the engine pad hidden and restored.
   - Phase 1, the dens: placement, the daily roll by badges, the den sprites and beam, A opening the den
     screen, picking four, START into the intro.
-- **Open from Phase 1.** A won raid should call `Dn.finish(den)`; that comes with the win in Phase 2.
-  A fled raid leaves the den active, as in the games.
-- **Next.** Phase 2, the battle slice (`battle.lua` adapter over the engine,
-  `raid_sim.lua` pure loop, HUD, FIGHT flow). Then Phase 3: G-Max effects and shaders, rewards and the
-  catch, the second-screen pad, the other games. Then Phase 4: polish and the Thor.
+  - Phase 2, the battle slice (2026-10-26): src/battle.lua, src/raid_sim.lua, the move menu, the turn's
+    events, win / loss; a won den is done for the day (`Dn.finish`). A fled or lost raid leaves the den
+    active, as in the games.
+- **Needs national_dex_gen3's `exports.moveExtra`** (added there 2026-10-26, its CHANGELOG
+  [Unreleased]; not yet released): without it its newer status moves (Work Up ...) do "nothing".
+- **Next.** Phase 3: the shields, the boss's extras (G-Max move, wipe, stat-up scripts), the pouch
+  (Bag), cheers, weather; the catch and rewards; G-Max effects and shaders; sound; the second-screen
+  pad; FireRed / LeafGreen / Ruby / Sapphire. Then Phase 4: polish and the Thor.
+- **Not in the sim yet:** confusion, flinch, multi-hit (Surging Strikes' three), Spectral Thief's
+  theft, the battle.damage hook's abilities (Adaptability, Filter ...: the engine runs them in its own
+  hit script), held items' end-of-turn effects, critical-hit stages beyond the engine's own roll.
 - **Known.** The 4th member stands behind the pad in a 16:9 window; space the members, or place the pad,
   with the battle HUD.

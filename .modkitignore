@@ -4,3 +4,4 @@ tools/raid_pack.py
 tests/dens_test.lua
 tests/drivers/raid_probe.lua
 tests/drivers/dens_probe.lua
+tests/raid_sim_test.lua

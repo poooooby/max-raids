@@ -1,0 +1,219 @@
+-- The raid's turns, headless: src/raid_sim.lua with a fake adapter (fixed damage, every move hits).
+--   luajit tests/raid_sim_test.lua   (from the repo root)
+
+local function read(path)
+  local f = assert(io.open(path, "rb"))
+  local s = f:read("*a")
+  f:close()
+  return s
+end
+local Sim = assert(loadstring(read("src/raid_sim.lua"), "@src/raid_sim.lua"))()
+
+local passed, failed = 0, 0
+local function check(ok, what)
+  if ok then passed = passed + 1 else failed = failed + 1; print("FAIL " .. what) end
+end
+
+-- a seeded generator
+local function rngOf(seed)
+  local s = seed
+  return function(lo, hi)
+    s = (1103515245 * s + 12345) % 2147483648
+    return lo + s % (hi - lo + 1)
+  end
+end
+
+local function stages() return { attack = 0, defense = 0, spAtk = 0, spDef = 0, speed = 0, accuracy = 0, evasion = 0 } end
+local function mv(name, o)
+  o = o or {}
+  return { name = name, power = o.power or 50, status = o.status or false, priority = o.priority or 0,
+    spread = o.spread or false, side = o.side, pp = 10, maxPp = 10, type = o.type or 0, accuracy = 100 }
+end
+local function battler(name, hp, speed, moves, boss)
+  return { name = name, mon = { hp = hp, maxHp = hp, speed = speed }, stages = stages(), moves = moves,
+    boss = boss, type1 = 0 }
+end
+
+-- the fake adapter: damage is the move's power (x2 when `double` names the target), all moves hit
+local function adapter(o)
+  o = o or {}
+  return {
+    damage = function(att, def, m) return m.power, { effectiveness = (o.eff and o.eff[def.name]) or 1 } end,
+    hits = function() return o.miss ~= true end,
+    speed = function(b) return b.mon.speed end,
+    effectiveness = function() return 1 end,
+  }
+end
+local function team(n, hp, speeds)
+  local t = {}
+  for i = 1, n do t[i] = battler("M" .. i, hp or 100, speeds and speeds[i] or 50, { mv("Tackle", { power = 10 }) }) end
+  return t
+end
+local function all(n) local c = {} for i = 1, n do c[i] = { move = 1 } end return c end
+local function kinds(ev) local k = {} for _, e in ipairs(ev) do k[#k + 1] = e.kind end return table.concat(k, ",") end
+
+-- order: by speed, the boss among them
+do
+  local boss = battler("Boss", 1000, 60, { mv("Hit", { power = 1 }) }, true)
+  local s = Sim.new{ boss = boss, members = team(4, 100, { 10, 90, 40, 70 }), adapter = adapter(), rng = rngOf(1) }
+  local ev = s:turn(all(4))
+  local order = {}
+  for _, e in ipairs(ev) do if e.kind == "use" then order[#order + 1] = e.who.name end end
+  check(table.concat(order, " ") == "M2 M4 Boss M3 M1", "speed order: " .. table.concat(order, " "))
+  check(boss.mon.hp == 960, "four hits of 10 on the boss")
+  check(s.turnNo == 2, "the turn moves on")
+end
+
+-- priority before speed
+do
+  local boss = battler("Boss", 1000, 200, { mv("Hit", { power = 1 }) }, true)
+  local m = team(1, 100, { 10 })
+  m[1].moves[1] = mv("Quick Attack", { power = 10, priority = 1 })
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(2) }
+  local ev = s:turn(all(1))
+  local first
+  for _, e in ipairs(ev) do if e.kind == "use" then first = first or e.who.name end end
+  check(first == "M1", "priority goes first")
+end
+
+-- the boss falls: won, and nothing after it
+do
+  local boss = battler("Boss", 15, 1, { mv("Hit", { power = 1 }) }, true)
+  local s = Sim.new{ boss = boss, members = team(4, 100, { 50, 40, 30, 20 }), adapter = adapter(), rng = rngOf(3) }
+  local ev = s:turn(all(4))
+  check(s.over == "win", "the boss down: won")
+  check(ev[#ev].kind == "over" and ev[#ev].outcome == "win", "the last event says so")
+  local uses = 0
+  for _, e in ipairs(ev) do if e.kind == "use" then uses = uses + 1 end end
+  check(uses == 2, "no move after the boss falls (" .. uses .. ")")
+end
+
+-- a member down sits the next turn out and comes back at full HP; every knock-out counts
+do
+  local boss = battler("Boss", 100000, 100, { mv("Crush", { power = 200 }) }, true)
+  local s = Sim.new{ boss = boss, members = team(1, 100), adapter = adapter(), rng = rngOf(4),
+    rules = { TURNS = 10, FAINTS = 4 } }
+  s:turn(all(1))
+  check(s.faints == 1 and not s:canAct(1), "knocked out: it cannot act next turn")
+  local ev = s:turn(all(1))
+  check(kinds(ev):find("back") ~= nil and s.members[1].mon.hp == 100, "back at full HP after a turn out")
+  check(s:canAct(1), "and acts again")
+end
+
+-- four knock-outs: lost
+do
+  local boss = battler("Boss", 100000, 100, { mv("Quake", { power = 500, spread = true }) }, true)
+  local s = Sim.new{ boss = boss, members = team(4, 100), adapter = adapter(), rng = rngOf(5),
+    rules = { TURNS = 10, FAINTS = 4 } }
+  local ev = s:turn(all(4))
+  check(s.over == "faints", "a spread move knocks out all four: lost")
+  local hit = 0
+  for _, e in ipairs(ev) do if e.kind == "damage" then hit = hit + 1 end end
+  check(hit == 4, "the spread move hit every member (" .. hit .. ")")
+  check(ev[#ev].text == "You were blown out of the den!", "blown out")
+end
+
+-- the storm: ten turns
+do
+  local boss = battler("Boss", 1000000, 1, { mv("Tap", { power = 1 }) }, true)
+  local s = Sim.new{ boss = boss, members = team(4, 1000), adapter = adapter(), rng = rngOf(6),
+    rules = { TURNS = 10, FAINTS = 4 } }
+  local n = 0
+  while not s.over and n < 20 do s:turn(all(4)); n = n + 1 end
+  check(s.over == "storm" and n == 10, ("the storm after ten turns (%s after %d)"):format(tostring(s.over), n))
+end
+
+-- status: sleep skips moves, a stat drop clamps at -6, a type immune to poison stays clean
+do
+  local boss = battler("Boss", 100000, 1, { mv("Sleep Powder", { status = true, power = 0, side = { status = "SLP" } }) }, true)
+  local m = team(1, 1000, { 50 })
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(7) }
+  s:turn(all(1))
+  check(m[1].status == "SLP", "put to sleep")
+  local ev = s:turn(all(1))
+  check(kinds(ev):find("cant") ~= nil, "asleep: it cannot move")
+
+  local boss2 = battler("Boss", 100000, 1, { mv("Screech", { status = true, power = 0, side = { stages = { defense = -2 } } }) }, true)
+  local m2 = team(1, 1000)
+  local s2 = Sim.new{ boss = boss2, members = m2, adapter = adapter(), rng = rngOf(8), rules = { TURNS = 20, FAINTS = 4 } }
+  for _ = 1, 5 do s2:turn(all(1)) end
+  check(m2[1].stages.defense == -6, "Defense held at -6")
+
+  local boss3 = battler("Boss", 100000, 1, { mv("Toxic", { status = true, power = 0, side = { status = "TOX" } }) }, true)
+  local m3 = team(1, 1000)
+  m3[1].type1 = 8
+  local s3 = Sim.new{ boss = boss3, members = m3, adapter = adapter(), rng = rngOf(9) }
+  local ev3 = s3:turn(all(1))
+  check(m3[1].status == nil and kinds(ev3):find("fail") ~= nil, "a Steel type is not poisoned")
+end
+
+-- poison bites at the turn's end, toxic harder each turn
+do
+  local boss = battler("Boss", 100000, 1, { mv("Toxic", { status = true, power = 0, side = { status = "TOX" } }) }, true)
+  local m = team(1, 1600)
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(10) }
+  s:turn({})
+  local after1 = m[1].mon.hp
+  s:turn({})
+  check(after1 == 1500 and m[1].mon.hp == 1300, ("toxic 1/16 then 2/16 (%d, %d)"):format(after1, m[1].mon.hp))
+end
+
+-- an immunity: no damage, the words for it
+do
+  local boss = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  local s = Sim.new{ boss = boss, members = team(1), adapter = adapter({ eff = { Boss = 0 } }), rng = rngOf(11) }
+  local ev = s:turn(all(1))
+  check(boss.mon.hp == 1000 and kinds(ev):find("effect") ~= nil, "no effect on an immune boss")
+end
+
+-- a newer move's extra (the National Dex's): src/battle.lua turns it into a side the sim runs
+do
+  local N = assert(loadstring(read("data/raid_rules.lua"), "@data/raid_rules.lua"))()
+  local mod = { log = { warn = function() end } }
+  local Bt = assert(loadstring(read("src/battle.lua"), "@src/battle.lua"))()(mod, { N = N, Bosses = {}, Sprites = {} })
+  local workUp = Bt.extraSide({ kind = "status", self = { attack = 1, spAtk = 1 }, chance = 100 })
+  check(workUp and workUp.self and workUp.selfStages.attack == 1 and workUp.chance == nil, "Work Up: its user, no chance roll")
+  local fang = Bt.extraSide({ kind = "hit", ailment = "BURN", ailmentChance = 10 })
+  check(fang and fang.status == "BRN" and fang.statusChance == 10, "Fire Fang: a 10% burn")
+  local closeCombat = Bt.extraSide({ kind = "hit", self = { defense = -1, spDef = -1 }, chance = 100 })
+  check(closeCombat and not closeCombat.self and closeCombat.selfStages.defense == -1, "Close Combat lowers its user's")
+
+  local boss = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  local m = team(1, 100, { 50 })
+  m[1].moves[1] = mv("Work Up", { status = true, power = 0, side = workUp })
+  local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(12) }
+  s:turn(all(1))
+  check(m[1].stages.attack == 1 and m[1].stages.spAtk == 1 and boss.stages.attack == 0, "Work Up raises its user's Attack and Sp. Atk")
+
+  local boss2 = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  local m2 = team(1, 100, { 50 })
+  m2[1].mon.hp = 50
+  m2[1].moves[1] = mv("Drain Punch", { power = 40, side = { drain = 50 } })
+  local s2 = Sim.new{ boss = boss2, members = m2, adapter = adapter(), rng = rngOf(13) }
+  s2:turn(all(1))
+  check(m2[1].mon.hp == 69, ("drains half the damage (50 + 20 - 1: %d)"):format(m2[1].mon.hp))
+
+  local boss3 = battler("Boss", 1000, 1, { mv("Tap", { power = 1 }) }, true)
+  local m3 = team(1, 100, { 50 })
+  m3[1].moves[1] = mv("Brave Bird", { power = 60, side = { drain = -33 } })
+  local s3 = Sim.new{ boss = boss3, members = m3, adapter = adapter(), rng = rngOf(14) }
+  s3:turn(all(1))
+  check(m3[1].mon.hp == 79, ("recoil a third of the damage (100 - 20 - 1: %d)"):format(m3[1].mon.hp))
+end
+
+-- the same seed, the same turn
+do
+  local function run()
+    local boss = battler("Boss", 1000, 50, { mv("A", { power = 5 }), mv("B", { power = 7 }) }, true)
+    local s = Sim.new{ boss = boss, members = team(4, 100, { 50, 50, 50, 50 }), adapter = adapter(), rng = rngOf(42) }
+    local out = {}
+    for _ = 1, 3 do
+      for _, e in ipairs(s:turn(all(4))) do out[#out + 1] = e.kind .. ":" .. (e.text or e.amount or "") end
+    end
+    return table.concat(out, "|")
+  end
+  check(run() == run(), "a seed plays the same")
+end
+
+print(("%d/%d checks passed  (max_raids sim)"):format(passed, passed + failed))
+if failed > 0 then os.exit(1) end

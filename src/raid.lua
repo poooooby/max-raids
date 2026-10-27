@@ -13,6 +13,8 @@
 
 return function(mod, deps)
   local N, Bosses, Sprites, Scene, Pad = deps.N, deps.Bosses, deps.Sprites, deps.Scene, deps.Pad
+  local BattlerHud = deps.BattlerHud
+  local Battle, Sim = deps.Battle, deps.Sim
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
 
@@ -27,6 +29,7 @@ return function(mod, deps)
   local Pokemon = engine("src.core.game3.pokemon")
   local Runtime = engine("src.core.game3.runtime")
   local Audio = engine("src.core.game3.audio")
+  local Summary = engine("src.core.game3.summary_data")
 
   local function drawPixel(...)
     local HD = deps.HD
@@ -220,8 +223,42 @@ return function(mod, deps)
 
   -- each member's picture as the den draws it, refreshed in the update step:
   -- { image, quad, box, cell } (box in the quad's units; cell the pic's height, 64)
+  -- what the HUD shows of a member (the update step): name, level, HP, gender, EXP share, icon
+  local function memberInfo(m)
+    local mon = m.mon
+    local info = m.info or {}
+    m.info = info
+    if not info.name then
+      local name = "?"
+      if Pokemon and Pokemon.displayName then
+        local ok, n = pcall(Pokemon.displayName, mon)
+        if ok and type(n) == "string" then name = n end
+      end
+      info.name = name
+      if Summary and Summary.gender then
+        local ok, g = pcall(Summary.gender, mon)
+        info.gender = ok and g or ""
+      end
+      if Pokemon and Pokemon.monIcon then
+        local ok, ic = pcall(Pokemon.monIcon, mon)
+        if ok and type(ic) == "table" then info.icon = ic end
+      end
+    end
+    info.level = tonumber(mon.level) or 1
+    info.maxHp = tonumber(mon.maxHp) or 0
+    info.hp = m.b and floor((m.b.dispHp or 0) + 0.5) or (tonumber(mon.hp) or 0)
+    info.exp = 0
+    if Summary and Summary.expProgress then
+      local okG, gr = pcall(function() return Pokemon.growthRate(Pokemon.speciesOf(mon)) end)
+      local ok, e = pcall(Summary.expProgress, mon, okG and gr or nil)
+      if ok and type(e) == "table" then info.exp = tonumber(e.progressPercent) or 0 end
+    end
+  end
+  Rd.memberInfo = memberInfo
+
   local function memberPics(r)
     for _, m in ipairs(r.members) do
+      memberInfo(m)
       local pic = backPicOf(m.mon)
       if pic then
         local img = pic.image
@@ -261,10 +298,33 @@ return function(mod, deps)
     return nil
   end
 
+  -- the battle: the four as copies (src/battle.lua), the boss at its tier, the turns (src/raid_sim.lua);
+  -- each member's `b` is its battler and its `mon` the copy from then on (the HUD and the summary
+  -- show the raid's HP, never the save's)
+  local function setupBattle(members)
+    if not (Battle and Sim) then return end
+    local gen = love and love.math and love.math.newRandomGenerator(os.time())
+    local rng = function(lo, hi) return gen and gen:random(lo, hi) or math.random(lo, hi) end
+    r.rng = rng
+    r.boss = Battle.boss(r.key, rng)
+    local list = {}
+    for i, m in ipairs(members) do
+      m.b = Battle.member(m.mon)
+      m.mon = m.b.mon
+      m.b.dispHp, m.b.dispTarget = tonumber(m.mon.hp) or 0, tonumber(m.mon.hp) or 0
+      list[i] = m.b
+    end
+    if not r.boss then return end
+    r.boss.dispHp, r.boss.dispTarget = r.boss.mon.hp, r.boss.mon.hp
+    r.adapter = Battle.adapter(rng)
+    r.sim = Sim.new{ boss = r.boss, members = list, adapter = r.adapter, rng = rng, rules = R }
+  end
+
   -- the raid itself begins: the intro from the close-up on the party
   local function begin(members)
     r.phase, r.t, r.members, r.cues, r.hud = "intro", 0, members, {}, 0
     r.say = nil
+    setupBattle(members)
     if Scene then
       Scene.setTime(0)
       Scene.shot("close", 0)
@@ -392,19 +452,274 @@ return function(mod, deps)
       if r.cues.say then r.hud = min(1, r.hud + dt / I.HUD_S) end
       if once("member", I.MEMBER_AT) and Scene then Scene.shot("member", I.MEMBER_S, 1) end
       if r.t >= I.DONE then
-        r.phase = "command"
         r.say = nil
+        Rd.startCommand(true)
       end
     end
+    if r.phase == "battle" then Rd.playEvents() end
+    if not r then return end
+    -- the HP bars drain (or fill) toward what the events have shown so far
+    local function ease(b)
+      if not (b and b.dispHp) then return end
+      local step = max(1, tonumber(b.mon.maxHp) or 1) * dt / Rd.EVENT.HP_S
+      local d = (b.dispTarget or 0) - b.dispHp
+      if math.abs(d) <= step then b.dispHp = b.dispTarget else b.dispHp = b.dispHp + (d > 0 and step or -step) end
+    end
+    ease(r.boss)
+    for _, m in ipairs(r.members) do ease(m.b) end
+    if r.boss and r.boss.dispHp then r.hpShown = r.boss.dispHp / max(1, r.boss.mon.maxHp) end
+    -- the boss's block: always outside the turn; in it, while the words are about the boss
+    local want = (r.phase ~= "battle" or r.bossShow) and 1 or 0
+    local cur = r.bossA or 1
+    r.bossA = cur + max(-1, min(1, (want - cur) * 1)) * min(1, dt * Rd.EVENT.FADE)
+    if r.phase == "command" and r.cmd and r.cmd.menu == "moves" then Rd.moveList() end
     -- the members' pictures and the den's render: here, outside any draw
     memberPics(r)
     if Scene and Scene.prepare then Scene.prepare(r.t) end
   end
 
+  -- ------- the commands: each member in turn (the order list down the top left) picks from the pad;
+  -- once all have, the turn is fought. B steps back to the one before, undoing its pick.
+
+  Rd.SWAP_S = 0.6     -- the camera to the next member's shoulder
+  local function canAct(i)
+    if r.sim then return r.sim:canAct(i) end
+    local m = r.members[i]
+    return m ~= nil and (tonumber(m.mon and m.mon.hp) or 1) > 0
+  end
+  local function nextActor(from)
+    for i = from, #r.members do
+      if canAct(i) and r.cmd.chosen[i] == nil then return i end
+    end
+    return nil
+  end
+  local function toMember(i, cut)
+    if Scene and i then Scene.shot("member", cut and 0 or Rd.SWAP_S, i) end
+  end
+
+  -- a new turn's commands (fresh: the intro has the camera there already)
+  function Rd.startCommand(fresh)
+    if not r then return false end
+    r.turn = (r.turn or 0) + 1
+    r.phase = "command"
+    r.cmd = { chosen = {}, cursor = 1, menu = "main" }
+    r.cmd.actor = nextActor(1)
+    r.say = nil
+    -- (no one able to choose - all sitting out: the boss's turn alone)
+    if not r.cmd.actor then return Rd.fight() end
+    if not fresh then toMember(r.cmd.actor) end
+    return true
+  end
+
+  function Rd.cursorTo(i)
+    if not (r and r.phase == "command" and Pad and Pad.ITEMS[i]) then return false end
+    r.cmd.cursor = i
+    return true
+  end
+
+  -- the game's own summary of the member choosing (L / R through the four), over the raid; read
+  -- only (context "factory": no moves swapped). The raid stands aside until it closes.
+  function Rd.summary()
+    if not (r and r.phase == "command" and r.cmd.actor) or r.summary then return false end
+    local SummaryMenu = engine("src.ui.game3.summary_menu")
+    if not (SummaryMenu and SummaryMenu.openMenu) then return false end
+    local mons = {}
+    for i, m in ipairs(r.members) do mons[i] = m.mon end
+    local raid = r
+    raid.summary = true
+    local ok, err = pcall(SummaryMenu.openMenu, mons, r.cmd.actor, {
+      context = "factory",
+      -- (the press that closed it is not the raid's: one input step skipped)
+      onClose = function() raid.summary, raid.skipInput = false, true end,
+    })
+    if not ok then
+      raid.summary = false
+      mod.log:warn("the summary could not open: %s", tostring(err))
+      return false
+    end
+    return true
+  end
+  function Rd.summaryUp() return r ~= nil and r.summary == true end
+
+  -- the member choosing now picks a command: Run leaves; Pokemon shows its summary
+  function Rd.choose(id)
+    if not (r and r.phase == "command" and r.cmd.actor) or r.summary then return false end
+    if id == "run" then return Rd.flee() end
+    if id == "pokemon" then return Rd.summary() end
+    local c = r.cmd
+    if id == "fight" then
+      c.menu, c.cursor = "moves", 1
+      Rd.moveList()
+      return true
+    end
+    if id == "back" then return Rd.back() end
+    local slot = type(id) == "string" and tonumber(id:match("^move(%d)$"))
+    if not slot then return false end
+    local b = r.members[c.actor] and r.members[c.actor].b
+    local mv = b and b.moves[slot]
+    if not mv or (mv.pp or 0) <= 0 then return false end
+    c.chosen[c.actor] = { move = slot }
+    local nxt = nextActor(c.actor + 1)
+    c.cursor, c.menu = 1, "main"
+    if nxt then
+      c.actor = nxt
+      toMember(nxt)
+    else
+      c.actor = nil
+      Rd.fight()
+    end
+    return true
+  end
+
+  -- the move menu's rows for the member choosing (the update step: effectiveness asks the engine)
+  local function effOf(m)
+    if m == 0 then return "none" elseif m > 1 then return "super" elseif m < 1 then return "weak" end
+    return nil
+  end
+  function Rd.moveList()
+    local c = r and r.cmd
+    local b = c and c.actor and r.members[c.actor] and r.members[c.actor].b
+    if not b then return end
+    c.moveList = c.moveList or {}
+    for i = 1, 4 do
+      local mv = b.moves[i]
+      if mv then
+        local row = c.moveList[i] or {}
+        c.moveList[i] = row
+        row.name, row.typeName, row.pp, row.maxPp = mv.name, mv.typeName, mv.pp, mv.maxPp
+        row.rgb = Battle and Battle.TYPE_RGB[mv.typeName] or nil
+        row.eff = nil
+        if not mv.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(mv.type, r.boss)) end
+      else
+        c.moveList[i] = nil
+      end
+    end
+  end
+
+  -- ------- the turn: the simulation runs it at once; its events then play one by one - the words
+  -- typed in the band, the camera on whoever moves, the bars draining as each hit lands
+
+  Rd.EVENT = { HOLD_S = 0.7, DAMAGE_S = 0.65, HP_S = 0.6, CAM_S = 0.5, FADE = 10 }
+  local function memberIndex(b)
+    for i, m in ipairs(r.members) do if m.b == b then return i end end
+    return nil
+  end
+
+  function Rd.fight()
+    if not (r and r.sim) then return false end
+    local choices = {}
+    for i, c in pairs(r.cmd and r.cmd.chosen or {}) do choices[i] = c end
+    r.actions = {}
+    for i, c in pairs(choices) do
+      r.actions[i] = BattlerHud and BattlerHud.actionOf(r.members[i], c) or "fight"
+    end
+    r.events = r.sim:turn(choices)
+    r.evI, r.evT, r.evDur = 0, r.t, 0
+    r.bossShow, r.rows = false, {}
+    r.phase = "battle"
+    return true
+  end
+
+  -- what the words are about, as the game shows it: the boss's block for the boss (its moves, a hit
+  -- on it, its status), else the member's row at the top left (its action, its HP); a member's move
+  -- at the boss is about the boss, one on itself about the member. "fail" keeps what was shown.
+  local function aboutOf(e)
+    if e.kind == "fail" then return nil end
+    if e.kind == "over" then return r.boss end
+    if e.kind == "use" then
+      if e.who.boss then return r.boss end
+      local mv = e.move
+      if mv and mv.status and mv.side and mv.side.self then return e.who end
+      return r.boss
+    end
+    return e.target or e.who
+  end
+  local function showFor(e)
+    local about = aboutOf(e)
+    if not about then return end
+    if about.boss then
+      r.bossShow, r.rows = true, {}
+    else
+      r.bossShow = false
+      local i = memberIndex(about)
+      r.rows = i and { { i, r.members[i], kind = r.actions and r.actions[i] or "fight" } } or {}
+    end
+  end
+
+  local function startEvent(e)
+    local E = Rd.EVENT
+    r.evT = r.t
+    showFor(e)
+    if e.kind == "faint" and not e.who.boss then r.shownFaints = (r.shownFaints or 0) + 1 end
+    if e.kind == "use" then
+      local i = memberIndex(e.who)
+      if Scene then
+        if i then Scene.shot("member", E.CAM_S, i) else Scene.shot("boss", E.CAM_S) end
+      end
+      if i then r.focus = i end
+    end
+    local hit = e.target or e.who
+    if e.hp and hit then
+      hit.dispTarget = e.hp
+      local i = memberIndex(hit)
+      if i then r.focus = i end
+      if (e.kind == "damage" or e.kind == "residual") and Scene then
+        Scene.shake(hit.boss and 0.08 or 0.14, 0.4)
+      end
+    end
+    if e.text then
+      Rd.say(e.text)
+      r.evDur = #e.text / Rd.MSG.CPS + E.HOLD_S
+    else
+      -- (a hit lands with no words: the band steps aside while the bar drains)
+      r.say = nil
+      r.evDur = E.DAMAGE_S
+    end
+  end
+
+  -- the end of the raid's last words: the den's outcome (deps.onEnd), then back to the field
+  local function finish()
+    local outcome = r.sim and r.sim.over
+    if deps.onEnd then pcall(deps.onEnd, r.den, outcome, r) end
+    Rd.close()
+  end
+
+  function Rd.playEvents(skip)
+    if not (r and r.phase == "battle" and r.events) then return end
+    if not skip and r.t - r.evT < r.evDur then return end
+    r.evI = r.evI + 1
+    local e = r.events[r.evI]
+    if e then return startEvent(e) end
+    r.events = nil
+    if r.sim and r.sim.over then return finish() end
+    for _, m in ipairs(r.members) do if m.b then m.b.dispTarget = m.b.mon.hp end end
+    if r.boss then r.boss.dispTarget = r.boss.mon.hp end
+    Rd.startCommand()
+  end
+
+  -- back: from the moves to the commands, else to the member before, its pick undone
+  function Rd.back()
+    if not (r and r.phase == "command" and r.cmd.actor) then return false end
+    if r.cmd.menu == "moves" then
+      r.cmd.menu, r.cmd.cursor = "main", 1
+      return true
+    end
+    for i = r.cmd.actor - 1, 1, -1 do
+      if canAct(i) then
+        r.cmd.chosen[i] = nil
+        r.cmd.actor, r.cmd.cursor, r.cmd.menu = i, 1, "main"
+        toMember(i)
+        return true
+      end
+    end
+    return false
+  end
+
   -- ------- input
 
   function Rd.input(input)
-    if not r then return end
+    if not r or r.summary then return end
+    if r.skipInput then r.skipInput = nil; return end
     if r.phase == "den" then
       -- (the press that opened the den is still down on its first frames: not a toggle)
       if r.t < Rd.DEN_ARM_S then return end
@@ -416,7 +731,17 @@ return function(mod, deps)
       elseif input:wasPressed("b") then Rd.close() end
       return
     end
-    if input:wasPressed("b") then Rd.flee() end
+    if r.phase == "command" and Pad then
+      local moves = r.cmd.menu == "moves"
+      local n = moves and max(1, #(r.cmd.moveList or {})) or #Pad.ITEMS
+      if input:wasPressed("up") then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
+      elseif input:wasPressed("down") then r.cmd.cursor = r.cmd.cursor % n + 1
+      elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
+      elseif input:wasPressed("b") then Rd.back() end
+    elseif r.phase == "battle" and input:wasPressed("a") then
+      -- A hurries the words: once typed, on to the next
+      if r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS >= #r.say then Rd.playEvents(true) end
+    end
   end
 
   -- the den screen's places (window pixels), from its last draw
@@ -438,9 +763,19 @@ return function(mod, deps)
       end
       return true
     end
-    if not (r and Pad) or deps.padOnSecond() then return false end
-    local hit = Pad.hit(ev.x, ev.y)
-    if ev.phase == "released" and hit == "flee" then Rd.flee() end
+    if not (r and Pad) or deps.padOnSecond() or r.phase ~= "command" or r.say or r.summary then return false end
+    local hit = Pad.hit(ev.x, ev.y, r.cmd.menu)
+    if hit and hit ~= "panel" then
+      -- a press moves the selection onto the pill; letting go picks it
+      local slot = hit:match("^move(%d)$")
+      if slot then r.cmd.cursor = tonumber(slot) end
+      if r.cmd.menu ~= "moves" then
+        for i, item in ipairs(Pad.ITEMS) do
+          if item.id == hit then r.cmd.cursor = i end
+        end
+      end
+      if ev.phase == "released" then Rd.choose(hit) end
+    end
     return hit ~= nil
   end
 
@@ -476,43 +811,107 @@ return function(mod, deps)
 
   local bossPic, memberPicsShown = {}, {}
 
-  -- the HUD over the den: the boss's name, stars and HP bar at the top (fading in with r.hud),
-  -- the dialogue box at the foot (Gen 5's: white, rounded, a blue-grey frame), clear of the pad
-  local function drawHud(G, w, h, padRect)
+  -- the message band (Sword / Shield's): dark gray across the whole width near the foot, the words
+  -- white, typed out at CPS characters a second. Sizes in the screen's height (`h`), the margin in its
+  -- width, measured off a 1784 x 998 capture: the band 172 tall with 23 under it, the words' left
+  -- edge 160 in, about 48 px type in the band's upper part
+  Rd.MSG = { BAND_H = 0.172, GAP = 0.023, TEXT = 0.048, LEFT = 0.09, TOP = 0.16, CPS = 40,
+    RGBA = { 0.2, 0.2, 0.2, 0.93 } }
+
+  -- the HUD over the den: the boss's name, stars and HP bar at the top (fading in with r.hud) and
+  -- the message band
+  -- the boss's block (Sword / Shield's, sizes in the window's height off a 1782 x 998 capture): the
+  -- name large and white with a pink glow, its status in a tag beside it, the HP bar under it on a
+  -- dark track. It shows while the words are about the boss (r.bossShow, eased into r.bossA).
+  Rd.BOSS_HUD = { NAME = 0.058, NAME_Y = 0.028, BAR_Y = 0.116, BAR_W = 0.513, BAR_H = 0.008 }
+  local STATUS_TAG = {
+    BRN = { "BURNED", { 0.95, 0.45, 0.15 } }, PAR = { "PARALYZED", { 0.85, 0.7, 0.1 } },
+    PSN = { "POISONED", { 0.6, 0.3, 0.75 } }, TOX = { "POISONED", { 0.6, 0.3, 0.75 } },
+    SLP = { "ASLEEP", { 0.55, 0.55, 0.6 } }, FRZ = { "FROZEN", { 0.35, 0.75, 0.9 } },
+  }
+  local glowOff = { { -2, 0 }, { 2, 0 }, { 0, -2 }, { 0, 2 }, { -1.5, -1.5 }, { 1.5, -1.5 }, { -1.5, 1.5 }, { 1.5, 1.5 } }
+  local function drawHud(G, w, h)
     local b = Bosses[r.key]
     if not b then return end
-    local u = h / 360
-    local a = r.hud or 0
-    if a > 0 then
-      local bw = min(w * 0.55, 520 * u)
-      local bx, by = (w - bw) / 2, 10 * u
-      G.setFont(font(15 * u))
-      G.setColor(0, 0, 0, 0.6 * a)
-      G.printf(b.name, bx + 1, by + 1, bw, "center")
+    local a = (r.hud or 0) * (r.bossA or 1)
+    if a > 0.01 then
+      local B = Rd.BOSS_HUD
+      local f = font(h * B.NAME)
+      G.setFont(f)
+      local name = b.name
+      local nw = f:getWidth(name)
+      local nx, ny = (w - nw) / 2, h * B.NAME_Y
+      local k = h / 998
+      G.setColor(1, 0.15, 0.45, 0.28 * a)
+      for _, d in ipairs(glowOff) do G.print(name, nx + d[1] * 2 * k, ny + d[2] * 2 * k) end
       G.setColor(1, 1, 1, a)
-      G.printf(b.name, bx, by, bw, "center")
-      G.setColor(1, 0.85, 0.3, a)
-      drawStars(G, b.stars, bx + bw, by + 9 * u, 9 * u)
-      local hy = by + 21 * u
-      G.setColor(0, 0, 0, 0.6 * a)
-      G.rectangle("fill", bx - 2 * u, hy - 2 * u, bw + 4 * u, 9 * u, 3 * u, 3 * u)
-      G.setColor(0.25, 0.9, 0.35, a)
-      G.rectangle("fill", bx, hy, bw * (r.hpShown or 1), 5 * u, 2 * u, 2 * u)
+      G.print(name, nx, ny)
+      G.print(name, nx + max(1, k), ny)
+      -- its status in a tag after the name
+      local st = r.boss and r.boss.status and STATUS_TAG[r.boss.status]
+      if st then
+        local tf = font(h * 0.02)
+        local tw, th = tf:getWidth(st[1]) + h * 0.03, h * 0.026
+        local tx, ty = nx + nw + h * 0.008, ny + f:getHeight() * 0.62 - th / 2
+        local c = st[2]
+        G.setColor(c[1], c[2], c[3], a)
+        G.rectangle("fill", tx, ty, tw, th, th * 0.3, th * 0.3)
+        -- its sign, drawn: a flame, a bolt, a drop, a "z", a flake
+        G.setColor(1, 1, 1, a)
+        local sx, sy, ss = tx + h * 0.012, ty + th / 2, th * 0.32
+        local code = r.boss.status
+        if code == "BRN" then
+          G.polygon("fill", sx, sy - ss, sx + ss * 0.7, sy + ss * 0.2, sx + ss * 0.45, sy + ss * 0.85,
+            sx - ss * 0.45, sy + ss * 0.85, sx - ss * 0.7, sy + ss * 0.2)
+        elseif code == "PAR" then
+          G.polygon("fill", sx + ss * 0.2, sy - ss, sx - ss * 0.6, sy + ss * 0.15, sx, sy + ss * 0.15,
+            sx - ss * 0.2, sy + ss, sx + ss * 0.6, sy - ss * 0.15, sx, sy - ss * 0.15)
+        elseif code == "PSN" or code == "TOX" then
+          G.circle("fill", sx, sy + ss * 0.25, ss * 0.6, 12)
+          G.polygon("fill", sx, sy - ss, sx + ss * 0.52, sy + ss * 0.05, sx - ss * 0.52, sy + ss * 0.05)
+        elseif code == "SLP" then
+          G.setLineWidth(max(1, ss * 0.3))
+          G.line(sx - ss * 0.6, sy - ss * 0.7, sx + ss * 0.6, sy - ss * 0.7, sx - ss * 0.6, sy + ss * 0.7, sx + ss * 0.6, sy + ss * 0.7)
+          G.setLineWidth(1)
+        else
+          G.setLineWidth(max(1, ss * 0.25))
+          for q = 0, 2 do
+            local ang = q * math.pi / 3
+            G.line(sx - math.cos(ang) * ss, sy - math.sin(ang) * ss, sx + math.cos(ang) * ss, sy + math.sin(ang) * ss)
+          end
+          G.setLineWidth(1)
+        end
+        G.setFont(tf)
+        G.print(st[1], tx + h * 0.024, ty + (th - tf:getHeight()) / 2)
+      end
+      -- the bar: green / yellow / red over a dark track
+      local bw, bh = h * B.BAR_W, h * B.BAR_H
+      local bx, by = (w - bw) / 2, h * B.BAR_Y
+      local share = max(0, min(1, r.hpShown or 1))
+      G.setColor(0.3, 0.3, 0.33, 0.9 * a)
+      G.rectangle("fill", bx, by, bw, bh)
+      if share > 0.5 then G.setColor(0.2, 0.9, 0.3, a)
+      elseif share > 0.2 then G.setColor(0.98, 0.78, 0.15, a)
+      else G.setColor(0.95, 0.25, 0.2, a) end
+      G.rectangle("fill", bx, by, bw * share, bh)
     end
     if r.say then
-      local bh = 46 * u
-      local bx, by = 12 * u, h - bh - 12 * u
-      local bw = w - 24 * u
-      if padRect then bw = max(160 * u, padRect.x - bx - 10 * u) end
-      G.setColor(0.32, 0.42, 0.55, 0.95)
-      G.rectangle("fill", bx, by, bw, bh, 9 * u, 9 * u)
-      G.setColor(0.98, 0.98, 0.97, 1)
-      G.rectangle("fill", bx + 3 * u, by + 3 * u, bw - 6 * u, bh - 6 * u, 7 * u, 7 * u)
-      local n = floor((r.t - (r.sayT or 0)) * 40)
+      local M = Rd.MSG
+      local bh = h * M.BAND_H
+      local by = h - bh - h * M.GAP
+      local c = M.RGBA
+      G.setColor(c[1], c[2], c[3], c[4])
+      G.rectangle("fill", 0, by, w, bh)
+      -- its ends: slanted, a shade lighter
+      G.setColor(1, 1, 1, 0.05)
+      G.polygon("fill", 0, by, h * 0.055, by, h * 0.022, by + bh, 0, by + bh)
+      G.polygon("fill", w - h * 0.05, by, w, by, w, by + bh, w - h * 0.085, by + bh)
+      local n = floor((r.t - (r.sayT or 0)) * M.CPS)
       local str = n >= #r.say and r.say or r.say:sub(1, n)
-      G.setFont(font(17 * u))
-      G.setColor(0.2, 0.2, 0.22, 1)
-      G.printf(str, bx + 16 * u, by + (bh - 17 * u * 1.2) / 2, bw - 32 * u, "left")
+      local lx = w * M.LEFT
+      G.setFont(font(h * M.TEXT))
+      G.setColor(1, 1, 1, 1)
+      G.printf(str, lx, by + bh * M.TOP, w - 2 * lx, "left")
     end
   end
 
@@ -621,7 +1020,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   end
 
   function Rd.draw(G, w, h)
-    if not r then return end
+    if not r or r.summary then return end
     if r.phase == "den" then return drawDen(G, w, h) end
     local img, q = Rd.frameAt(r.key, r.t)
     if img and loaded then
@@ -632,9 +1031,18 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       memberPicsShown[i] = m and m.draw or nil
     end
     if Scene then Scene.draw(G, 0, 0, w, h, r.t, img and bossPic or nil, memberPicsShown) end
-    local padRect = nil
-    if Pad and not deps.padOnSecond() then padRect = Pad.draw(G, w, h, r) end
-    drawHud(G, w, h, padRect)
+    drawHud(G, w, h)
+    -- the commands: the order down the top left, the one choosing in the lower left, the pad (only
+    -- once a message has gone, as the game)
+    if r.phase == "command" and not r.say then
+      if BattlerHud then
+        BattlerHud.drawOrder(G, w, h, r.members, r.cmd, r.t)
+        BattlerHud.drawPanel(G, w, h, r.cmd.actor and r.members[r.cmd.actor])
+      end
+      if Pad and not deps.padOnSecond() then Pad.draw(G, w, h, r) end
+    elseif r.phase == "battle" and BattlerHud and r.rows and #r.rows > 0 then
+      BattlerHud.drawRows(G, w, h, r.rows, r.t)
+    end
   end
 
   -- ------- for drivers
@@ -647,6 +1055,14 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     view.phase = r and r.phase or nil
     view.loaded = Rd.loadedKey()
     view.song = r and r.song or nil
+    view.summary = r and r.summary == true or false
+    view.turn = r and r.turn or nil
+    view.actor = r and r.cmd and r.cmd.actor or nil
+    view.cursor = r and r.cmd and r.cmd.cursor or nil
+    local n = 0
+    if r and r.cmd then for _ in pairs(r.cmd.chosen) do n = n + 1 end end
+    view.chosen = n
+    view.menu = r and r.cmd and r.cmd.menu or nil
     return view
   end
 

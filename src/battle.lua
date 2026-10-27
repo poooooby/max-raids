@@ -1,0 +1,328 @@
+-- The raid's battle on the engine: the battlers (the four as deep copies of the party's Pokemon, the
+-- boss from the Giga Megas pack's stats at its tier's level), the moves (the engine's records, the
+-- National Dex's among them), and the maths the simulation asks for - the engine's own damage
+-- (Damage.calc with an adapter, so the National Dex's abilities and move rules apply), Gen 3
+-- accuracy and speed, effectiveness, and what a move does besides its damage (by its Gen 3 effect).
+-- src/raid_sim.lua runs the turns over this; nothing here touches the save.
+--   Bt = battle(mod, { N, Bosses, Sprites, dex })   dex() -> national_dex_gen3's exports (moveExtra)
+--   Bt.member(mon) -> battler ; Bt.boss(key, rng) -> battler ; Bt.adapter(rng) -> the sim's adapter
+--   Bt.TYPE_RGB[name] ; Bt.typeName(num)
+
+return function(mod, deps)
+  local N, Bosses, Sprites = deps.N, deps.Bosses, deps.Sprites
+  local R = N.RAID
+  local floor, max, min = math.floor, math.max, math.min
+  local Bt = {}
+
+  local function engine(name)
+    local ok, m = pcall(require, name)
+    return ok and type(m) == "table" and m or nil
+  end
+  local Damage = engine("src.core.game3.battle.damage")
+  local Moves = engine("src.core.game3.battle.moves")
+  local Types = engine("src.core.game3.battle.types")
+  local State = engine("src.core.game3.battle.state")
+  local AdapterMod = engine("src.core.game3.battle.adapter")
+  local Rules = engine("src.core.game3.battle.rules")
+  local EffectIds = engine("src.core.game3.battle.effect_ids")
+  local Pokemon = engine("src.core.game3.pokemon")
+  local Progression = engine("src.core.game3.progression")
+
+  -- ------- types
+
+  Bt.TYPE_NAMES = { [0] = "NORMAL", "FIGHTING", "FLYING", "POISON", "GROUND", "ROCK", "BUG", "GHOST", "STEEL",
+    "MYSTERY", "FIRE", "WATER", "GRASS", "ELECTRIC", "PSYCHIC", "ICE", "DRAGON", "DARK", "FAIRY" }
+  -- the types' colours (the modern games')
+  Bt.TYPE_RGB = {
+    NORMAL = { 0.62, 0.62, 0.55 }, FIGHTING = { 0.8, 0.27, 0.22 }, FLYING = { 0.55, 0.62, 0.95 },
+    POISON = { 0.62, 0.33, 0.7 }, GROUND = { 0.85, 0.7, 0.4 }, ROCK = { 0.72, 0.64, 0.33 },
+    BUG = { 0.6, 0.72, 0.15 }, GHOST = { 0.43, 0.35, 0.6 }, STEEL = { 0.6, 0.65, 0.74 },
+    MYSTERY = { 0.45, 0.6, 0.6 }, FIRE = { 0.95, 0.5, 0.2 }, WATER = { 0.3, 0.55, 0.95 },
+    GRASS = { 0.4, 0.75, 0.3 }, ELECTRIC = { 0.97, 0.8, 0.15 }, PSYCHIC = { 0.97, 0.35, 0.52 },
+    ICE = { 0.45, 0.82, 0.85 }, DRAGON = { 0.42, 0.3, 0.95 }, DARK = { 0.42, 0.33, 0.28 },
+    FAIRY = { 0.93, 0.55, 0.75 },
+  }
+  function Bt.typeName(num) return Bt.TYPE_NAMES[tonumber(num) or 0] or "NORMAL" end
+  function Bt.typeNum(name)
+    if Progression and Progression.typeIndexFor then
+      local ok, n = pcall(Progression.typeIndexFor, name)
+      if ok and tonumber(n) then return tonumber(n) end
+    end
+    for k, v in pairs(Bt.TYPE_NAMES) do if v == name then return k end end
+    return 0
+  end
+
+  -- "AIR SLASH" -> "Air Slash"
+  local function titled(s)
+    s = tostring(s or ""):gsub("_", " "):lower()
+    return (s:gsub("(%a)([%w']*)", function(a, b) return a:upper() .. b end))
+  end
+  Bt.titled = titled
+
+  -- ------- moves
+
+  -- the effect ids by name (the engine's table) and back
+  local EFFECT_NAME = {}
+  for name, id in pairs(EffectIds or {}) do if type(id) == "number" then EFFECT_NAME[id] = name end end
+  local STAT_KEY = { ATTACK = "attack", DEFENSE = "defense", SPEED = "speed", SPECIAL_ATTACK = "spAtk",
+    SPECIAL_DEFENSE = "spDef", ACCURACY = "accuracy", EVASION = "evasion" }
+  local MAJOR = { SLEEP = "SLP", TOXIC = "TOX", POISON = "PSN", PARALYZE = "PAR", WILL_O_WISP = "BRN" }
+  local MAJOR_HIT = { POISON_HIT = "PSN", BURN_HIT = "BRN", FREEZE_HIT = "FRZ", PARALYZE_HIT = "PAR" }
+  local MULTI_UP = {
+    BULK_UP = { attack = 1, defense = 1 }, CALM_MIND = { spAtk = 1, spDef = 1 },
+    DRAGON_DANCE = { attack = 1, speed = 1 }, COSMIC_POWER = { defense = 1, spDef = 1 },
+  }
+
+  -- what a move does besides its damage, from its Gen 3 effect:
+  --   { stages = { [stat] = n }, self = true (stages on the user), status = "PAR", chance = 0..100,
+  --     heal = share }
+  local function sideOf(effect, chance)
+    local name = EFFECT_NAME[tonumber(effect) or -1]
+    if not name then return nil end
+    if MULTI_UP[name] then return { stages = MULTI_UP[name], self = true } end
+    if MAJOR[name] then return { status = MAJOR[name] } end
+    if MAJOR_HIT[name] then return { status = MAJOR_HIT[name], chance = chance } end
+    if name == "RESTORE_HP" then return { heal = 0.5, self = true } end
+    -- a stat raised or lowered: NAME_UP / _DOWN (one stage), _UP_2 / _DOWN_2 (two), and
+    -- NAME_UP_HIT / _DOWN_HIT (an attack's chance of one stage)
+    local function cut(suffix)
+      if name:sub(-#suffix) == suffix then return name:sub(1, -#suffix - 1) end
+      return nil
+    end
+    for _, row in ipairs({ { "_UP_HIT", 1, true }, { "_DOWN_HIT", -1, true }, { "_UP_2", 2 }, { "_DOWN_2", -2 },
+      { "_UP", 1 }, { "_DOWN", -1 } }) do
+      local stat = cut(row[1])
+      if stat and STAT_KEY[stat] then
+        return { stages = { [STAT_KEY[stat]] = row[2] }, self = row[2] > 0, chance = row[3] and chance or nil }
+      end
+    end
+    return nil
+  end
+  Bt.sideOf = sideOf
+
+  -- a newer move's extra as the National Dex carries it out (its exports.moveExtra) -> a side:
+  --   foeStages / selfStages, status (+ statusChance), chance (the stat changes'), heal, drain (% of
+  --   the damage dealt; negative = recoil)
+  local AILMENT = { BURN = "BRN", FREEZE = "FRZ", PARALYSIS = "PAR", POISON = "PSN", SLEEP = "SLP", TOXIC = "TOX" }
+  local function extraSide(e)
+    if type(e) ~= "table" then return nil end
+    local s = {}
+    if type(e.foe) == "table" and next(e.foe) then s.foeStages = e.foe end
+    if type(e.self) == "table" and next(e.self) then s.selfStages = e.self end
+    if e.ailment and AILMENT[e.ailment] then s.status, s.statusChance = AILMENT[e.ailment], tonumber(e.ailmentChance) end
+    if tonumber(e.chance) and tonumber(e.chance) < 100 then s.chance = tonumber(e.chance) end
+    if tonumber(e.heal) and (e.healTarget or "self") == "self" then s.heal = tonumber(e.heal) / 100; s.self = true end
+    if tonumber(e.drain) then s.drain = tonumber(e.drain) end
+    -- (a status move touching only its user goes on the user)
+    if e.kind == "status" and s.selfStages and not s.foeStages and not s.status then s.self = true end
+    if not next(s) then return nil end
+    return s
+  end
+  Bt.extraSide = extraSide
+  local function dexExtra(m)
+    local dex = deps.dex and deps.dex()
+    if not (dex and dex.moveExtra) then return nil end
+    local ok, e = pcall(dex.moveExtra, m.numId or m.id)
+    if not (ok and e) then ok, e = pcall(dex.moveExtra, m.id) end
+    return ok and e or nil
+  end
+
+  -- a move as the simulation and the menu use it (nil when the game has no such move)
+  local SPREAD = 8 + 32       -- MOVE_TARGET_BOTH | MOVE_TARGET_FOES_AND_ALLY
+  local bitlib = rawget(_G, "bit")
+  if not bitlib then
+    local ok, b = pcall(require, "bit")
+    bitlib = ok and b or nil
+  end
+  function Bt.move(ref, pp, maxPp)
+    if not Moves then return nil end
+    local ok, m = pcall(Moves.get, ref)
+    if not (ok and type(m) == "table") then return nil end
+    local name = m.id
+    if Moves.displayName then
+      local okN, n = pcall(Moves.displayName, m.numId or ref)
+      if okN and type(n) == "string" and not n:find("^%-+$") then name = n end
+    end
+    local power = tonumber(m.power) or 0
+    return {
+      ref = m, num = m.numId, name = titled(name), type = tonumber(m.type) or 0,
+      typeName = Bt.typeName(m.type), power = power, accuracy = tonumber(m.accuracy) or 0,
+      priority = tonumber(m.priority) or 0, status = power == 0,
+      spread = bitlib and (bitlib.band(tonumber(m.target) or 0, SPREAD) ~= 0) or false,
+      side = extraSide(dexExtra(m)) or sideOf(m.effect, tonumber(m.secondaryChance) or 0),
+      pp = pp or tonumber(m.pp) or 10, maxPp = maxPp or tonumber(m.pp) or 10,
+    }
+  end
+
+  -- ------- battlers
+
+  local function deepCopy(t, seen)
+    if type(t) ~= "table" then return t end
+    seen = seen or {}
+    if seen[t] then return seen[t] end
+    local c = {}
+    seen[t] = c
+    for k, v in pairs(t) do c[k] = deepCopy(v, seen) end
+    return setmetatable(c, getmetatable(t))
+  end
+  Bt.copy = deepCopy
+
+  local function typesOf(species)
+    if Pokemon and Pokemon.types then
+      local ok, t = pcall(Pokemon.types, species)
+      if ok and type(t) == "table" then return t[1], t[2] end
+    end
+    return 0, nil
+  end
+
+  -- one of the four: a deep copy of the party's Pokemon (the save is never touched)
+  function Bt.member(mon)
+    local copy = deepCopy(mon)
+    local b
+    if State and State.makeBattler then
+      local ok, made = pcall(State.makeBattler, copy, "player", { id = 0 })
+      if ok and type(made) == "table" then b = made end
+    end
+    if not b then
+      local species = Pokemon and Pokemon.speciesOf and select(2, pcall(Pokemon.speciesOf, copy)) or copy.species
+      local t1, t2 = typesOf(species)
+      b = { mon = copy, species = species, type1 = t1, type2 = t2 ~= t1 and t2 or nil, side = "player",
+        stages = { attack = 0, defense = 0, spAtk = 0, spDef = 0, speed = 0, accuracy = 0, evasion = 0 },
+        status = copy.status }
+    end
+    b.side = "player"
+    b.name = "?"
+    if Pokemon and Pokemon.displayName then
+      local ok, n = pcall(Pokemon.displayName, copy)
+      if ok and type(n) == "string" then b.name = titled(n) end
+    end
+    b.status = (type(b.status) == "string" and b.status ~= "" and b.status ~= "NONE") and b.status or nil
+    b.moves = {}
+    for i = 1, 4 do
+      local ref = copy.moves and copy.moves[i]
+      if ref and ref ~= 0 then
+        local mv = Bt.move(ref, copy.pp and tonumber(copy.pp[i]), copy.maxPp and tonumber(copy.maxPp[i]))
+        if mv then b.moves[#b.moves + 1] = mv end
+      end
+    end
+    return b
+  end
+
+  -- a stat at a level (Gen 3's formula; HP its own), from a base, an IV, no EVs, neutral nature
+  local function stat(base, iv, level, hp)
+    local core = floor((2 * base + iv) * level / 100)
+    return hp and (core + level + 10) or (core + 5)
+  end
+
+  -- the boss: its pack's Giga base stats at a level in its tier's band, the tier's IVs and HP x hpMult
+  function Bt.boss(key, rng)
+    local b, sp = Bosses[key], Sprites[key]
+    if not (b and sp) then return nil end
+    local T = R.STARS[b.stars] or R.STARS[1]
+    local level = rng and rng(T.lv[1], T.lv[2]) or T.lv[1]
+    local base = sp.base or {}
+    local iv = T.iv or 10
+    local hp = floor(stat(base.hp or 80, iv, level, true) * (T.hpMult or 1))
+    local species = Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national)) or nil
+    local mon = {
+      species = tonumber(species) or 0, speciesId = tonumber(species) or 0, level = level, hp = hp, maxHp = hp,
+      attack = stat(base.atk or 80, iv, level), defense = stat(base.def or 80, iv, level),
+      spAtk = stat(base.spa or 80, iv, level), spDef = stat(base.spd or 80, iv, level),
+      speed = stat(base.spe or 80, iv, level),
+      ivs = { hp = iv, atk = iv, def = iv, spe = iv, spa = iv, spd = iv },
+      evs = { hp = 0, atk = 0, def = 0, spe = 0, spa = 0, spd = 0 },
+      personality = 0, ability = 0, abilityId = 0, friendship = 255,
+    }
+    mon.atk, mon.def, mon.spa, mon.spd, mon.spe = mon.attack, mon.defense, mon.spAtk, mon.spDef, mon.speed
+    local types = b.types or { "NORMAL" }
+    local t1, t2 = Bt.typeNum(types[1]), types[2] and Bt.typeNum(types[2]) or nil
+    local boss = {
+      mon = mon, species = mon.species, type1 = t1, type2 = (t2 ~= t1) and t2 or nil, side = "enemy", id = 1,
+      ability = 0, stages = { attack = 0, defense = 0, spAtk = 0, spDef = 0, speed = 0, accuracy = 0, evasion = 0 },
+      name = b.name, boss = true, key = key, moves = {},
+    }
+    for _, name in ipairs(b.moves or {}) do
+      local mv = Bt.move(name, 99, 99)
+      if mv then boss.moves[#boss.moves + 1] = mv
+      else mod.log:warn("raid boss %s: the game has no move %s", key, tostring(name)) end
+    end
+    return boss
+  end
+
+  -- ------- the simulation's adapter
+
+  -- the abilities that stop a move outright (applied here: the engine's own run in its battle script)
+  local IMMUNE = { LEVITATE = 4, VOLT_ABSORB = 13, WATER_ABSORB = 11, FLASH_FIRE = 10 }
+
+  function Bt.adapter(rng)
+    rng = rng or function(lo, hi) return love.math.random(lo, hi) end
+    local st = { wild = true, badges = {}, kinds = {}, rng = rng }
+    local engineAdapter = nil
+    if AdapterMod and AdapterMod.new then
+      local ok, ad = pcall(AdapterMod.new, st)
+      if ok then engineAdapter = ad end
+    end
+    local A = { rng = rng }
+
+    local function abilityName(b)
+      if not engineAdapter or b.boss then return nil end
+      local ok, a = pcall(engineAdapter.abilityOf, engineAdapter, b)
+      return ok and type(a) == "string" and a:upper():gsub(" ", "_") or nil
+    end
+    A.abilityName = abilityName
+
+    -- the type multiplier of a move on a battler (1, 2, 0.5, 0 ...)
+    function A.effectiveness(moveType, def)
+      if Types and Types.effectiveness then
+        local ok, m = pcall(Types.effectiveness, moveType, def.type1, def.type2 or def.type1)
+        if ok and tonumber(m) then return tonumber(m) end
+      end
+      return 1
+    end
+
+    -- the damage of att's move on def: dmg, info (effectiveness, critical); 0 for an immunity
+    function A.damage(att, def, mv, spread)
+      local ab = abilityName(def)
+      if ab and IMMUNE[ab] == mv.type then return 0, { effectiveness = 0, immuneBy = ab } end
+      if ab == "WONDER_GUARD" and A.effectiveness(mv.type, def) <= 1 then return 0, { effectiveness = 0, immuneBy = ab } end
+      if not Damage then return 1, { effectiveness = 1 } end
+      st.player, st.enemy = att.side == "player" and att or def, att.side == "player" and def or att
+      local ok, dmg, info = pcall(Damage.calc, att, def, mv.ref, { adapter = engineAdapter, st = st, rng = rng,
+        weather = st.weather, spread = spread or nil })
+      if not ok then
+        mod.log:warn("raid damage failed (%s): %s", tostring(mv.name), tostring(dmg))
+        return 1, { effectiveness = 1 }
+      end
+      info = type(info) == "table" and info or {}
+      -- (the engine's own `effectiveness` is its chart's scaled product: the multiplier from the chart)
+      local flags = info.typeFlags
+      if (flags and flags.immune) or info.effectiveness == 0 then info.effectiveness = 0
+      else info.effectiveness = A.effectiveness(mv.type, def) end
+      return max(0, floor(tonumber(dmg) or 0)), info
+    end
+
+    -- Gen 3's accuracy check (the engine's formula: stages, the move's accuracy)
+    local ACC = Rules and Rules.ACCURACY_STAGE
+    function A.hits(att, def, mv)
+      if (mv.accuracy or 0) <= 0 then return true end
+      local buff = max(-6, min(6, (att.stages.accuracy or 0) - (def.stages.evasion or 0)))
+      local r = ACC and ACC[buff] or { 1, 1 }
+      local calc = floor(r[1] * mv.accuracy / r[2])
+      return rng(1, 100) <= calc
+    end
+
+    -- speed with its stage, paralysis quartering it
+    function A.speed(b)
+      local s = tonumber(b.mon.speed) or 1
+      if Damage and Damage.applyStage then
+        local ok, v = pcall(Damage.applyStage, s, b.stages.speed or 0)
+        if ok and tonumber(v) then s = tonumber(v) end
+      end
+      if b.status == "PAR" then s = floor(s / 4) end
+      return s
+    end
+    return A
+  end
+
+  return Bt
+end
