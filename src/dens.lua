@@ -148,16 +148,24 @@ return function(mod, deps)
     return tiers[stars] or {}
   end
 
-  -- a den for a new day: active or quiet, its tier and boss (pure)
-  function Dn.roll(den, day, badges, rnd)
+  -- a den for a new day: active or quiet, its tier, its beam and boss (pure but for `pickDyna`):
+  -- purple (D.RARE of them) a Gigantamax boss of the tier, else red, pickDyna(stars, rnd) -> a
+  -- Pokemon of the route Dynamaxed (src/dyna.lua); a route with none is purple
+  function Dn.roll(den, day, badges, rnd, pickDyna)
     den.day = day
     den.done = nil
     den.active = rnd() < D.ACTIVE
-    if not den.active then den.stars, den.boss = nil, nil; return den end
+    if not den.active then den.stars, den.boss, den.rare = nil, nil, nil; return den end
     local tiersOk = Dn.starsFor(badges)
     den.stars = tiersOk[rnd(1, #tiersOk)]
-    local list = Dn.tier(den.stars)
-    den.boss = list[rnd(1, max(1, #list))]
+    den.rare = rnd() < (D.RARE or 0)
+    den.boss = nil
+    if not den.rare and pickDyna then den.boss = pickDyna(den.stars, rnd) end
+    if not den.boss then
+      den.rare = true
+      local list = Dn.tier(den.stars)
+      den.boss = list[rnd(1, max(1, #list))]
+    end
     return den
   end
 
@@ -407,7 +415,9 @@ return function(mod, deps)
     for i, den in ipairs(list) do
       if den.day ~= today then
         badges = badges or Dn.badges()
-        Dn.roll(den, today, badges, Dn.rng(seedOf(tostring(trainerId()) .. ":" .. mapId .. ":" .. i .. ":" .. today)))
+        local Dy = deps.Dyna
+        Dn.roll(den, today, badges, Dn.rng(seedOf(tostring(trainerId()) .. ":" .. mapId .. ":" .. i .. ":" .. today)),
+          Dy and function(stars, rnd) return Dy.pick(mapId, stars, rnd) end or nil)
       end
       spawned[mapId] = spawned[mapId] or {}
       local id = spawned[mapId][i]
@@ -577,7 +587,8 @@ return function(mod, deps)
         local x = floor(self.x + 8 - camX)
         -- from the pit, 11 px above the den's foot (the tile's middle)
         local y = floor(self.y - 3 - camY)
-        local hot = (self.stars or 1) >= 3
+        -- (red: a Dynamax Pokemon; purple: the rare beam, a Gigantamax one)
+        local hot = not self.rare
         local cr, cg, cb = hot and 1 or 0.8, hot and 0.2 or 0.35, hot and 0.35 or 1
         local pr, pg, pb, pa = G.getColor()
         local hgt = 160
@@ -601,6 +612,9 @@ return function(mod, deps)
       beams[key] = a
     end
     a.x, a.y, a.sortY, a.stars = den.x * 16, den.y * 16, den.y * 16 + 15.5, den.stars
+    -- (a den rolled before beams told the two apart: by its boss)
+    a.rare = den.rare
+    if a.rare == nil then a.rare = not (type(den.boss) == "string" and den.boss:sub(1, 5) == "DYNA:") end
     return a
   end
 

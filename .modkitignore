@@ -28,3 +28,5 @@ tools/raid_pack.py
 tests/drivers/battle_size_probe.lua
 tests/drivers/run_probe.lua
 tests/drivers/day_probe.lua
+tests/dyna_test.lua
+tests/drivers/dyna_probe.lua

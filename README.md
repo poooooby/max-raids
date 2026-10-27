@@ -4,7 +4,7 @@
 
 A mod for [Gen1Recomp](https://github.com/bryanthaboi/gen1recomp)'s Generation 3 games. Pokémon
 Dens appear along the routes once you've earned your first Gym Badge. Step up to one, choose four
-of your Pokémon, and take on a giant Gigantamax Pokémon in a 3D den, then try to catch it.
+of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den, then try to catch it.
 
 > [!NOTE]
 > **Requires [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3).** It brings the
@@ -19,12 +19,17 @@ of your Pokémon, and take on a giant Gigantamax Pokémon in a 3D den, then try 
 - ⚡ **The region awakens:** win your first Gym Badge and, when you step back outside, the
   ground shakes and pillars of light rise from Pokémon Dens along the routes.
 - 🗺️ **Dens on the routes:** one or two on each route, always in the same places on your save.
-  A den with a Pokémon in it shines a beam into the sky: purple for 1★ and 2★, red for 3★ and
-  stronger.
+  A den with a Pokémon in it shines a beam into the sky.
+- 🔴 **Red beams:** a Pokémon of that route, Dynamaxed: any Pokémon you could meet there in the
+  grass, on the water, fishing or with Rock Smash. With **Modern Spawns**, it's the route's
+  Pokémon as Modern Spawns has them, every one a slot can roll. The more stars, the more
+  evolved: as you'd find it at 1★ and 2★, one evolution on at 3★, fully evolved at 4★ and 5★.
+- 🟣 **Purple beams:** the rare beam, about one den in ten: a Gigantamax Pokémon.
 - 📅 **A new raid every day:** each den holds a new Pokémon each day, or sits quiet. A den you've
   beaten goes quiet until tomorrow.
-- ⭐ **Harder raids as you go:** the more Gym Badges you hold, the more stars the dens' Pokémon
-  can have, from 1★ at the start up to 5★.
+- ⭐ **Harder raids as you go:** the stars follow your Gym Badges as in Sword and Shield: 1★–2★
+  with one or two, 1★–3★ with three, 2★–3★ with four, 3★–4★ with five or six, and 3★–5★
+  with seven or eight.
 
 ### The Den Screen
 
@@ -36,17 +41,21 @@ of your Pokémon, and take on a giant Gigantamax Pokémon in a 3D den, then try 
 
 ### The Raid
 
-- 🏔️ **A 3D den:** a cave lit red, the Gigantamax Pokémon towering over your four. It bursts in
-  with a roar, and the camera follows the fight: over your Pokémon's shoulder as you choose,
-  pulled back as the giant attacks, and onto each of your Pokémon as an effect lands on them.
-- 🐉 **37 Gigantamax and Dynamax Pokémon:** Charizard, Pikachu, Eevee, Snorlax, Gengar, Lapras
-  and more, fully animated, with their cries.
+- 🏔️ **A 3D den:** a cave lit red, the giant towering over your four in its red Dynamax aura.
+  It bursts in with a roar, and the camera follows the fight: over your Pokémon's shoulder as you
+  choose, pulled back as the giant attacks, and onto each of your Pokémon as an effect lands on them.
+- 🐉 **37 Gigantamax Pokémon:** Charizard, Pikachu, Eevee, Snorlax, Gengar, Lapras and more,
+  fully animated, with their cries.
+- 🌿 **Dynamax Pokémon:** the route's own, with their own sprites and cries, and the moves a wild
+  one of their level knows.
 - ⚔️ **Fight, Bag, Run:** each of your four picks a move, or uses an item from the raid's pouch
   (Potions, a Full Heal and a Revive shared by the team). **Run** asks first: leave, and you're
   blown out of the den, which is spent for the day.
-- 💥 **G-Max Moves:** the boss's G-Max Move strikes all four at once and leaves its mark: a sea of
-  fire burning your team each turn, vines, rocks, status conditions and more. Every attack has its
-  own look: beams, waves, falling rocks, bites, slashes, earthquakes that crack the ground.
+- 💥 **G-Max and Max Moves:** a Gigantamax boss's G-Max Move strikes all four at once and leaves
+  its mark: a sea of fire burning your team each turn, vines, rocks, status conditions and more. A
+  Dynamax boss uses a Max Move of its strongest attack's type, with its effect on your team's or
+  its own stats. Every attack has its own look: beams, waves, falling rocks, bites, slashes,
+  earthquakes that crack the ground.
 - 🛡️ **Barriers:** as its HP falls, the boss throws up a barrier that blocks most of each hit
   until enough blows break it. Breaking it sharply lowers the boss's Defense and Sp. Def.
 - 📣 **Cheers:** a Pokémon that fainted cheers the team on from the sidelines: healing, raised
@@ -59,7 +68,8 @@ of your Pokémon, and take on a giant Gigantamax Pokémon in a 3D den, then try 
 ### After the Win
 
 - 🔴 **One throw to catch it:** choose one of your Poké Balls. The Pokémon joins your party, or
-  your PC when the party is full. The higher its stars, the harder it is to catch.
+  your PC when the party is full. The higher its stars, the harder it is to catch, and the better
+  its IVs: one perfect IV at 1★, two at 2★, three at 3★, four at 4★ and 5★.
 - 🎁 **Rewards:** Exp. Candies (more and bigger for more stars), TMs of the boss's types,
   berries, treasures to sell, sometimes a Rare Candy, and on the hardest raids a PP Max.
 

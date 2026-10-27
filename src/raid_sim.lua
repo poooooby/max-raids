@@ -295,6 +295,8 @@ function Sim:gmaxEffect(ev, att, mv, hit)
     for _, m in ipairs(hit) do
       if alive(m) then for stat, n in pairs(e.foe or {}) do self:stage(ev, m, stat, n) end end
     end
+  elseif e.kind == "boost" then
+    for stat, n in pairs(e.self or {}) do self:stage(ev, att, stat, n) end
   elseif e.kind == "pp" then
     for _, m in ipairs(hit) do
       for _, mvm in ipairs(m.moves or {}) do mvm.pp = max(0, (mvm.pp or 0) - (e.n or 2)) end

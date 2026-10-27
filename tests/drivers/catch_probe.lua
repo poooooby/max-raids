@@ -81,11 +81,23 @@ local function body(game, log)
       Rw.throw = function() return false, nil end
     else
       -- (a sure catch: the real throw with the Master Ball's odds, the ball thrown kept)
-      Rw.throw = function(key, level, ball, rng)
+      Rw.throw = function(key, level, ball, rng, ivs)
         local sure = {}
         for k, v in pairs(ball) do sure[k] = v end
         sure.mult = 0
-        return real(key, level, sure, rng)
+        local caught, info = real(key, level, sure, rng, ivs)
+        -- the caught Pokemon keeps the boss's IVs
+        local mon = type(info) == "table" and info.mon
+        if mon and ivs then
+          local same, row = true, {}
+          for _, k in ipairs({ "hp", "atk", "def", "spe", "spa", "spd" }) do
+            same = same and mon.ivs and mon.ivs[k] == ivs[k]
+            row[#row + 1] = k .. " " .. tostring(mon.ivs and mon.ivs[k])
+          end
+          log("caught IVs:", table.concat(row, ", "), "hp", tostring(mon.hp) .. "/" .. tostring(mon.maxHp))
+          check(same and mon.hp == mon.maxHp, "the caught Pokemon keeps the boss's IVs, at full HP")
+        end
+        return caught, info
       end
     end
   end

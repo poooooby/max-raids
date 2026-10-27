@@ -1,6 +1,6 @@
 -- Max Raids' numbers (src/training/raid_sim.lua, src/training/raid.lua). Sword / Shield's Max Raid
 -- Battles where they are documented; ours where they are not (no official source gives the
--- shield's thresholds, its damage cut, or a 5★ HP multiplier). EVIDENCE classifies each group
+-- shield's thresholds or its damage cut). EVIDENCE classifies each group
 -- (dotted key path) as Super Training's rules file does: verified / measured / inferred /
 -- placeholder, plus "ours" for numbers of PlayNav's own design.
 local N = {}
@@ -11,14 +11,15 @@ N.RAID = {
   SHIELD_DMG = 0.25,          -- a hit's damage while the shield stands
   BREAK_DROP = -2,            -- Def and Sp. Def stages when the shield breaks
   ITEM_PRIORITY = 6,          -- items go before moves
-  -- per tier: the boss's level band, HP multiplier, IVs (DVs on Gen 1 / 2: half), HP thresholds
-  -- for its shields, the EVs a win gives, the bag size it drops, and the turns a medal allows
+  -- per tier: the boss's level band, HP multiplier, how many of its IVs are 31 (the rest 0-31; the
+  -- caught Pokemon keeps them), HP thresholds for its shields, the EVs a win gives, the bag size it
+  -- drops, and the turns a medal allows
   STARS = {
-    [1] = { lv = { 15, 20 }, hpMult = 1.4, iv = 10, shields = { 0.5 }, ev = 4, bag = "s", medalTurns = 6 },
-    [2] = { lv = { 25, 30 }, hpMult = 1.6, iv = 15, shields = { 0.5 }, ev = 8, bag = "m", medalTurns = 7 },
-    [3] = { lv = { 35, 40 }, hpMult = 1.9, iv = 20, shields = { 0.7, 0.3 }, ev = 12, bag = "m", medalTurns = 7 },
-    [4] = { lv = { 45, 50 }, hpMult = 2.5, iv = 25, shields = { 0.7, 0.3 }, ev = 20, bag = "l", medalTurns = 8 },
-    [5] = { lv = { 55, 60 }, hpMult = 5.0, iv = 31, shields = { 0.7, 0.3 }, ev = 32, bag = "l", medalTurns = 8 },
+    [1] = { lv = { 15, 20 }, hpMult = 1.4, perfect = 1, shields = { 0.5 }, ev = 4, bag = "s", medalTurns = 6 },
+    [2] = { lv = { 25, 30 }, hpMult = 1.6, perfect = 2, shields = { 0.5 }, ev = 8, bag = "m", medalTurns = 7 },
+    [3] = { lv = { 35, 40 }, hpMult = 1.9, perfect = 3, shields = { 0.7, 0.3 }, ev = 12, bag = "m", medalTurns = 7 },
+    [4] = { lv = { 45, 50 }, hpMult = 2.5, perfect = 4, shields = { 0.7, 0.3 }, ev = 20, bag = "l", medalTurns = 8 },
+    [5] = { lv = { 55, 60 }, hpMult = 3.0, perfect = 4, shields = { 0.7, 0.3 }, ev = 32, bag = "l", medalTurns = 8 },
   },
   -- shield segments: BASE + floor((base Def + base Sp. Def) / PER), within MIN..MAX
   SEGMENTS = { BASE = 2, PER = 60, MIN = 2, MAX = 8 },
@@ -88,13 +89,15 @@ N.RAID = {
   },
   -- the boss's size against a member's: by its height, within MIN..MAX
   SIZE = { MIN = 6.5, MAX = 8.5, H0 = 14, H1 = 43 },
-  -- the star tiers a den may roll, by the gym badges held (the highest row whose min is reached)
+  -- the star tiers a den may roll, by the gym badges held (the highest row whose min is reached);
+  -- Sword / Shield's ranges
   BADGE_STARS = {
-    { min = 0, stars = { 1, 2 } },
-    { min = 2, stars = { 1, 2, 3 } },
-    { min = 4, stars = { 2, 3, 4 } },
-    { min = 6, stars = { 3, 4, 5 } },
-    { min = 8, stars = { 4, 5 } },
+    { min = 0, stars = { 1 } },
+    { min = 1, stars = { 1, 2 } },
+    { min = 3, stars = { 1, 2, 3 } },
+    { min = 4, stars = { 2, 3 } },
+    { min = 5, stars = { 3, 4 } },
+    { min = 7, stars = { 3, 4, 5 } },
   },
   -- dens on the routes: how many a route gets (seeded), how often one is active on a day, and
   -- where one may stand: EDGE cells in from the map's border, WARP_GAP cells from any warp, SPREAD
@@ -104,7 +107,9 @@ N.RAID = {
   -- ground or grass (no trail, sand, flowers, bridge; 0: the den's own cell); water = the radius of calm
   -- water round a den out on the water (3: a 7x7, a larger body, never a channel); RESERVE_PAD cells round
   -- an NPC's or a trainer's wander area, SIGHT_PAD past a trainer's sight
-  DENS = { MIN = 1, MAX = 2, ACTIVE = 0.7, EDGE = 3, WARP_GAP = 4, SPREAD = 8, TRIES = 400,
+  -- RARE: the share of active dens with a purple beam (a Gigantamax boss); the rest are red, a
+  -- Pokemon of the route Dynamaxed
+  DENS = { MIN = 1, MAX = 2, ACTIVE = 0.7, RARE = 0.1, EDGE = 3, WARP_GAP = 4, SPREAD = 8, TRIES = 400,
     PASSES = {
       { name = "clear", open = 2, ground = 1 },
       { name = "water", water = 3 },
@@ -120,7 +125,7 @@ N.EVIDENCE = {
   ["RAID.SHIELD_DMG"] = { class = "ours", source = "the games greatly reduce damage through the barrier, by an unpublished formula (Bulbapedia Max Raid Battle); a quarter is ours", confidence = "medium" },
   ["RAID.BREAK_DROP"] = { class = "verified", source = "Pokemon.com; GameSpot: breaking the barrier sharply lowers the boss's Defense and Sp. Def", confidence = "medium" },
   ["RAID.ITEM_PRIORITY"] = { class = "ours", source = "items before moves, as the main games run the bag; raids have no bag", confidence = "high" },
-  ["RAID.STARS"] = { class = "inferred", source = "levels by tier: Serebii (15-20 .. 55-60); HP x1.4 / 1.6 / 1.9 / 2.5 for 1-4★: Bulbapedia Max Raid Battle; 5★ x5.0 (ours: x3.0 let a Lv 70 team, IVs 31, 252-EV spreads, win every 5★ in 3-8 of its 10 turns - balance_probe, 2026-10-26), the thresholds, IVs, EVs, bags and medal turns are ours; shields: none at 1-2★ in the games (one here, to teach it), one at 3-4★, two at 5★ (Bulbapedia, Pokemon.com)", confidence = "medium" },
+  ["RAID.STARS"] = { class = "inferred", source = "levels by tier: Serebii (15-20 .. 55-60); HP x1.4 / 1.6 / 1.9 / 2.5 / 3.0 for 1-5★: Bulbapedia Max Raid Battle (5★ x3 also a solo-clear guide, note.com pagepoteto); perfect IVs 1 / 2 / 3 / 4 / 4: Bulbapedia, GameWith; the thresholds, EVs, bags and medal turns are ours; shields: none at 1-2★ in the games (one here, to teach it), one at 3-4★, two at 5★ (Bulbapedia, Pokemon.com)", confidence = "medium" },
   ["RAID.REWARD"] = { class = "inferred", source = "Serebii, Sword / Shield Max Raid den listings (den18): Exp. Candy XS x5 + S x1 (1★), S x5 + M x1 (2★), M x5 + L x1 (3★), M x2 + L x3 (4★), L x2 + XL x1 (5★); Dynamax Candy 1-2; TRs 1 / 1 / 2 / 3 / 3 at 100%; two berries at 80%; Big Nugget / Nugget / Rare Bone 20-50% each by tier; Rare Candy 25%; Bottle Cap 1-3% from 3★. Gen 3 stand-ins ours (TMs for TRs; Big Pearl / Star Piece for Big Nugget / Rare Bone; PP Max for the Bottle Cap; no Dynamax Candy)", confidence = "medium" },
   ["RAID.SEGMENTS"] = { class = "ours", source = "the games: 2 to 8 segments, by the boss's defensive stats (Bulbapedia, Serebii); this formula is ours", confidence = "medium" },
   ["RAID.CHEER"] = { class = "verified", source = "Serebii: cheer heals, raises a stat, sets a screen or breaks the barrier, about 16% each, nothing 20%; the screens are a Defense / Sp. Def raise here", confidence = "medium" },
@@ -129,7 +134,8 @@ N.EVIDENCE = {
   ["RAID.CATCH"] = { class = "inferred", source = "the games: one throw after a win, the ball the player picks, the chance by the boss (Serebii Max Raid Battles); the tier chances are ours, the ball multipliers the engine's (battle/catching.lua BALL_BONUS)", confidence = "medium" },
   ["RAID.SCRIPTS"] = { class = "inferred", source = "the games: the boss may act more than once a turn (a Max Move, a wave cancelling the players' stat changes); how often is not published (Pokemon.com, GamerGuides, Serebii); these schedules are ours", confidence = "medium" },
   ["RAID.SIZE"] = { class = "ours", source = "the boss drawn 6.5 to 8.5 times a member's height (Sword / Shield's giants tower over the party)", confidence = "high" },
-  ["RAID.BADGE_STARS"] = { class = "ours", source = "Wooble 2026-10-26: star tiers open with gym badges; Sword / Shield gates them by badges too, with other cut-offs", confidence = "medium" },
+  ["RAID.DENS.RARE"] = { class = "inferred", source = "Sword / Shield: a den's beam is red (its common pool) or purple (its rare pool, where the Gigantamax Pokemon are); ~10% purple by players' counts (GameFAQs), no datamined figure", confidence = "low" },
+  ["RAID.BADGE_STARS"] = { class = "verified", source = "Sword / Shield's star range by badges (0: 1, 1-2: 1-2, 3: 1-3, 4: 2-3, 5-6: 3-4, 7-8: 3-5; Smogon's SwSh shiny hunting guide); the pick within a range is even (the game weights per den)", confidence = "medium" },
   ["RAID.DENS"] = { class = "ours", source = "Wooble 2026-10-26: dens generated on the routes, seeded per save, refreshing daily", confidence = "high" },
 }
 

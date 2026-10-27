@@ -72,6 +72,32 @@ G.MOVES = {
   ETERNABEAM = { type = "DRAGON", power = 160, name = "Eternabeam" },
 }
 
+-- the plain Max Moves, by the type of the move they come from (a Dynamax boss's, and a G-Max boss's
+-- without a G-Max move of its own): name, and effect as above (+ { kind = "boost", self = { stat = n } }:
+-- the boss's own stats). Weather and terrain (Max Flare, Geyser, Hailstorm, Rockfall, Overgrowth,
+-- Lightning, Mindstorm, Starfall) do nothing in a raid here: the sim has no weather or terrain.
+-- EVIDENCE: Bulbapedia "Max Move" (each move's effect).
+G.MAX = {
+  NORMAL = { name = "Max Strike", effect = { kind = "stages", foe = { speed = -1 } } },
+  FIGHTING = { name = "Max Knuckle", effect = { kind = "boost", self = { attack = 1 } } },
+  FLYING = { name = "Max Airstream", effect = { kind = "boost", self = { speed = 1 } } },
+  POISON = { name = "Max Ooze", effect = { kind = "boost", self = { spAtk = 1 } } },
+  GROUND = { name = "Max Quake", effect = { kind = "boost", self = { spDef = 1 } } },
+  ROCK = { name = "Max Rockfall" },
+  BUG = { name = "Max Flutterby", effect = { kind = "stages", foe = { spAtk = -1 } } },
+  GHOST = { name = "Max Phantasm", effect = { kind = "stages", foe = { defense = -1 } } },
+  STEEL = { name = "Max Steelspike", effect = { kind = "boost", self = { defense = 1 } } },
+  FIRE = { name = "Max Flare" },
+  WATER = { name = "Max Geyser" },
+  GRASS = { name = "Max Overgrowth" },
+  ELECTRIC = { name = "Max Lightning" },
+  PSYCHIC = { name = "Max Mindstorm" },
+  ICE = { name = "Max Hailstorm" },
+  DRAGON = { name = "Max Wyrmwind", effect = { kind = "stages", foe = { attack = -1 } } },
+  DARK = { name = "Max Darkness", effect = { kind = "stages", foe = { spDef = -1 } } },
+  FAIRY = { name = "Max Starfall" },
+}
+
 -- the words when an effect takes hold (src/raid_sim.lua fills {BOSS} / {MON})
 G.WORDS = {
   field = {

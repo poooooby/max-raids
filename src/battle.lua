@@ -224,22 +224,44 @@ return function(mod, deps)
     return hp and (core + level + 10) or (core + 5)
   end
 
-  -- the boss: its pack's Giga base stats at a level in its tier's band, the tier's IVs and HP x hpMult
+  -- a raid boss's IVs (Sword / Shield's): `perfect` of the six at 31, chosen at random, the rest 0-31;
+  -- without a roll (a preview) the first `perfect` in order at 31, the rest 15
+  Bt.IV_STATS = { "hp", "atk", "def", "spe", "spa", "spd" }
+  function Bt.rollIvs(perfect, rng)
+    local ivs = {}
+    local order = {}
+    for i, k in ipairs(Bt.IV_STATS) do
+      ivs[k] = rng and rng(0, 31) or 15
+      order[i] = k
+    end
+    if rng then
+      for i = #order, 2, -1 do
+        local j = rng(1, i)
+        order[i], order[j] = order[j], order[i]
+      end
+    end
+    for i = 1, min(#order, perfect or 0) do ivs[order[i]] = 31 end
+    return ivs
+  end
+
+  -- the boss: its base stats (the pack's Giga ones; a Dynamax boss its species') at a level in its
+  -- tier's band, its IVs (Bt.rollIvs) and HP x hpMult
   function Bt.boss(key, rng)
     local b, sp = Bosses[key], Sprites[key]
     if not (b and sp) then return nil end
     local T = R.STARS[b.stars] or R.STARS[1]
     local level = rng and rng(T.lv[1], T.lv[2]) or T.lv[1]
     local base = sp.base or {}
-    local iv = T.iv or 10
-    local hp = floor(stat(base.hp or 80, iv, level, true) * (T.hpMult or 1))
-    local species = Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national)) or nil
+    local ivs = Bt.rollIvs(T.perfect or 0, rng)
+    local hp = floor(stat(base.hp or 80, ivs.hp, level, true) * (T.hpMult or 1))
+    -- (a Dynamax boss carries its own species: a form is a species of its own)
+    local species = b.slot or (Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national))) or nil
     local mon = {
       species = tonumber(species) or 0, speciesId = tonumber(species) or 0, level = level, hp = hp, maxHp = hp,
-      attack = stat(base.atk or 80, iv, level), defense = stat(base.def or 80, iv, level),
-      spAtk = stat(base.spa or 80, iv, level), spDef = stat(base.spd or 80, iv, level),
-      speed = stat(base.spe or 80, iv, level),
-      ivs = { hp = iv, atk = iv, def = iv, spe = iv, spa = iv, spd = iv },
+      attack = stat(base.atk or 80, ivs.atk, level), defense = stat(base.def or 80, ivs.def, level),
+      spAtk = stat(base.spa or 80, ivs.spa, level), spDef = stat(base.spd or 80, ivs.spd, level),
+      speed = stat(base.spe or 80, ivs.spe, level),
+      ivs = ivs,
       evs = { hp = 0, atk = 0, def = 0, spe = 0, spa = 0, spd = 0 },
       personality = 0, ability = 0, abilityId = 0, friendship = 255,
     }
@@ -251,10 +273,19 @@ return function(mod, deps)
       ability = 0, stages = { attack = 0, defense = 0, spAtk = 0, spDef = 0, speed = 0, accuracy = 0, evasion = 0 },
       name = b.name, boss = true, key = key, moves = {},
     }
-    for _, name in ipairs(b.moves or {}) do
-      local mv = Bt.move(name, 99, 99)
-      if mv then boss.moves[#boss.moves + 1] = mv
-      else mod.log:warn("raid boss %s: the game has no move %s", key, tostring(name)) end
+    if b.moves then
+      for _, name in ipairs(b.moves) do
+        local mv = Bt.move(name, 99, 99)
+        if mv then boss.moves[#boss.moves + 1] = mv
+        else mod.log:warn("raid boss %s: the game has no move %s", key, tostring(name)) end
+      end
+    elseif b.slot and Pokemon and Pokemon.movesAtLevel then
+      -- (a Dynamax boss: the moves a wild one of its level knows)
+      local ok, ids = pcall(Pokemon.movesAtLevel, b.slot, level)
+      for _, id in ipairs(ok and type(ids) == "table" and ids or {}) do
+        local mv = tonumber(id) and tonumber(id) > 0 and Bt.move(tonumber(id), 99, 99)
+        if mv then boss.moves[#boss.moves + 1] = mv end
+      end
     end
     -- the raid's own: its barriers (its tier's HP shares; the segments from its base Def + Sp. Def),
     -- its script, its G-Max move
@@ -262,7 +293,7 @@ return function(mod, deps)
     local S = R.SEGMENTS or { BASE = 2, PER = 60, MIN = 2, MAX = 8 }
     boss.segments = max(S.MIN, min(S.MAX, S.BASE + floor(((base.def or 80) + (base.spd or 80)) / S.PER)))
     boss.script = R.SCRIPTS and R.SCRIPTS[b.script or "basic"] or {}
-    boss.gmax = Bt.gmaxMove(b.gmax, boss)
+    boss.gmax = Bt.gmaxMove(b.gmax, boss) or Bt.maxMove(boss)
     return boss
   end
 
@@ -299,6 +330,31 @@ return function(mod, deps)
       priority = 0, status = false, spread = true, isGmax = true, gmaxEffect = effect, pp = 99, maxPp = 99,
       ref = { id = "MAX_RAIDS_GMAX_" .. id, numId = 0, power = power, type = t, accuracy = 0, pp = 1, effect = 0,
         priority = 0, target = 8, flags = 0, secondaryChance = 0 },
+    }
+  end
+
+  -- a plain Max Move (Gmax.MAX) from the boss's strongest damaging move (a move of its own type
+  -- counting half again): its type, the Max power band of its power, on all four, never missing;
+  -- drawn as that move (isMax, baseKey)
+  function Bt.maxMove(boss)
+    local best, bestScore = nil, -1
+    for _, mv in ipairs(boss.moves or {}) do
+      if not mv.status then
+        local stab = (mv.type == boss.type1 or (boss.type2 ~= nil and mv.type == boss.type2)) and 1.5 or 1
+        local score = (mv.power or 0) * stab
+        if score > bestScore then best, bestScore = mv, score end
+      end
+    end
+    if not best then return nil end
+    local row = Gmax.MAX and Gmax.MAX[best.typeName] or {}
+    local power = Bt.maxPower(best.power, best.typeName)
+    local t = best.type
+    return {
+      name = row.name or ("Max " .. titled(best.typeName)), type = t, typeName = best.typeName, power = power,
+      accuracy = 0, key = "MAX_" .. best.typeName, baseKey = best.key, priority = 0, status = false, spread = true,
+      isGmax = true, isMax = true, gmaxEffect = row.effect, pp = 99, maxPp = 99,
+      ref = { id = "MAX_RAIDS_MAX_" .. best.typeName, numId = 0, power = power, type = t, accuracy = 0, pp = 1,
+        effect = 0, priority = 0, target = 8, flags = 0, secondaryChance = 0 },
     }
   end
 

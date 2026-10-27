@@ -68,6 +68,7 @@ return function(mod)
   local makeScreen2 = loadSibling(mod, "src/screen2.lua")
   local makeDen = loadSibling(mod, "src/den_screen.lua")
   local makePick = loadSibling(mod, "src/pc_pick.lua")
+  local makeDyna = loadSibling(mod, "src/dyna.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
     mod.log:error("Max Raids is missing files; it stays off -- reinstall the mod")
     return
@@ -96,6 +97,18 @@ return function(mod)
     if ok and type(bt) == "table" then Battle = bt else mod.log:warn("the raid's battle failed to build: %s", tostring(bt)) end
     -- (the rewards read the TMs' moves through it)
     if Battle and Rewards then Rewards.battle = Battle end
+  end
+  -- the red dens' Dynamax Pokemon: the route's, as boss records under "DYNA:" keys
+  local Dyna = nil
+  if makeDyna then
+    local ok, dy = pcall(makeDyna, mod, { N = N, Bosses = Bosses, Sprites = Sprites,
+      typeName = Battle and Battle.typeName or nil })
+    if ok and type(dy) == "table" then
+      Dyna = dy
+      Dyna.install()
+    else
+      mod.log:warn("the Dynamax dens failed to build: %s", tostring(dy))
+    end
   end
   local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil }) or nil
   local PadHide = makePadHide and makePadHide(mod) or nil
@@ -174,7 +187,7 @@ return function(mod)
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax,
     Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene }) or nil, MoveFx = MoveFx, Sounds = Sounds,
-    makeDen = makeDen, Pick = Pick,
+    makeDen = makeDen, Pick = Pick, Dyna = Dyna,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome)
       -- (won, or left by Run: spent for the day)
@@ -200,7 +213,7 @@ return function(mod)
 
   -- ------- dens on the routes: A on one opens its den screen (src/dens.lua)
   if makeDens then
-    local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, open = function(den) return Raid.openDen(den) end })
+    local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, Dyna = Dyna, open = function(den) return Raid.openDen(den) end })
     if ok and type(dn) == "table" then
       Dens = dn
       Dens.registerSprites()
@@ -281,7 +294,7 @@ return function(mod)
   mod.exports.bosses = function() return Bosses.ORDER end
   mod.exports.dens = Dens
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
-    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick,
+    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,
     padSecond = function(on) padForced = on end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }
   mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))

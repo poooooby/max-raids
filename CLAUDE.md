@@ -48,11 +48,56 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
     (`padOnSecond`). Drivers: `_test.gearOptions(t | false | nil)` (a stand-in Gear, no Gear, the
     real one), `_test.padWanted()`; `tests/drivers/gear_option_probe.lua`.
 - **Dens in the overworld,** generated on routes: 1–2 per outdoor route, seeded per save, saved once
-  chosen, refreshing daily. Star tiers open with badges.
+  chosen, refreshing daily. Star tiers by badges are Sword / Shield's (2026-10-27, Wooble: "keep it how
+  SWSH has it"): `RAID.BADGE_STARS` 0: 1★, 1-2: 1-2, 3: 1-3, 4: 2-3, 5-6: 3-4, 7-8: 3-5, an even pick.
+- **Boss IVs and HP are Sword / Shield's** (2026-10-27, Wooble): `STARS[n].perfect` 1 / 2 / 3 / 4 / 4
+  IVs at 31, the stats chosen at random, the rest 0-31 (`Bt.rollIvs`; a preview without a roll: the
+  first ones, the rest 15); the caught Pokemon keeps them (`Rw.throw(..., ivs)` sets `mon.ivs`,
+  `Pokemon.applyStats`, full HP; catch_probe checks it). HP x1.4 / 1.6 / 1.9 / 2.5 / 3.0 (5★ was our
+  x5.0 for balance; back to the game's x3). No attack boost: the games scale only HP.
+- **Red and purple dens** (2026-10-27, Wooble: "the non Max Raid dens, separate from the max on SwSh
+  odds"; species "the route's mon, with compatibility for Modern Spawns extended tables - not just the
+  slot but the extended rolls"): an active den is purple `RAID.DENS.RARE` 0.1 of the time (the rare
+  beam, a Giga Megas boss of the tier), else red: a Pokemon of the route Dynamaxed (`src/dyna.lua`).
+  - **The route's species** (`Dy.routeSpecies(mapId)`, cached per map and Modern Spawns' mode / seed):
+    the engine's table (`src.core.game3.encounters` `tableFor` / `_tables`, ids tried as given, then
+    bare / `EM_` / `FR_`): land, water, rocks, fishing. With Modern Spawns active
+    (`mod:find("modern_spawns").exports`, `isActive`): its `tableFor` + `poolFor` (COMPLETE's every
+    roll behind each slot) for land / water / fish.good / fish.super, plus the engine's rocks and Old
+    Rod slots (1-2), which it leaves alone. Its ids go to slots through `mod.content.pokemon:get(id).index`.
+  - **Stage by stars** (`Dy.STAGE_STEPS`): as found at 1-2★, one evolution on at 3★, the end of the
+    line at 4-5★ (`Pokemon.evolutions`, a branch at random).
+  - **Keys** `DYNA:<species id>:<stars>`; the id tells forms apart (`RATICATE_ALOLA`): the National
+    Dex's `idOfSlot`, else `Pokemon.keyName`. Back to a slot (`Dy.slotOfId`): the National Dex's
+    `slotOf` only when `idOfSlot` maps it back to the same id (asked for a cart species it answers
+    with a form of it), else the LOWEST slot with that keyName that is not the National Dex's - the
+    engine's `speciesFromName("RATICATE")` and `speciesFromNational(20)` both answer Alolan Raticate
+    (the last registered). `dyna_probe` found it (Raticate Dark / Normal).
+  - **Records:** `Dy.install` puts an `__index` on the shared `Bosses` / `Sprites` tables, so every
+    `Bosses[key]` / `Sprites[key]` answers a DYNA key: `{ national, slot, name, types (names), stars,
+    script (strong at 5★), dyna }` / `{ dyna, slot, base = Pokemon.stats, height = dexEntry.heightM,
+    cry = false }`. `ORDER` and the pack's keys are untouched.
+  - **Battle:** `Bt.boss` takes `b.slot` as the species, `Pokemon.movesAtLevel(slot, level)` as the
+    moves, and `Bt.maxMove(boss)` (also any G-Max boss without a G-Max move: Greninja, Marshadow):
+    the strongest damaging move (its own type x1.5) -> `Gmax.MAX[type]` (Max Flare, Max Strike ...,
+    `isGmax` + `isMax`, `baseKey` = that move, drawn with its look in `Rd.specOf`), the power band
+    of its power; effects `stages` on the foes or `boost` (sim `gmaxEffect`) on itself; the weather /
+    terrain ones nothing (no weather or terrain in the sim).
+  - **Drawing:** `Rd.load` for a dyna key keeps `loaded.dyna`; `Rd.stepBossPic` (in `Rd.update`
+    before the den phase's return, and once at the load) fetches `Pokemon.frontPic(slot, 0, shiny,
+    0)` (a sprite mod's canvas, so never in a draw), gen3-hd-sprites' tag when there is one, the
+    opaque box when the frame's size changes; `frameAt` / `bossBox` hand it out as the pack's. Never
+    released (the engine's). The red aura in `drawBoss` is generic. Cry: `Audio.playCry(slot)`.
+  - **The catch** (`Rw.throw`) gives `b.slot`. The beam (`dens.lua` `beamActor`): red unless
+    `den.rare` (a den saved before has no `rare`: purple unless its boss is a DYNA key).
+  - Tests: `tests/dyna_test.lua` (a stand-in engine and Modern Spawns), `dens_test` (the badge
+    ranges, the purple share); driver `tests/drivers/dyna_probe.lua` (`PROBE_ROUTE`, `PROBE_KEY`,
+    `PROBE_IDS`: the route's species, picks per star, a Dynamax raid to its Max Move; Emerald
+    Route 104 and FireRed Route 2 checked 2026-10-27).
 - **Party.** The player picks 4 at the den. They fight as **simulated copies** (full HP, real stats and
   moves); the save changes only by the rewards.
 - **Rewards.** Catch the boss (one throw), items, EVs, Exp.
-- **Bosses.** Only the Giga Megas pack's forms, with full animation, cries, attack motions by type, and
+- **Bosses.** The purple dens: only the Giga Megas pack's forms, with full animation, cries, attack motions by type, and
   engine-drawn shader field effects.
 - **Camera.** Low and close, pointed up at the giant. Party Pokémon stand where the trainers stand in
   Sword / Shield. The intro: close on the party, pull back down to the ground looking up the boss, the
@@ -517,6 +562,7 @@ The dens have a headless test and an engine probe:
 ```sh
 cd ~/Documents/GitHub/max-raids && luajit tests/dens_test.lua    # placement and the daily roll
 luajit tests/raid_sim_test.lua   # the turns: order, faints, the storm, statuses, extras
+luajit tests/dyna_test.lua       # the red dens: route species, Modern Spawns' pools, stages, keys, Max Moves
 # in gen1recomp: POKEPORT_DRIVER=mods/max_raids/tests/drivers/dens_probe.lua (same env as above)
 ```
 

@@ -6,7 +6,7 @@
 -- Bottle Cap (RAID.REWARD); nothing straight to the four who fought.
 --   Rw = rewards(mod, { N, Bosses, Sprites }) ; Rw.battle = src/battle.lua's (for the TMs' moves)
 --   Rw.balls() -> { { item, name, n, mult }, ... } ; Rw.chance(stars, mult) (pure)
---   Rw.throw(key, level, ball, rng) -> caught, { name, toPC } | why
+--   Rw.throw(key, level, ball, rng, ivs) -> caught, { name, toPC } | why   (ivs: the boss's, kept)
 --   Rw.rollItems(key, rng) -> { { id, n }, ... } ; Rw.give(r, rng) -> { items, firstWin }
 
 return function(mod, deps)
@@ -94,19 +94,27 @@ return function(mod, deps)
   end
 
   -- the throw: the ball used up, the roll; caught, the boss's species at `level` in that ball
-  function Rw.throw(key, level, ball, rng)
+  function Rw.throw(key, level, ball, rng, ivs)
     local s = session()
     local b = Bosses[key]
     if not (s and b and ball) then return false, "no session" end
     if Bag and Bag.remove then pcall(Bag.remove, s.bag, ball.item, 1) end
     local roll = rng and rng(1, 100) or math.random(1, 100)
     if roll > Rw.chance(b.stars, ball.mult) then return false, "broke free" end
-    local species = Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national))
+    -- (a Dynamax boss carries its own species, its form among them)
+    local species = b.slot or (Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national)))
     species = tonumber(species)
     if not (species and Party and Party.giveMonToPlayer) then return false, "no species" end
     local ok, code, mon = pcall(Party.giveMonToPlayer, s, species, level)
     if not ok or code == Party.MON_CANT_GIVE or not mon then return false, "no room" end
     mon.pokeball = ball.item
+    -- (it keeps the boss's IVs, as Sword / Shield's raid Pokemon do)
+    if type(ivs) == "table" then
+      mon.ivs = mon.ivs or {}
+      for k, v in pairs(ivs) do mon.ivs[k] = v end
+      if Pokemon and Pokemon.applyStats then pcall(Pokemon.applyStats, mon, s) end
+      mon.hp = mon.maxHp or mon.hp
+    end
     if Dex and Dex.registerCapture and s.dex then pcall(Dex.registerCapture, s.dex, species, s, mon.personality) end
     local name = b.name
     if Pokemon and Pokemon.displayName then

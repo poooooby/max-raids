@@ -101,7 +101,8 @@ return function(mod, deps)
   local loaded = nil
   function Rd.release()
     if not loaded then return end
-    if loaded.sheet and loaded.sheet.release then pcall(loaded.sheet.release, loaded.sheet) end
+    -- (a Dynamax boss's picture is the engine's / its sprite mod's: theirs to keep)
+    if loaded.sheet and loaded.sheet.release and not loaded.dyna then pcall(loaded.sheet.release, loaded.sheet) end
     if loaded.cry and loaded.cry.release then pcall(loaded.cry.release, loaded.cry) end
     loaded = nil
   end
@@ -110,6 +111,14 @@ return function(mod, deps)
     Rd.release()
     local b, sp = Rd.boss(key)
     if not b then return nil end
+    if sp.dyna then
+      -- a Dynamax boss: the game's front picture (its sprite mod's, animated), fetched in the
+      -- update step (Rd.stepBossPic) - a sprite mod redraws it into a canvas at each ask
+      loaded = { key = key, shiny = shiny == true, dyna = true, slot = sp.slot, quads = {}, cell = 64, sp = sp, b = b,
+        box = { 0, 0, 64, 64 } }
+      Rd.stepBossPic()
+      return loaded.sheet and loaded or nil
+    end
     local sheet, data = imageOf("assets/bosses/" .. key .. ((shiny and sp.shiny) and "_shiny" or "") .. ".png", true)
     if not sheet then return nil end
     -- its feet and width from the first frame (the pad stands it there)
@@ -141,9 +150,14 @@ return function(mod, deps)
     return 1
   end
 
-  -- the boss's cry: the pack's .ogg, at the game's effects volume
+  -- the boss's cry: the pack's .ogg, at the game's effects volume; a Dynamax boss's the game's own
   function Rd.cry(key)
     local L = Rd.load(key)
+    if L and L.dyna then
+      if not (Audio and Audio.playCry) then return false end
+      local ok = pcall(Audio.playCry, L.slot)
+      return ok
+    end
     if not (L and L.sp.cry and love and love.audio and love.sound) then return false end
     if not L.cry then
       local ok, sd = pcall(function()
@@ -310,6 +324,36 @@ return function(mod, deps)
         d.hd = tag ~= nil
         if not d.box or fresh then d.box = opaqueBox(img, d.quad) end
       end
+    end
+  end
+
+  -- a Dynamax boss's picture now (the update step, and once at its load): its front picture, whole
+  -- (gen3-hd-sprites' full frame, a provider's own crop), its opaque box measured when the frame's
+  -- size changes; frameAt then hands it out as the pack's sheets are
+  function Rd.stepBossPic()
+    local L = loaded
+    if not (L and L.dyna and Pokemon) then return end
+    local fn = Pokemon.frontPic
+    if not fn then return end
+    local ok, pic = pcall(fn, L.slot, 0, L.shiny, 0)
+    if not (ok and type(pic) == "table" and pic.image) then return end
+    local img, srcQuad, tagScale = pic.image, pic.quad, 1
+    local tag = hdTagOf(img)
+    if tag then img, srcQuad, tagScale = tag.texture, tag.quad, tonumber(tag.scale) or 1 end
+    local iw, ih = img:getDimensions()
+    local qx, qy, w, h = 0, 0, iw, ih
+    if srcQuad and srcQuad.getViewport then qx, qy, w, h = srcQuad:getViewport() end
+    local fresh = false
+    if not L.quads[1] or L.qw ~= w or L.qh ~= h or L.qx ~= qx or L.qy ~= qy or L.sheet ~= img then
+      L.quads[1] = love.graphics.newQuad(qx, qy, w, h, iw, ih)
+      fresh = L.qw ~= w or L.qh ~= h or L.sheet ~= img
+      L.qx, L.qy, L.qw, L.qh = qx, qy, w, h
+    end
+    L.sheet = img
+    L.cell = (pic.h or 64) / tagScale
+    if fresh or not L.measured then
+      L.box = opaqueBox(img, L.quads[1])
+      L.measured = true
     end
   end
 
@@ -523,6 +567,7 @@ return function(mod, deps)
     end
     r.t = r.t + dt
     Rd.stepWarm()
+    Rd.stepBossPic()
     -- the den screen: no den in 3D yet
     if r.phase == "den" then
       stepStarting()
@@ -1107,7 +1152,11 @@ return function(mod, deps)
 
   function Rd.specOf(mv)
     if not (MoveFx and mv) then return { "slam" } end
-    if mv.isGmax then return MoveFx.GMAX[mv.key or ""] or { "wave", shape = "light" } end
+    if mv.isGmax then
+      -- (a plain Max Move: the look of the move it comes from)
+      if mv.isMax then return MoveFx.MOVES[mv.baseKey or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "wave", shape = "light" } end
+      return MoveFx.GMAX[mv.key or ""] or { "wave", shape = "light" }
+    end
     return MoveFx.MOVES[mv.key or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "slam" }
   end
 
@@ -1417,7 +1466,7 @@ return function(mod, deps)
     local ball = r.cmd.balls[i or r.cmd.ball]
     if not ball then return false end
     local level = r.boss and r.boss.mon.level or 20
-    local caught, info = Rewards.throw(r.key, level, ball, r.rng)
+    local caught, info = Rewards.throw(r.key, level, ball, r.rng, r.boss and r.boss.mon.ivs or nil)
     r.throw = { t0 = r.t, caught = caught, info = type(info) == "table" and info or nil, ball = ball,
       rgb = BALL_RGB[ball.key] or BALL_RGB.ITEM_POKE_BALL, said = {}, cues = {}, acc = 0 }
     r.phase = "throw"

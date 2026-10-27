@@ -118,13 +118,14 @@ check(not Dn.isRoute("EM_ROUTE104_MR_BRINEYS_HOUSE", { mapType = 8 }), "not a ho
 local tiny = Dn.pick({ w = 6, h = 6, open = function() return true end, warps = {} }, 9)
 check(#tiny == 0, "a map too small for a den gets none")
 
--- the daily roll
+-- the daily roll (no route Pokemon: every active den purple, a Gigantamax boss)
 local actives, total = 0, 2000
 for i = 1, total do
   local den = Dn.roll({}, 100, 0, Dn.rng(i))
   if den.active then
     actives = actives + 1
-    check(den.stars == 1 or den.stars == 2, "0 badges: 1 or 2 stars")
+    check(den.stars == 1, "0 badges: 1 star")
+    check(den.rare == true, "no route Pokemon: purple")
     check(Bosses[den.boss] and Bosses[den.boss].stars == den.stars, "a boss of the den's tier")
   else
     check(den.boss == nil, "a quiet den has no boss")
@@ -133,10 +134,35 @@ for i = 1, total do
 end
 local share = actives / total
 check(math.abs(share - D.ACTIVE) < 0.05, ("about %d%% active (%.1f%%)"):format(D.ACTIVE * 100, share * 100))
-for i = 1, 300 do
-  local den = Dn.roll({}, 1, 8, Dn.rng(i))
-  if den.active then check(den.stars >= 4, "8 badges: 4 or 5 stars") end
+-- Sword / Shield's star ranges by badges
+local RANGE = { [0] = { 1, 1 }, { 1, 2 }, { 1, 2 }, { 1, 3 }, { 2, 3 }, { 3, 4 }, { 3, 4 }, { 3, 5 }, { 3, 5 } }
+for badges = 0, 8 do
+  local seen = {}
+  for i = 1, 400 do
+    local den = Dn.roll({}, 1, badges, Dn.rng(i))
+    if den.active then seen[den.stars] = true end
+  end
+  local lo, hi = RANGE[badges][1], RANGE[badges][2]
+  local ok = true
+  for s = 1, 5 do ok = ok and ((seen[s] == true) == (s >= lo and s <= hi)) end
+  check(ok, ("%d badges: %d-%d stars"):format(badges, lo, hi))
 end
+-- with route Pokemon: about RARE of the active dens purple (G-Max), the rest red (the route's)
+local purple, red = 0, 0
+for i = 1, 4000 do
+  local den = Dn.roll({}, 7, 8, Dn.rng(i), function(stars) return ("DYNA:263:%d"):format(stars) end)
+  if den.active then
+    if den.rare then
+      purple = purple + 1
+      check(Bosses[den.boss] and Bosses[den.boss].stars == den.stars, "purple: a Gigantamax boss of the tier")
+    else
+      red = red + 1
+      check(den.boss == "DYNA:263:" .. den.stars, "red: the route's Pokemon at the den's stars")
+    end
+  end
+end
+local rare = purple / (purple + red)
+check(math.abs(rare - D.RARE) < 0.02, ("about %d%% purple (%.1f%%)"):format(D.RARE * 100, rare * 100))
 for _, stars in ipairs({ 1, 2, 3, 4, 5 }) do check(#Dn.tier(stars) > 0, "tier " .. stars .. " has bosses") end
 check(Dn.seedOf("123:EM_ROUTE101") == Dn.seedOf("123:EM_ROUTE101"), "seeds are stable")
 check(Dn.seedOf("123:EM_ROUTE101") ~= Dn.seedOf("124:EM_ROUTE101"), "another trainer, another seed")
