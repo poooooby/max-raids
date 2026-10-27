@@ -1,0 +1,37 @@
+Max Raids - asset credits
+
+---------------------------------------------
+The raid bosses (assets/bosses/, data/raid_sprites.lua): the 37 Gigantamax and other forms of the
+2.0 Giga Megas Pack (Gen 9 Pack format, for Pokemon Essentials), their animated front sprites
+re-wrapped into grids, their icons and cries, and the forms' stats and sprite metrics, by
+tools/raid_pack.py. From the pack's credits:
+
+  Resource Organization/Formatting - Hazy Crazy / 4AllNighterGrinder64
+  Animated Sprites/Cries          - Dynamax DBK Add-on by Lucidious89 (Deluxe Battle Kit)
+
+  Battler Sprites
+    Gen 7 - All Contributors To Smogon Sun/Moon Sprite Project
+    Gen 8 - All Contributors To Smogon Sword/Shield Sprite Project
+    Contributors to the original "Sprites Animados" spanish plugin:
+      Tenshi of War, DPertierra, Skyflyer, Hellfire_raptor, Antiant, AshnixsLaw, AyanoCloud,
+      Azrita, BR0DE0, Caruban, Creobnil, DanEx, Diegotoon20, dimbly, ekurepu, Ebaru, EricLostie,
+      Falcon7, Federico97_ez, Fleimer_, Franark122k, Hellfire0raptor, HM100, HyperactiveFlummi,
+      iametrine, Involuntary-Twitch, ItsYugen, jinta, justnyxnow, KingOfThe-X-Roads, kiriaura,
+      Legitimate Username, localghost, lucasomi, MallowOut, mangalos810, MCH4R1Z4RD, N-Kin,
+      NoelleMBrooks, Noobiess, Nolo33, OldSoulja, OmegalingYT, PKMarioG, PomPomKing, Poki
+      Papillon, PumpkinPastel, RetroNC, RadicalCharizard, seleccion, SelenaArmorclaw, SkidMarc25,
+      Snivy101, Sopita_Yorita, SoulWardenInfinity, TheAetherPlayer, TheCynicalPoet, Typhlito,
+      uppababy
+    Other Contributors: Lucidious89, Regis, Rod, kayzering
+
+  Icon Sprites
+    Gen 7 - Marin, MapleBranchWing, Contributors to the DS Styled Gen 7+ Repository
+    Gen 8 - Larry Turbo, Leparagon
+    Gen 1-8 (Shiny) - StarrWolf, Pokemon Shattered Light Team
+    Resource Compilation - Golisopod User, UberDunsparce, Caruban
+
+---------------------------------------------
+g3d (src/g3d) by groverburger, MIT licence (src/g3d/LICENSE).
+
+Pokemon and their designs are (c) Nintendo / Creatures Inc. / GAME FREAK Inc.; Max Raids is an
+unofficial fan project.

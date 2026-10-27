@@ -1,0 +1,29 @@
+{
+  "id": "max_raids",
+  "name": "Max Raids",
+  "version": "0.1.0",
+  "api": 2,
+  "entry": "main.lua",
+  "profile": "content",
+  "games": [
+    "gen3"
+  ],
+  "category": "OTHER",
+  "priority": 260,
+  "permissions": [
+    "engine_internals"
+  ],
+  "dependencies": [
+    "national_dex_gen3@>=1.2.0"
+  ],
+  "optional_dependencies": [
+    "g9-battle-sprites-gen3",
+    "kanto_gear"
+  ],
+  "conflicts": [],
+  "incompatible": [],
+  "description": "Max Raid Battles on the Gen 3 games: dens on the routes, a giant Gigantamax boss against four of your party in a 3D den, shields, Max moves and a catch at the end.",
+  "dependency_sources": {
+    "national_dex_gen3": "https://github.com/poooooby/national_dex_gen3"
+  }
+}
