@@ -1,4 +1,4 @@
--- Dynamax Raids' bosses: the Giga Megas pack's forms (data/raid_sprites.lua, tools/raid_pack.py), and
+-- Galar Rising's bosses: the Giga Megas pack's forms (data/raid_sprites.lua, tools/raid_pack.py), and
 -- only those. Per pack key:
 --   national  the species' National Dex number (its cry falls back to the game's when the pack's
 --             is missing; never used to look the boss up in the game - most are not in it)

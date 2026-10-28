@@ -1,4 +1,4 @@
--- Dynamax Raids: Sword / Shield's Max Raid Battles on the Gen 3 games, with National Dex Gen 3's
+-- Galar Rising: Sword / Shield's Max Raid Battles on the Gen 3 games, with National Dex Gen 3's
 -- species, moves, Fairy type and abilities. A giant Gigantamax boss (the Giga Megas pack) against
 -- four of the party in a 3D den, on a layer of its own over the field, drawn at the window's
 -- resolution.
@@ -74,7 +74,7 @@ return function(mod)
   local makePick = loadSibling(mod, "src/pc_pick.lua")
   local makeDyna = loadSibling(mod, "src/dyna.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
-    mod.log:error("Dynamax Raids is missing files; it stays off -- reinstall the mod")
+    mod.log:error("Galar Rising is missing files; it stays off -- reinstall the mod")
     return
   end
   if HD then mod.hd = HD end
@@ -312,5 +312,5 @@ return function(mod)
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,
     padSecond = function(on) padForced = on end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }
-  mod.log:info("Dynamax Raids ready (%d bosses)", #(Bosses.ORDER or {}))
+  mod.log:info("Galar Rising ready (%d bosses)", #(Bosses.ORDER or {}))
 end

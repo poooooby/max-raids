@@ -1,4 +1,4 @@
--- Driver: an ordinary wild battle (not a raid), to see whether Dynamax Raids changes how it is drawn.
+-- Driver: an ordinary wild battle (not a raid), to see whether Galar Rising changes how it is drawn.
 -- A Route 101 battle against PROBE_SPECIES (default ZIGZAGOON, then WAILORD), shot at the command
 -- menu; the enemy's front pic as the engine hands it out (its size, a gen3-hd-sprites tag) logged.
 -- Run with max_raids on, and compare against the same with it off. Shots n*.png.

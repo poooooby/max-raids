@@ -1,4 +1,4 @@
-# Dynamax Raids
+![Galar Rising](assets/Galarrising.png)
 
 *Sword and Shield's Max Raid Battles in Ruby, Sapphire, Emerald, FireRed and LeafGreen.*
 
@@ -162,7 +162,7 @@ battlefield in 3D, then try to catch it.
 1. Install [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3) and
    [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3) first.
 2. Download `max_raids-X.Y.Z.zip` from the latest release and add it in Gen1Recomp's mod manager.
-3. Turn on Dynamax Raids for a Gen 3 game.
+3. Turn on Galar Rising for a Gen 3 game.
 
 ## 👏 Credits
 
