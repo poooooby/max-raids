@@ -4,15 +4,15 @@
 
 A mod for [Gen1Recomp](https://github.com/bryanthaboi/gen1recomp)'s Generation 3 games. Pokémon
 Dens appear along the routes once you've earned your first Gym Badge. Step up to one, choose four
-of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den, then try to catch it.
+of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon on Sword and Shield's raid
+battlefield in 3D, then try to catch it.
 
 > [!NOTE]
-> **Requires [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3).** It brings the
-> raid bosses' and your Pokémon's modern moves, the Fairy type, abilities and the Exp. Candies the
-> raids reward (with a National Dex Gen 3 that has no Exp. Candies yet, a Rare Candy takes their place),
-> and the Dynamax Levels, Gigantamax Factor and Dynamax items (with an older one, every Pokémon
-> Dynamaxes at Level 0 and no Gigantamax). [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)
-> is recommended for your Pokémon's animated back sprites.
+> **Requires [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3) 1.4.0 or newer**
+> (the raid bosses' and your Pokémon's modern moves, the Fairy type, abilities, the Exp. Candies the
+> raids reward, Dynamax Levels, the Gigantamax Factor and the Dynamax items) **and
+> [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)** (your Pokémon's
+> animated sprites in the raid).
 
 ## ✨ Features
 
@@ -159,7 +159,8 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 
 ## 📦 Install
 
-1. Install [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3) first.
+1. Install [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3) and
+   [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3) first.
 2. Download `max_raids-X.Y.Z.zip` from the latest release and add it in Gen1Recomp's mod manager.
 3. Turn on Dynamax Raids for a Gen 3 game.
 

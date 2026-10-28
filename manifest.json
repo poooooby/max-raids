@@ -1,7 +1,7 @@
 {
   "id": "max_raids",
   "name": "Dynamax Raids",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -14,17 +14,18 @@
     "engine_internals"
   ],
   "dependencies": [
-    "national_dex_gen3@>=1.2.0"
+    "national_dex_gen3@>=1.4.0",
+    "g9-battle-sprites-gen3@>=1.5.4"
   ],
   "optional_dependencies": [
-    "g9-battle-sprites-gen3",
     "kanto_gear"
   ],
   "conflicts": [],
   "incompatible": [],
   "description": "Sword and Shield's Max Raid Battles on the Gen 3 games: dens on the routes, a giant Dynamax or Gigantamax boss against four of your party on the raid battlefield in 3D, your own Dynamax, barriers, Max Moves and a catch at the end.",
   "dependency_sources": {
-    "national_dex_gen3": "https://github.com/poooooby/national_dex_gen3"
+    "national_dex_gen3": "https://github.com/poooooby/national_dex_gen3",
+    "g9-battle-sprites-gen3": "https://github.com/poooooby/g9-battle-sprites-gen3"
   },
   "github": "poooooby/max-raids"
 }
