@@ -43,8 +43,11 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 
 ### The Raid
 
-- 🏔️ **A 3D den:** a cave lit red, the giant towering over your four in its red Dynamax aura, its
-  three dark-red clouds circling over its head. A Dynamax Pokémon's cry is its own, deeper and slower.
+- 🌌 **Sword and Shield's battlefield, in 3D:** a barren plain of red dust, rounded crags and
+  boulders round its sides, a night sky full of stars, and an aurora of violet, pink, blue and green
+  shifting and dancing all round. The giant towers over your four in its red Dynamax aura, pink
+  energy flickering up round its feet, its three dark-red clouds circling over its head and a vast
+  violet vortex turning in the sky above it. A Dynamax Pokémon's cry is its own, deeper and slower.
   It bursts in with a roar, and the camera follows the fight: over your Pokémon's shoulder as you
   choose, pulled back as the giant attacks, and onto each of your Pokémon as an effect lands on them.
 - 🐉 **37 Gigantamax Pokémon:** Charizard, Pikachu, Eevee, Snorlax, Gengar, Lapras and more,

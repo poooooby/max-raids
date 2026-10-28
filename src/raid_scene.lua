@@ -1,13 +1,16 @@
--- A Max Raid's den (src/training/raid.lua) on the top screen: a cave built here in 3D - a raised
--- rock plateau with a cliff falling away at its front, the boss's round metal pad with a glowing
--- ring at its back, rough cave walls round it with a dark tunnel mouth, stalagmites and
--- stalactites, boulders - lit per vertex (a cool ambient, a shaft of light from the upper left,
--- the pad's warm glow, fog with distance). Over the picture, in 2D at projected points: the light
--- shaft, motes drifting in it (one mesh moved by a shader), the boss (the pack's frames, a red
--- outline, red wisps over its head, streaks swirling round it, sparks), then the party from behind
--- with their shadows. The camera sits behind and above the party looking down at the pad, with a
--- slow sway; Sc.shot eases it between poses (the intro's close-up, the reveal, over a member's
--- shoulder, in on the boss), Sc.shake jolts it, Sc.burst sets off the boss's roar.
+-- A Max Raid's den (src/raid.lua) on the top screen, Sword / Shield's battlefield: a barren plain of
+-- rose-red dust under a night sky, crags and boulders round its sides and back, built here in 3D
+-- (lit per vertex - a dim violet ambient, a cool key from above, the Dynamax energy's pink round the
+-- boss's feet, a violet haze with distance) and drawn by src/render3d.lua with its sky left clear;
+-- behind it, in 2D: the night sky (dark above, a violet haze at the horizon), stars, the aurora's
+-- curtains (a shader: rays drifting, hues shifting through violet, magenta, blue and green, a
+-- bright hem fading up), a mist along the horizon. Over it: the Dynamax portal (a vortex turning in
+-- the sky above the boss's head, a shader on a projected disc), the pink energy pillars round its
+-- feet, the boss (the pack's frames, a red outline, the three-part cloud over its head, streaks
+-- swirling round it, sparks), then the party from behind with their shadows, specks of energy
+-- drifting up. The camera sits behind and above the party looking up at the boss, with a slow sway;
+-- Sc.shot eases it between poses (the intro's close-up, the reveal, over a member's shoulder, in on
+-- the boss), Sc.shake jolts it, Sc.burst sets off the boss's roar.
 --
 -- Drawn by src/render3d.lua: Sc.prepare renders from the training layer's update (never inside the
 -- engine's draw); Sc.draw places it. Without a 3D device the same camera paints a flat version.
@@ -18,13 +21,14 @@ return function(mod, deps)
   local sqrt, sin, cos, tan, rad, pi, floor = math.sqrt, math.sin, math.cos, math.tan, math.rad, math.pi, math.floor
   local min, max, abs = math.min, math.max, math.abs
 
-  -- the den, in metres (y up, the camera looking down -z)
-  --   PLAT      the plateau: its middle, half widths (x, z), the cliff's foot
-  --   PAD       the boss's pad: middle, radius, height
+  -- the battlefield, in metres (y up, the camera looking down -z)
+  --   PAD       where the boss stands: middle, radius of its energy, height
   --   MEMBERS   the party's feet, left to right (a slight arc)
-  --   CAVE      the walls: their middle, radius, foot and top
-  Sc.PLAT = { cx = 0, cz = -5.4, rx = 9.6, rz = 7.0, foot = -4.5 }
-  Sc.PAD = { x = 0, z = -9.2, r = 3.4, h = 0.22 }
+  Sc.PAD = { x = 0, z = -9.2, r = 3.4, h = 0.02 }
+  -- the plain: its reach from the boss's feet; the crags in a ring between cragNear and cragFar
+  -- (none in front), boulders between boulderNear and boulderFar, stones on the battle's ground
+  Sc.ARENA = { r = 140, CRAGS = 38, cragNear = 21, cragFar = 48, BOULDERS = 52, boulderNear = 11, boulderFar = 30,
+    STONES = 170 }
   Sc.MEMBERS = { { x = -3.1, z = -0.75 }, { x = -1.05, z = -1.25 }, { x = 1.05, z = -1.25 }, { x = 3.1, z = -0.75 } }
   -- the members drawn mirrored: right of the boss (a back pic faces up and to the right)
   Sc.MEMBER_FLIP = { [3] = true, [4] = true }
@@ -32,15 +36,16 @@ return function(mod, deps)
   -- a member's sprite: one scale for all (a 64-px pic's height in metres), so each keeps its own
   -- size against the others
   Sc.MEMBER_PIC_H = 1.75
-  Sc.CAVE = { cx = 0, cz = -9, r = 25, y0 = -4.5, y1 = 19 }
   Sc.EYE = { 0, 1.15, 6.6 }    -- the battle's eye (fog is measured from here)
   Sc.ASPECT = 1.5
   Sc.PORTRAIT_CY = 0.42
   Sc.NEAR, Sc.FAR = 0.05, 200
-  Sc.CLEAR = { 0.03, 0.035, 0.04 }
-  -- where the light comes from: the shaft (upper left, behind), the pad's glow
-  Sc.LIGHT = { amb = { 0.3, 0.3, 0.31 }, key = { -10, 15, -11 }, keyRGB = { 0.85, 0.9, 0.84 },
-    pad = { 1.0, 0.62, 0.34 }, padReach = 4.2, fog = { 0.05, 0.055, 0.06 }, fogFrom = 16, fogSpan = 60, fogMax = 0.6 }
+  -- (the 3D picture's sky left clear: the night sky is drawn behind it)
+  Sc.CLEAR = { 0, 0, 0, 0 }
+  -- the light: a dim violet ambient, a cool key from high in front (the aurora's), the Dynamax energy
+  -- round the boss's feet, a violet haze with distance
+  Sc.LIGHT = { amb = { 0.34, 0.22, 0.32 }, key = { 8, 40, 30 }, keyRGB = { 0.62, 0.55, 0.78 },
+    pad = { 1.0, 0.3, 0.55 }, padReach = 7.5, fog = { 0.36, 0.13, 0.32 }, fogFrom = 18, fogSpan = 75, fogMax = 0.82 }
 
   -- ------- the camera
 
@@ -344,53 +349,6 @@ return function(mod, deps)
     return img
   end
 
-  -- rock: mottled grey-brown, darker blotches, light grit, a few cracks (tiles both ways)
-  local function rock(base, seed)
-    return picture(128, 128, function(G, w, h)
-      G.setColor(base[1], base[2], base[3], 1)
-      G.rectangle("fill", 0, 0, w, h)
-      for i = 1, 60 do
-        local t = hash(i + seed, 1)
-        G.setColor(t * 0.18, t * 0.17, t * 0.15, 0.25)
-        local x, y, rr = w * hash(i + seed, 2), h * hash(i + seed, 3), 5 + 18 * hash(i + seed, 4)
-        for ddx = -1, 1 do for ddy = -1, 1 do G.circle("fill", x + ddx * w, y + ddy * h, rr, 18) end end
-      end
-      for i = 1, 700 do
-        local t = hash(i + seed, 5)
-        G.setColor(0.5 + 0.4 * t, 0.48 + 0.38 * t, 0.44 + 0.34 * t, 0.22)
-        G.rectangle("fill", w * hash(i + seed, 6), h * hash(i + seed, 7), 1.2, 1.2)
-      end
-      G.setColor(0.04, 0.04, 0.04, 0.55)
-      G.setLineWidth(1)
-      for i = 1, 6 do
-        local x, y = w * hash(i + seed, 8), h * hash(i + seed, 9)
-        local pts = { x, y }
-        for k = 1, 5 do
-          x = x + 6 + 10 * hash(i * 9 + k + seed, 10)
-          y = y + (hash(i * 9 + k + seed, 11) - 0.5) * 14
-          pts[#pts + 1], pts[#pts + 2] = x, y
-        end
-        G.line(pts)
-      end
-    end)
-  end
-
-  -- the pad's metal: brushed bands
-  local function metal()
-    return picture(64, 64, function(G, w, h)
-      G.setColor(0.62, 0.62, 0.64, 1)
-      G.rectangle("fill", 0, 0, w, h)
-      for i = 0, h - 1, 2 do
-        G.setColor(1, 1, 1, 0.04 + 0.06 * hash(i, 12))
-        G.rectangle("fill", 0, i, w, 1)
-      end
-    end)
-  end
-
-  local function white()
-    return picture(4, 4, function(G, w, h) G.setColor(1, 1, 1, 1); G.rectangle("fill", 0, 0, w, h) end)
-  end
-
   -- ------- geometry (g3d's triangles: x, y, z, u, v, nx, ny, nz, r, g, b, a)
 
   local function vtx(x, y, z, u, v, r, g, b, a) return { x, y, z, u, v, 0, 1, 0, r, g, b, a or 1 } end
@@ -400,18 +358,6 @@ return function(mod, deps)
   end
   local function tri(out, a, b, c) out[#out + 1] = a; out[#out + 1] = b; out[#out + 1] = c end
   local function quad(out, a, b, c, d) tri(out, a, b, c); tri(out, a, c, d) end
-
-  -- the plateau's rim at angle a: an irregular, squarish outline (its front nearly straight)
-  local function rimAt(a)
-    local P = Sc.PLAT
-    local c, s = cos(a), sin(a)
-    -- a superellipse (squarer than an ellipse), roughened
-    local e = 0.55
-    local x = P.rx * (abs(c) ^ e) * (c < 0 and -1 or 1)
-    local z = P.rz * (abs(s) ^ e) * (s < 0 and -1 or 1)
-    local j = 0.88 + 0.2 * noise(a * 3.1, 7.3) + 0.06 * sin(a * 11)
-    return P.cx + x * j, P.cz + z * j
-  end
 
   local scene = nil
   local R = nil
@@ -429,8 +375,110 @@ return function(mod, deps)
   end
   function Sc.resetScene() scene = nil end
 
-  local ROCK = { 0.82, 0.76, 0.68 }       -- the plateau's top, dusty
-  local WALL = { 0.6, 0.62, 0.62 }        -- the cave, cooler
+  local GROUND = { 0.86, 0.5, 0.52 }      -- the arena's dust, rose under the energy's light
+  local CRAG = { 0.9, 0.52, 0.44 }        -- the rocks, a red-brown
+
+  -- the ground's dust: reddish grit, darker blotches, pebbles lit from above, a web of fine cracks,
+  -- pale dust drifts (tiles both ways)
+  local function dirt()
+    return picture(256, 256, function(G, w, h)
+      G.setColor(0.8, 0.72, 0.7, 1)
+      G.rectangle("fill", 0, 0, w, h)
+      local function wrap(fn) for ddx = -1, 1 do for ddy = -1, 1 do fn(ddx * w, ddy * h) end end end
+      for i = 1, 90 do
+        local t = hash(i, 41)
+        G.setColor(0.45 + 0.2 * t, 0.36 + 0.15 * t, 0.36 + 0.14 * t, 0.22)
+        local x, y, rr = w * hash(i, 42), h * hash(i, 43), 8 + 30 * hash(i, 44)
+        wrap(function(ox, oy) G.ellipse("fill", x + ox, y + oy, rr, rr * (0.5 + 0.5 * hash(i, 45)), 20) end)
+      end
+      for i = 1, 40 do
+        G.setColor(1, 0.92, 0.88, 0.1)
+        local x, y, rr = w * hash(i, 46), h * hash(i, 47), 10 + 26 * hash(i, 48)
+        wrap(function(ox, oy) G.ellipse("fill", x + ox, y + oy, rr * 1.6, rr * 0.5, 20) end)
+      end
+      -- cracks: branching dark lines, each with a pale lip
+      G.setLineWidth(1.4)
+      for i = 1, 14 do
+        local x, y = w * hash(i, 50), h * hash(i, 51)
+        local ang = hash(i, 52) * 2 * pi
+        local pts = { x, y }
+        for k = 1, 9 do
+          ang = ang + (hash(i * 13 + k, 53) - 0.5) * 1.2
+          x, y = x + cos(ang) * (5 + 9 * hash(i * 13 + k, 54)), y + sin(ang) * (5 + 9 * hash(i * 13 + k, 55))
+          pts[#pts + 1], pts[#pts + 2] = x, y
+        end
+        G.setColor(1, 0.9, 0.86, 0.18)
+        G.push(); G.translate(0.8, 0.8); G.line(pts); G.pop()
+        G.setColor(0.18, 0.1, 0.1, 0.6)
+        G.line(pts)
+      end
+      -- pebbles: a shadow, the stone, its lit top
+      for i = 1, 140 do
+        local x, y, rr = w * hash(i, 56), h * hash(i, 57), 1 + 3.2 * hash(i, 58) ^ 2
+        G.setColor(0.1, 0.05, 0.05, 0.45)
+        G.ellipse("fill", x + rr * 0.4, y + rr * 0.5, rr, rr * 0.7, 10)
+        local t = hash(i, 59)
+        G.setColor(0.42 + 0.25 * t, 0.3 + 0.18 * t, 0.28 + 0.16 * t, 1)
+        G.ellipse("fill", x, y, rr, rr * 0.75, 10)
+        G.setColor(1, 0.9, 0.85, 0.35)
+        G.ellipse("fill", x - rr * 0.25, y - rr * 0.3, rr * 0.45, rr * 0.3, 8)
+      end
+      -- fine grit
+      for i = 1, 2200 do
+        local t = hash(i, 60)
+        G.setColor(0.55 + 0.45 * t, 0.45 + 0.4 * t, 0.42 + 0.4 * t, 0.28)
+        G.rectangle("fill", w * hash(i, 61), h * hash(i, 62), 1.2, 1.2)
+      end
+    end)
+  end
+
+  -- the crags' face: worn layers across, deep crevices down, lichen-dark streaks and grit
+  local function cragTex()
+    return picture(256, 256, function(G, w, h)
+      G.setColor(0.82, 0.7, 0.64, 1)
+      G.rectangle("fill", 0, 0, w, h)
+      for row = 0, 15 do
+        local y = row * h / 16
+        G.setColor(0.35, 0.24, 0.22, 0.12 + 0.12 * hash(row, 63))
+        G.rectangle("fill", 0, y, w, 3 + 6 * hash(row, 64))
+        G.setColor(1, 0.92, 0.86, 0.1)
+        G.rectangle("fill", 0, y + 7, w, 2)
+      end
+      for i = 1, 26 do
+        local x = w * hash(i, 65)
+        local pts = { x, 0 }
+        for k = 1, 12 do
+          x = x + (hash(i * 7 + k, 66) - 0.5) * 9
+          pts[#pts + 1], pts[#pts + 2] = x, k * h / 12
+        end
+        G.setLineWidth(1 + 3 * hash(i, 67))
+        G.setColor(0.12, 0.06, 0.06, 0.55)
+        G.line(pts)
+        G.setLineWidth(1)
+        G.setColor(1, 0.9, 0.85, 0.15)
+        G.push(); G.translate(2, 0); G.line(pts); G.pop()
+      end
+      for i = 1, 70 do
+        G.setColor(0.2, 0.12, 0.12, 0.2)
+        local x, y = w * hash(i, 68), h * hash(i, 69)
+        G.ellipse("fill", x, y, 3 + 10 * hash(i, 70), 8 + 24 * hash(i, 71), 14)
+      end
+      for i = 1, 1500 do
+        local t = hash(i, 72)
+        G.setColor(0.5 + 0.5 * t, 0.42 + 0.45 * t, 0.4 + 0.42 * t, 0.25)
+        G.rectangle("fill", w * hash(i, 73), h * hash(i, 74), 1.3, 1.3)
+      end
+    end)
+  end
+
+  -- the arena's ground height: flat where the battle stands, a gentle swell of dunes beyond
+  local function groundY(x, z)
+    local dx, dz = x - Sc.PAD.x, z - Sc.PAD.z
+    local d = sqrt(dx * dx + dz * dz)
+    local out = max(0, min(1, (d - 16) / 30))
+    return 0.04 * (noise(x * 0.8, z * 0.8) - 0.5) + out * (1.6 * noise(x * 0.08, z * 0.08) + 0.6 * noise(x * 0.25, z * 0.25))
+  end
+  Sc.groundY = groundY
 
   local function build()
     local lib = renderer().g3d()
@@ -438,215 +486,116 @@ return function(mod, deps)
     local function add(verts, img, pass, name)
       if #verts >= 3 then pieces[#pieces + 1] = { model = lib.newModel(verts, img), pass = pass, name = name } end
     end
-    local plain = white()
-    local P, PD, C = Sc.PLAT, Sc.PAD, Sc.CAVE
-    local N = 40
+    local PD = Sc.PAD
+    local A = Sc.ARENA
 
-    -- the cave floor below the plateau, far and dim
+    -- the ground: rings from the boss's feet out to the far haze
     do
       local v = {}
-      local y = P.foot
-      for z = -40, 14, 3 do
-        for x = -42, 42, 3 do
-          local function V(xx, zz)
-            local yy = y + 0.4 * noise(xx * 0.3, zz * 0.3)
-            return lv(xx, yy, zz, xx / 4, zz / 4, 0, 1, 0, ROCK[1] * 0.7, ROCK[2] * 0.7, ROCK[3] * 0.7)
+      local SEG = 72
+      local radii = { 0 }
+      local r = 1.2
+      while r < A.r do radii[#radii + 1] = r; r = r * 1.18 + 0.6 end
+      radii[#radii + 1] = A.r
+      local function V(ri, i)
+        local rr = radii[ri]
+        local a = 2 * pi * i / SEG
+        local x, z = PD.x + rr * cos(a), PD.z + rr * sin(a)
+        local y = groundY(x, z)
+        -- (the dust darker in hollows, lighter on the rises)
+        local k = 0.86 + 0.28 * noise(x * 0.35 + 3, z * 0.35)
+        return lv(x, y, z, x / 5, z / 5, 0, 1, 0, GROUND[1] * k, GROUND[2] * k, GROUND[3] * k)
+      end
+      for ri = 1, #radii - 1 do
+        for i = 0, SEG - 1 do
+          if ri == 1 then tri(v, V(1, i), V(2, i + 1), V(2, i))
+          else quad(v, V(ri, i), V(ri, i + 1), V(ri + 1, i + 1), V(ri + 1, i)) end
+        end
+      end
+      add(v, dirt(), 2, "ground")
+    end
+
+    -- the crags and boulders: lumpy rounded spires, layered, with crevices (rings of vertices pushed
+    -- in and out by noise), and low boulders
+    do
+      local v = {}
+      local function crag(x, z, rb, h, seed, lean)
+        local SEG, ROWS = 14, 11
+        local y0 = groundY(x, z) - 0.3
+        local function at(i, row)
+          local a = 2 * pi * i / SEG
+          local t = row / ROWS
+          -- (rounded toward the top, bulging in lumps, ridged in layers, a crevice here and there)
+          -- (a rounded dome: wide up most of its height, curving in over the top)
+          local shape = (1 - t ^ 3.2) ^ 0.45 * (0.7 + 0.55 * noise(a * 1.7 + seed, t * 2.2 + seed))
+            * (1 + 0.18 * sin(t * pi * 1.3 + seed))
+          local ridge = 1 + 0.06 * sin(t * 15 + seed) + 0.05 * sin(a * 5 + seed * 3)
+          local crev = 1 - 0.18 * max(0, sin(a * 3 + seed * 1.7) - 0.75) * 4
+          local rr = rb * shape * ridge * crev
+          if row == ROWS then rr = 0 end
+          local lx = lean * t * t * h * 0.15
+          return x + rr * cos(a) + lx, y0 + h * t, z + rr * sin(a), cos(a), 0.25 + 0.6 * t, sin(a), a
+        end
+        for i = 0, SEG - 1 do
+          for row = 0, ROWS - 1 do
+            local function P(ii, rr2)
+              local px, py, pz, nx, ny, nz, a = at(ii, rr2)
+              local shade = 0.8 + 0.35 * noise(a * 3 + seed, py * 0.6)
+              return lv(px, py, pz, (ii / SEG) * rb * 1.6, -py / 3, nx, ny, nz,
+                CRAG[1] * shade, CRAG[2] * shade, CRAG[3] * shade)
+            end
+            quad(v, P(i, row), P(i + 1, row), P(i + 1, row + 1), P(i, row + 1))
           end
-          quad(v, V(x, z + 3), V(x + 3, z + 3), V(x + 3, z), V(x, z))
         end
       end
-      add(v, rock({ 0.45, 0.42, 0.38 }, 30), 2, "floor")
-    end
-
-    -- the plateau's top: rings from its middle out to the rim, gently bumpy away from the pad
-    do
-      local v = {}
-      local RINGS = 6
-      local function topY(x, z)
-        local dpx, dpz = x - PD.x, z - PD.z
-        local nearPad = min(1, sqrt(dpx * dpx + dpz * dpz) / (PD.r + 1.2))
-        return 0.06 * (noise(x * 0.9, z * 0.9) - 0.5) * nearPad
-      end
-      local function at(ring, i)
-        local a = 2 * pi * i / N
-        local rx, rz = rimAt(a)
-        local k = ring / RINGS
-        local x, z = P.cx + (rx - P.cx) * k, P.cz + (rz - P.cz) * k
-        return x, topY(x, z), z
-      end
-      for ring = 0, RINGS - 1 do
-        for i = 0, N - 1 do
-          local x1, y1, z1 = at(ring, i)
-          local x2, y2, z2 = at(ring, i + 1)
-          local x3, y3, z3 = at(ring + 1, i + 1)
-          local x4, y4, z4 = at(ring + 1, i)
-          local function V(x, y, z) return lv(x, y, z, x / 3, z / 3, 0, 1, 0, ROCK[1], ROCK[2], ROCK[3]) end
-          if ring == 0 then tri(v, V(x1, y1, z1), V(x4, y4, z4), V(x3, y3, z3))
-          else quad(v, V(x1, y1, z1), V(x4, y4, z4), V(x3, y3, z3), V(x2, y2, z2)) end
-        end
-      end
-      add(v, rock({ 0.5, 0.46, 0.4 }, 0), 2, "plateau")
-    end
-
-    -- the cliff: from the rim down to the floor, bulging and ragged
-    do
-      local v = {}
-      local ROWS = 4
-      local function at(i, row)
-        local a = 2 * pi * i / N
-        local rx, rz = rimAt(a)
-        local k = row / ROWS
-        local y = P.foot * k
-        local bulge = (0.35 * sin(k * pi) + 0.25 * k) * (0.6 + 0.8 * noise(a * 5, row * 1.7))
-        local ox, oz = rx - P.cx, rz - P.cz
-        local l = sqrt(ox * ox + oz * oz)
-        return rx + ox / l * bulge, y, rz + oz / l * bulge, ox / l, oz / l
-      end
-      for i = 0, N - 1 do
-        for row = 0, ROWS - 1 do
-          local function V(ii, rr)
-            local x, y, z, nx, nz = at(ii, rr)
-            return lv(x, y, z, (ii / N) * 24, -y / 2.5, nx, 0.15, nz, WALL[1] * 0.9, WALL[2] * 0.88, WALL[3] * 0.85)
+      -- the ring of crags round the sides and the back (angles from the boss: 90 is toward the party)
+      for k = 1, A.CRAGS do
+        local u = (k - 0.5) / A.CRAGS
+        local ang = rad(110 + 320 * u) + (hash(k, 81) - 0.5) * 0.12
+        local dist = A.cragNear + (A.cragFar - A.cragNear) * hash(k, 82)
+        local x, z = PD.x + dist * cos(ang), PD.z + dist * sin(ang)
+        -- (none in the party's view of the boss: the front stays open)
+        if not (z > PD.z + 4 and abs(x) < 16) then
+          local h = 3 + 6.5 * hash(k, 83) * (dist / A.cragFar)
+          crag(x, z, 2.2 + 3.2 * hash(k, 84), h, k * 3.7, (hash(k, 85) - 0.5) * 2)
+          -- a smaller one beside it
+          if hash(k, 86) > 0.45 then
+            crag(x + 2.5 * cos(ang + 1.4), z + 2.5 * sin(ang + 1.4), 1 + 1.3 * hash(k, 87), h * 0.55, k * 5.1, 0)
           end
-          quad(v, V(i, row), V(i + 1, row), V(i + 1, row + 1), V(i, row + 1))
         end
       end
-      add(v, rock({ 0.4, 0.38, 0.35 }, 60), 2, "cliff")
+      -- boulders scattered round the arena's edge and the sides near the party
+      for k = 1, A.BOULDERS do
+        local ang = 2 * pi * hash(k, 88)
+        local dist = A.boulderNear + (A.boulderFar - A.boulderNear) * hash(k, 89)
+        local x, z = PD.x + dist * cos(ang), PD.z + dist * sin(ang)
+        if not (z > PD.z + 3 and abs(x) < 9) and not (abs(x) < 7 and z > -14 and z < 8) then
+          crag(x, z, 0.5 + 1.1 * hash(k, 90), 0.6 + 1.6 * hash(k, 91), k * 2.3 + 40, 0)
+        end
+      end
+      add(v, cragTex(), 2, "rocks")
     end
 
-    -- the cave walls: a broken ring round the back and sides, lumpy, with a ceiling closing over
-    -- the far half and a dark tunnel mouth at the back right
+    -- pebbles and stones on the battle's ground (small flat lumps)
     do
       local v = {}
-      local A0, A1, SEG, ROWS = rad(150), rad(390), 56, 12
-      local function mouth(a, y)
-        -- the tunnel: a dark, rounded hole at about 300 degrees
-        local da = (a - rad(303)) / rad(12)
-        local dy = (y - (C.y0 + 4.5)) / 4.5
-        return da * da + dy * dy < 1
-      end
-      local function at(i, row)
-        local a = A0 + (A1 - A0) * i / SEG
-        local k = row / ROWS
-        local y = C.y0 + (C.y1 - C.y0) * k
-        local r = C.r * (0.9 + 0.22 * noise(a * 4, k * 3)) - k * k * 6
-        return C.cx + r * cos(a), y, C.cz + r * sin(a), -cos(a), -sin(a), a
-      end
-      for i = 0, SEG - 1 do
-        for row = 0, ROWS - 1 do
-          local function V(ii, rr)
-            local x, y, z, nx, nz, a = at(ii, rr)
-            local k = mouth(a, y) and 0.08 or 1
-            return lv(x, y, z, ii / SEG * 18, -y / 3, nx, 0.2, nz, WALL[1] * k, WALL[2] * k, WALL[3] * k)
-          end
-          quad(v, V(i, row), V(i, row + 1), V(i + 1, row + 1), V(i + 1, row))
-        end
-      end
-      -- the ceiling: from the walls' top inward and up, dark
-      local cy = C.y1
-      for i = 0, SEG - 1 do
-        local function T(ii, k)
-          local a = A0 + (A1 - A0) * ii / SEG
-          local r = (C.r - 6) * (1 - k * 0.85)
-          local x, z = C.cx + r * cos(a), C.cz + r * sin(a)
-          return lv(x, cy + k * 5, z, ii / SEG * 18, k * 4, 0, -1, 0, 0.3, 0.3, 0.32)
-        end
-        quad(v, T(i, 0), T(i, 1), T(i + 1, 1), T(i + 1, 0))
-      end
-      add(v, rock({ 0.42, 0.42, 0.42 }, 90), 2, "walls")
-    end
-
-    -- stalagmites (up from the floor and the plateau) and stalactites (down from the ceiling),
-    -- and a few boulders on the plateau
-    do
-      local v = {}
-      local function cone(x, y, z, r, h, down)
-        local n = 7
-        local tip = down and (y - h) or (y + h)
+      for k = 1, A.STONES do
+        local ang = 2 * pi * hash(k, 92)
+        local dist = 4 + 18 * hash(k, 93)
+        local x, z = PD.x + dist * cos(ang), PD.z + dist * sin(ang)
+        local r = 0.06 + 0.22 * hash(k, 94) ^ 2
+        local y = groundY(x, z)
+        local top = { x, y + r * 0.45, z }
+        local n = 8
         for i = 0, n - 1 do
           local a0, a1 = 2 * pi * i / n, 2 * pi * (i + 1) / n
-          local j0, j1 = 0.8 + 0.4 * hash(i + x * 3, z), 0.8 + 0.4 * hash(i + 1 + x * 3, z)
-          local x0, z0 = x + r * j0 * cos(a0), z + r * j0 * sin(a0)
-          local x1, z1 = x + r * j1 * cos(a1), z + r * j1 * sin(a1)
-          local am = (a0 + a1) / 2
-          local nx, nz = cos(am), sin(am)
-          tri(v, lv(x0, y, z0, 0, 1, nx, 0.3, nz, WALL[1], WALL[2], WALL[3]),
-            lv(x1, y, z1, 1, 1, nx, 0.3, nz, WALL[1], WALL[2], WALL[3]),
-            lv(x + 0.06 * r, tip, z, 0.5, 0, nx, 0.6, nz, WALL[1], WALL[2], WALL[3]))
+          local j0, j1 = 0.8 + 0.4 * hash(k * 9 + i, 95), 0.8 + 0.4 * hash(k * 9 + i + 1, 95)
+          tri(v, lv(x + r * j0 * cos(a0), y, z + r * j0 * sin(a0), 0, 1, cos(a0), 0.4, sin(a0), CRAG[1], CRAG[2], CRAG[3]),
+            lv(x + r * j1 * cos(a1), y, z + r * j1 * sin(a1), 1, 1, cos(a1), 0.4, sin(a1), CRAG[1], CRAG[2], CRAG[3]),
+            lv(top[1], top[2], top[3], 0.5, 0, 0, 1, 0, CRAG[1] * 1.1, CRAG[2] * 1.1, CRAG[3] * 1.1))
         end
       end
-      local f = P.foot
-      for _, s in ipairs({ { -9.5, f, -11, 0.9, 5.2 }, { -7.2, f, -15, 1.1, 7 }, { -12.5, f, -5, 0.8, 4.6 },
-        { -14, f, -12, 1.2, 6.2 }, { 10.5, f, -12.5, 0.9, 4.8 }, { 13, f, -6, 0.7, 3.4 }, { 8.6, f, -16, 1.3, 7.6 },
-        { 11.5, f, -1, 0.6, 2.8 }, { -11, f, 1, 0.6, 2.6 }, { 6.9, 0, -9.8, 0.35, 1.5 }, { -6.6, 0, -9.2, 0.3, 1.1 },
-        { 7.6, 0, -7.6, 0.22, 0.8 }, { -2.5, f, -18, 1.4, 9 }, { 3.5, f, -19, 1.2, 8 } }) do
-        cone(s[1], s[2], s[3], s[4], s[5])
-      end
-      for _, s in ipairs({ { -6, 15, -14, 0.9, 4 }, { 4, 15, -16, 1.1, 5 }, { 9, 14.5, -9, 0.7, 3 },
-        { -10, 14.5, -6, 0.8, 3.5 }, { 0.5, 16, -19, 1.3, 6 } }) do
-        cone(s[1], s[2], s[3], s[4], s[5], true)
-      end
-      -- boulders: lumpy eight-sided rocks
-      local function boulder(x, z, r)
-        local y = 0
-        local pts = {}
-        for i = 0, 7 do
-          local a = 2 * pi * i / 8
-          local rr = r * (0.8 + 0.4 * hash(i + x, z))
-          pts[i] = { x + rr * cos(a), y, z + rr * sin(a) * 0.8 }
-        end
-        local top = { x, y + r * 1.1, z }
-        for i = 0, 7 do
-          local a, b = pts[i], pts[(i + 1) % 8]
-          local am = 2 * pi * (i + 0.5) / 8
-          tri(v, lv(a[1], a[2], a[3], 0, 1, cos(am), 0.5, sin(am), WALL[1], WALL[2], WALL[3]),
-            lv(b[1], b[2], b[3], 1, 1, cos(am), 0.5, sin(am), WALL[1], WALL[2], WALL[3]),
-            lv(top[1], top[2], top[3], 0.5, 0, cos(am), 0.9, sin(am), WALL[1], WALL[2], WALL[3]))
-        end
-      end
-      boulder(-7.0, 0.8, 0.8)
-      boulder(6.6, -1.6, 0.55)
-      boulder(-5.6, -8.6, 0.45)
-      add(v, rock({ 0.44, 0.43, 0.42 }, 120), 2, "rocks")
-    end
-
-    -- the pad: a metal disc on a short drum, a glowing ring inset in its top, lights round its rim
-    do
-      local v = {}
-      local n, r, h = 36, PD.r, PD.h
-      for i = 0, n - 1 do
-        local a0, a1 = 2 * pi * i / n, 2 * pi * (i + 1) / n
-        local c0, s0, c1, s1 = cos(a0), sin(a0), cos(a1), sin(a1)
-        local function M(x, y, z, u, vv, nx, ny, nz, k)
-          return lv(x, y, z, u, vv, nx, ny, nz, 0.78 * k, 0.78 * k, 0.8 * k)
-        end
-        -- the top
-        tri(v, M(PD.x, h, PD.z, 0.5, 0.5, 0, 1, 0, 1), M(PD.x + r * c1, h, PD.z + r * s1, 1, 1, 0, 1, 0, 1),
-          M(PD.x + r * c0, h, PD.z + r * s0, 0, 1, 0, 1, 0, 1))
-        -- the side
-        quad(v, M(PD.x + r * c0, h, PD.z + r * s0, 0, 0, c0, 0, s0, 0.8), M(PD.x + r * c1, h, PD.z + r * s1, 1, 0, c1, 0, s1, 0.8),
-          M(PD.x + r * c1, 0, PD.z + r * s1, 1, 1, c1, 0, s1, 0.5), M(PD.x + r * c0, 0, PD.z + r * s0, 0, 1, c0, 0, s0, 0.5))
-      end
-      add(v, metal(), 2, "pad")
-      -- the glowing parts: the inset ring and the rim lights (lit by themselves)
-      local g = {}
-      local r0, r1, y = r * 0.8, r * 0.88, h + 0.004
-      for i = 0, n - 1 do
-        local a0, a1 = 2 * pi * i / n, 2 * pi * (i + 1) / n
-        quad(g, vtx(PD.x + r0 * cos(a0), y, PD.z + r0 * sin(a0), 0, 0, 1, 0.78, 0.55),
-          vtx(PD.x + r0 * cos(a1), y, PD.z + r0 * sin(a1), 1, 0, 1, 0.78, 0.55),
-          vtx(PD.x + r1 * cos(a1), y, PD.z + r1 * sin(a1), 1, 1, 1, 0.9, 0.75),
-          vtx(PD.x + r1 * cos(a0), y, PD.z + r1 * sin(a0), 0, 1, 1, 0.9, 0.75))
-      end
-      for i = 0, 11 do
-        local a = 2 * pi * (i + 0.5) / 12
-        local c, s = cos(a), sin(a)
-        local tx, tz = -s * 0.16, c * 0.16
-        local x, z = PD.x + (r + 0.006) * c, PD.z + (r + 0.006) * s
-        quad(g, vtx(x - tx, h * 0.35, z - tz, 0, 0, 1, 0.85, 0.6), vtx(x + tx, h * 0.35, z + tz, 1, 0, 1, 0.85, 0.6),
-          vtx(x + tx, h * 0.7, z + tz, 1, 1, 1, 0.95, 0.8), vtx(x - tx, h * 0.7, z - tz, 0, 1, 1, 0.95, 0.8))
-      end
-      add(g, plain, 2, "pad light")
+      add(v, cragTex(), 2, "stones")
     end
 
     return { clear = Sc.CLEAR, pieces = pieces }
@@ -697,28 +646,7 @@ return function(mod, deps)
     G2.setBlendMode("alpha")
   end
 
-  -- the light shaft: a wedge of added light from the upper left down onto the plateau
-  local shaftMesh = nil
-  local function shaft(G2, ex, ey, ew, eh)
-    local x0, y0 = project(-11, 16, -13)
-    local x1, y1 = project(-4.2, 0, -6)
-    if not (x0 and x1) then return end
-    if not shaftMesh then
-      shaftMesh = G2.newMesh({ { 0, 0, 0, 0, 0.75, 0.9, 0.85, 0.16 }, { 0, 0, 0, 0, 0.75, 0.9, 0.85, 0.16 },
-        { 0, 0, 0, 0, 0.75, 0.9, 0.85, 0 }, { 0, 0, 0, 0, 0.75, 0.9, 0.85, 0 } }, "fan", "stream")
-    end
-    local w0, w1 = eh * 0.06, eh * 0.26
-    shaftMesh:setVertex(1, x0 - w0, y0, 0, 0, 0.75, 0.9, 0.85, 0.2)
-    shaftMesh:setVertex(2, x0 + w0, y0, 0, 0, 0.75, 0.9, 0.85, 0.2)
-    shaftMesh:setVertex(3, x1 + w1, y1, 0, 0, 0.75, 0.9, 0.85, 0)
-    shaftMesh:setVertex(4, x1 - w1, y1, 0, 0, 0.75, 0.9, 0.85, 0)
-    G2.setBlendMode("add")
-    G2.setColor(1, 1, 1, 1)
-    G2.draw(shaftMesh)
-    G2.setBlendMode("alpha")
-  end
-
-  -- the motes: MOTES specks drifting up through the cave, twinkling, thickest in the shaft;
+  -- the motes: MOTES specks of energy drifting up over the plain, twinkling;
   -- one static mesh moved by a vertex shader (no Lua a speck), plain circles without it
   Sc.MOTES = 60
   local MOTE_SHADER = [[
@@ -761,8 +689,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         local a = { hash(i, 31), hash(i, 32), 0.01 + 0.025 * hash(i, 33), 0.5 + 0.9 * hash(i, 34) }
         local warm = hash(i, 36) > 0.86 and 1 or 0
         for _, c in ipairs({ { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, -1 }, { 1, 1 }, { -1, 1 } }) do
-          local r, g, b = 0.8, 1, 0.92
-          if warm == 1 then r, g, b = 1, 0.75, 0.4 end
+          local r, g, b = 0.95, 0.6, 1
+          if warm == 1 then r, g, b = 1, 0.4, 0.7 end
           v[#v + 1] = { a[1], a[2], a[3], a[4], c[1], c[2], hash(i, 35), warm, r, g, b, 1 }
         end
       end
@@ -797,6 +725,313 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local yy = 1 - (hash(i, 32) + clock * 0.02) % 1
       G2.setColor(0.8, 1, 0.9, 0.5)
       G2.circle("fill", ex + hash(i, 31) ^ 2 * ew * 0.85, ey + yy * eh * 0.85, 0.6, 6)
+    end
+  end
+
+  -- ------- the sky behind the arena (2D, under the 3D picture, whose own sky is left clear): a night
+  -- sky dark at the top to a violet haze at the horizon, stars, the aurora's curtains, a pale mist
+  -- along the horizon
+
+  Sc.SKY = { top = { 0.015, 0.01, 0.045 }, mid = { 0.09, 0.03, 0.14 }, horizon = { 0.42, 0.14, 0.36 }, STARS = 260 }
+  local skyMesh = nil
+  local skyV = {}
+  for i = 1, 6 do skyV[i] = { 0, 0, 0, 0, 1, 1, 1, 1 } end
+  local function horizonY()
+    local x, y = project(eye[1], eye[2], eye[3] - 2000)
+    return y
+  end
+  -- (top of the rect dark, a violet band part way down, the haze at the horizon and below it)
+  local function skyGradient(G2, ex, ey, ew, eh, hy)
+    local S = Sc.SKY
+    hy = hy or (ey + eh * 0.5)
+    local top = min(ey, hy - eh * 0.2)
+    local my = top + (hy - top) * 0.55
+    local function set(i, x, y, c)
+      local t = skyV[i]
+      t[1], t[2], t[5], t[6], t[7], t[8] = x, y, c[1], c[2], c[3], 1
+    end
+    set(1, ex, top, S.top); set(2, ex + ew, top, S.top)
+    set(3, ex, my, S.mid); set(4, ex + ew, my, S.mid)
+    set(5, ex, hy, S.horizon); set(6, ex + ew, hy, S.horizon)
+    if not skyMesh then skyMesh = G2.newMesh(skyV, "strip", "stream") else skyMesh:setVertices(skyV) end
+    G2.setColor(1, 1, 1, 1)
+    G2.draw(skyMesh)
+    G2.setColor(S.horizon[1], S.horizon[2], S.horizon[3], 1)
+    if hy < ey + eh then G2.rectangle("fill", ex, hy, ew, ey + eh - hy) end
+  end
+
+  -- the stars: directions over the far half of the sky, projected each frame (fixed at infinity)
+  local starDir, starPts = nil, {}
+  local function stars(G2, ex, ey, ew, eh, hy)
+    if not starDir then
+      starDir = {}
+      for i = 1, Sc.SKY.STARS do
+        local az = rad(-120 + 240 * hash(i, 101)) - pi / 2
+        local el = math.asin(0.06 + 0.94 * hash(i, 102) ^ 0.8)
+        starDir[i] = { cos(el) * cos(az), math.sin(el), cos(el) * sin(az), 0.35 + 0.65 * hash(i, 103) ^ 2, hash(i, 104) }
+        starPts[i] = { 0, 0, 1, 1, 1, 0 }
+      end
+    end
+    local n = 0
+    for i = 1, #starDir do
+      local d = starDir[i]
+      local x, y = project(eye[1] + d[1] * 500, eye[2] + d[2] * 500, eye[3] + d[3] * 500)
+      if x and y < (hy or 1e9) - 2 and x > ex and x < ex + ew and y > ey then
+        n = n + 1
+        local p = starPts[n]
+        local tw = 0.55 + 0.45 * sin(clock * (1.5 + 3 * d[5]) + i)
+        local cool = d[5] > 0.7
+        p[1], p[2], p[3], p[4], p[5], p[6] = x, y, cool and 0.75 or 1, cool and 0.85 or 0.95, 1, d[4] * tw
+      end
+    end
+    for i = n + 1, #starPts do starPts[i][6] = 0 end
+    G2.setPointSize(max(1, eh / 300))
+    G2.setColor(1, 1, 1, 1)
+    if n > 0 then G2.points(starPts) end
+    -- a few bright ones with a soft glow
+    for i = 1, min(n, 18) do
+      local p = starPts[i]
+      if starDir[i][4] > 0.75 then glow(G2, p[1], p[2], eh * 0.006, eh * 0.006, 0.8, 0.85, 1, 0.35 * p[6]) end
+    end
+  end
+
+  -- the aurora: curtains on rings round the arena (behind and to the sides), each a strip of columns
+  -- whose foot and top wave in time; the shader lights rays along them, shifts their hue through
+  -- violet, magenta, blue and green, and fades them up their height (added light)
+  Sc.AURORA = {
+    { r = 70, a0 = 175, a1 = 365, foot = 2, top = 52, amp = 6, speed = 0.17, hue = 0.0, bright = 1.9 },
+    { r = 56, a0 = 195, a1 = 345, foot = 4, top = 40, amp = 5, speed = -0.23, hue = 0.33, bright = 1.5 },
+    { r = 90, a0 = 160, a1 = 380, foot = 1, top = 70, amp = 8, speed = 0.11, hue = 0.62, bright = 1.4 },
+    COLS = 96,
+  }
+  local AURORA_SHADER = [[
+extern float auT;
+extern float hueOff;
+extern float bright;
+vec3 pal(float h) {
+  // violet -> magenta -> deep blue -> teal-green -> violet, blended round a loop (ominous: deep,
+  // violet the most of it)
+  vec3 c0 = vec3(0.55, 0.18, 0.95);
+  vec3 c1 = vec3(1.0, 0.22, 0.68);
+  vec3 c2 = vec3(0.22, 0.38, 1.0);
+  vec3 c3 = vec3(0.16, 0.95, 0.62);
+  float x = fract(h) * 5.0;
+  if (x < 1.0) return mix(c0, c1, smoothstep(0.0, 1.0, x));
+  if (x < 2.0) return mix(c1, c0, smoothstep(1.0, 2.0, x));
+  if (x < 3.0) return mix(c0, c2, smoothstep(2.0, 3.0, x));
+  if (x < 4.0) return mix(c2, c3, smoothstep(3.0, 4.0, x));
+  return mix(c3, c0, smoothstep(4.0, 5.0, x));
+}
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  float u = tc.x;
+  float v = tc.y;
+  // rays: fine streaks drifting along, folded by a slower wave
+  float fold = sin(u * 3.1 + auT * 0.35) * 1.6 + sin(u * 7.3 - auT * 0.55) * 0.6;
+  float rays = 0.5 + 0.32 * sin(u * 38.0 + fold * 2.0 + auT * 1.1) + 0.18 * sin(u * 91.0 - auT * 2.3);
+  rays = pow(clamp(rays, 0.0, 1.0), 1.3);
+  // up the curtain: a bright hem at its foot, fading to nothing at its top
+  float hem = smoothstep(0.0, 0.05, v) * (0.45 + 0.55 * exp(-v * 3.5)) * pow(1.0 - v, 0.9);
+  // the light breathing along it
+  float breath = 0.55 + 0.45 * sin(u * 2.0 - auT * 0.4 + hueOff * 6.0);
+  float h = fract(u * 0.42 + auT * 0.045 + hueOff + v * 0.22);
+  vec3 col = pal(h) * (0.6 + 0.4 * (1.0 - v));
+  float a = rays * hem * breath * bright * color.a;
+  return vec4(col * a, a);
+}
+]]
+  local auroraShader, auroraFailed = nil, false
+  local auroraMeshes, auroraV = {}, {}
+  local function aurora(G2, ex, ey, ew, eh)
+    if auroraFailed then return end
+    if not auroraShader then
+      local ok, s = pcall(G2.newShader, AURORA_SHADER)
+      if not ok then auroraFailed = true; return end
+      auroraShader = s
+    end
+    local A = Sc.AURORA
+    local PD = Sc.PAD
+    local N = A.COLS
+    G2.setShader(auroraShader)
+    G2.setBlendMode("add", "premultiplied")
+    G2.setColor(1, 1, 1, 1)
+    auroraShader:send("auT", clock % 1000)
+    for c = 1, #A do
+      local C = A[c]
+      local V = auroraV[c]
+      if not V then
+        V = {}
+        for i = 1, (N + 1) * 2 do V[i] = { 0, 0, 0, 0, 1, 1, 1, 1 } end
+        auroraV[c] = V
+      end
+      local lastX, lastY, lastTX, lastTY = ex, ey + eh * 0.5, ex, ey
+      for i = 0, N do
+        local f = i / N
+        local ang = rad(C.a0 + (C.a1 - C.a0) * f)
+        -- (the curtain sways in and out, its foot and its top ripple)
+        local sway = C.amp * sin(f * 9 + clock * C.speed * 4) + C.amp * 0.5 * sin(f * 23 - clock * C.speed * 7)
+        local r = C.r + sway
+        local x, z = PD.x + r * cos(ang), PD.z + r * sin(ang)
+        local foot = C.foot + 2 * sin(f * 13 + clock * 0.3 + c)
+        local top = C.top + 6 * sin(f * 5 - clock * 0.25 + c * 2) + 3 * sin(f * 17 + clock * 0.6)
+        local bx, by = project(x, foot, z)
+        local tx, ty = project(x, top, z)
+        if bx and tx then lastX, lastY, lastTX, lastTY = bx, by, tx, ty end
+        local vb, vt = V[i * 2 + 1], V[i * 2 + 2]
+        local u = f * (C.a1 - C.a0) / 60 + c * 1.7
+        vb[1], vb[2], vb[3], vb[4] = lastX, lastY, u, 0
+        vt[1], vt[2], vt[3], vt[4] = lastTX, lastTY, u, 1
+      end
+      local m = auroraMeshes[c]
+      if not m then m = G2.newMesh(V, "strip", "stream"); auroraMeshes[c] = m else m:setVertices(V) end
+      auroraShader:send("hueOff", C.hue)
+      auroraShader:send("bright", C.bright)
+      G2.draw(m)
+    end
+    G2.setShader()
+    G2.setBlendMode("alpha")
+  end
+
+  local function horizonMist(G2, ex, ey, ew, eh, hy)
+    if not hy then return end
+    -- a pale band of mist where the aurora meets the land, cooler above, rose below
+    glow(G2, ex + ew * 0.5, hy - eh * 0.04, ew * 0.85, eh * 0.16, 0.45, 0.6, 0.75, 0.42)
+    glow(G2, ex + ew * 0.3, hy - eh * 0.03, ew * 0.4, eh * 0.1, 0.75, 0.75, 0.9, 0.3)
+    glow(G2, ex + ew * 0.72, hy - eh * 0.03, ew * 0.4, eh * 0.1, 0.9, 0.6, 0.85, 0.3)
+    glow(G2, ex + ew * 0.5, hy + eh * 0.02, ew * 0.9, eh * 0.08, 0.95, 0.4, 0.6, 0.3)
+  end
+
+  -- ------- over the boss: the Dynamax portal - a vast vortex of violet and magenta cloud turning in
+  -- the sky above its head, bright round its eye, its arms radiating out and thinning into the night;
+  -- a horizontal disc in the world (a grid projected each frame), drawn by a shader in its polar
+  -- coordinates
+  Sc.PORTAL = { UP = 1.0, LIFT = 1.4, R_K = 2.3, R_MIN = 11, GRID = 18, SPIN = 0.22 }
+  local PORTAL_SHADER = [[
+extern float poT;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) { return 0.55 * vnoise(p) + 0.3 * vnoise(p * 2.1) + 0.15 * vnoise(p * 4.3); }
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  vec2 p = tc * 2.0 - 1.0;
+  float r = length(p);
+  if (r > 1.0) return vec4(0.0);
+  float a = atan(p.y, p.x);
+  // the spiral: the angle wound by the log of the radius, turning in time
+  float sw = a + log(r + 0.04) * 2.6 - poT;
+  float arms = 0.5 + 0.5 * sin(sw * 3.0);
+  // billowing cloud along the arms
+  vec2 q = vec2(cos(sw) * r * 3.0, sin(sw) * r * 3.0) + vec2(poT * 0.15, 0.0);
+  float cloud = fbm(q * 1.6 + vec2(r * 2.0, 0.0));
+  float body = smoothstep(0.25, 0.85, arms * 0.6 + cloud * 0.7);
+  // waves radiating outward from the eye
+  float wave = 0.5 + 0.5 * sin(r * 22.0 - poT * 4.5 + cloud * 3.0);
+  // the eye: a dark heart ringed bright magenta
+  float eyeRing = exp(-pow((r - 0.14) / 0.05, 2.0));
+  float heart = smoothstep(0.12, 0.0, r);
+  // thinning to nothing at its edge
+  float fade = pow(1.0 - smoothstep(0.35, 1.0, r), 1.3);
+  vec3 deep = vec3(0.16, 0.03, 0.22);
+  vec3 violet = vec3(0.48, 0.12, 0.62);
+  vec3 magenta = vec3(1.0, 0.28, 0.66);
+  vec3 col = mix(deep, violet, body);
+  col = mix(col, magenta, body * (0.35 + 0.4 * wave) * (1.0 - smoothstep(0.2, 0.8, r)));
+  col += magenta * eyeRing * 1.2;
+  col = mix(col, vec3(0.06, 0.0, 0.1), heart * 0.85);
+  float alpha = (0.35 + 0.65 * body) * fade + eyeRing * 0.8 + heart * 0.9;
+  alpha *= color.a;
+  return vec4(col * clamp(alpha, 0.0, 1.0), clamp(alpha, 0.0, 1.0));
+}
+]]
+  local portalShader, portalFailed, portalMesh = nil, false, nil
+  local portalV = {}
+  local function portal(G2, size)
+    if portalFailed then return end
+    local PO = Sc.PORTAL
+    local GN = PO.GRID
+    if not portalShader then
+      local ok, s = pcall(G2.newShader, PORTAL_SHADER)
+      if not ok then portalFailed = true; return end
+      portalShader = s
+      for i = 1, (GN + 1) * (GN + 1) do portalV[i] = { 0, 0, 0, 0, 1, 1, 1, 1 } end
+      local map = {}
+      for j = 0, GN - 1 do
+        for i = 0, GN - 1 do
+          local a = j * (GN + 1) + i + 1
+          local b, c, d = a + 1, a + GN + 1, a + GN + 2
+          map[#map + 1] = a; map[#map + 1] = b; map[#map + 1] = d
+          map[#map + 1] = a; map[#map + 1] = d; map[#map + 1] = c
+        end
+      end
+      portalMesh = G2.newMesh(portalV, "triangles", "stream")
+      portalMesh:setVertexMap(map)
+    end
+    local PD = Sc.PAD
+    local h = Sc.MEMBER_H * (size or 3.5)
+    local Y = h * PO.UP + PO.LIFT
+    local Rr = max(PO.R_MIN, h * PO.R_K)
+    -- (turned in the plane: the spin carried in the shader's clock)
+    for j = 0, GN do
+      for i = 0, GN do
+        local u, v = i / GN, j / GN
+        local x, z = PD.x + (u * 2 - 1) * Rr, PD.z + (v * 2 - 1) * Rr
+        local sx, sy = project(x, Y, z)
+        local t = portalV[j * (GN + 1) + i + 1]
+        -- (a point behind the eye: folded onto the eye's middle, its triangles collapsing)
+        if not sx then sx, sy = cam.CX, cam.CY - 4000 end
+        t[1], t[2], t[3], t[4] = sx, sy, u, v
+      end
+    end
+    portalMesh:setVertices(portalV)
+    portalShader:send("poT", (clock * PO.SPIN * 2 * pi) % (2 * pi * 100))
+    G2.setShader(portalShader)
+    G2.setBlendMode("alpha", "premultiplied")
+    G2.setColor(1, 1, 1, 1)
+    G2.draw(portalMesh)
+    G2.setShader()
+    G2.setBlendMode("alpha")
+    -- its light falling on the boss below: a faint violet bloom
+    local cx, cy, d = project(PD.x, Y, PD.z)
+    if cx then glow(G2, cx, cy, Rr * cam.F / d * 0.9, Rr * cam.F / d * 0.35, 0.6, 0.2, 0.7, 0.18) end
+  end
+
+  -- pink energy pillars rising from the ground round the boss's feet, flickering
+  Sc.PILLARS = 9
+  local function pillars(G2, size, front)
+    local PD = Sc.PAD
+    local h = Sc.MEMBER_H * (size or 3.5)
+    for i = 1, Sc.PILLARS do
+      local ang = 2 * pi * (i + 0.3 * hash(i, 111)) / Sc.PILLARS
+      local inFront = sin(ang) > 0
+      if inFront == front then
+        local rr = PD.r * (0.7 + 0.6 * hash(i, 112))
+        local x, z = PD.x + rr * cos(ang), PD.z + rr * sin(ang)
+        local life = (clock * (0.25 + 0.2 * hash(i, 113)) + hash(i, 114)) % 1
+        local a = sin(life * pi) ^ 2 * (0.55 + 0.45 * sin(clock * 9 + i * 3))
+        local top = h * (0.25 + 0.55 * hash(i, 115)) * (0.6 + 0.4 * sin(life * pi))
+        local bx, by, bd = project(x, 0, z)
+        local tx, ty = project(x, top, z)
+        if bx and tx and a > 0.02 then
+          local w = 0.3 * cam.F / bd
+          G2.setBlendMode("add")
+          G2.setColor(1, 0.3, 0.62, a * 0.75)
+          G2.polygon("fill", bx - w, by, bx + w, by, tx + w * 0.15, ty, tx - w * 0.15, ty)
+          G2.setColor(1, 0.85, 0.95, a * 0.7)
+          G2.polygon("fill", bx - w * 0.3, by, bx + w * 0.3, by, tx, ty)
+          G2.setBlendMode("alpha")
+          glow(G2, bx, by, w * 4, w * 1.2, 1, 0.35, 0.65, a * 0.5)
+        end
+      end
+    end
+    -- (and the energy pooled on the ground under it, once)
+    if not front then
+      local gx, gy, gd = project(PD.x, 0.02, PD.z)
+      if gx then
+        local R = PD.r * 1.6 * cam.F / gd
+        glow(G2, gx, gy, R, R * 0.25, 1, 0.25, 0.55, 0.55 + 0.1 * sin(clock * 2))
+      end
     end
   end
 
@@ -1216,45 +1451,42 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G2.draw(vigMesh, ex + ew / 2, ey + eh / 2, 0, ew / 2 * 1.05, eh / 2 * 1.05)
   end
 
-  -- the flat version (no 3D): the plateau's top and the pad as polygons under the same camera
+  -- the flat version (no 3D): the plain from the horizon down in its dust colour, under the same sky
   function Sc.drawFlat(G2, ex, ey, ew, eh)
     Sc.setRect(ex, ey, ew, eh)
     place()
-    G2.setColor(Sc.CLEAR[1] * 2, Sc.CLEAR[2] * 2, Sc.CLEAR[3] * 2, 1)
-    G2.rectangle("fill", ex, ey, ew, eh)
-    local pts = {}
-    for i = 0, 39 do
-      local x, z = rimAt(2 * pi * i / 40)
-      local sx, sy = project(x, 0, z)
-      if sx then pts[#pts + 1], pts[#pts + 2] = sx, sy end
-    end
-    if #pts >= 6 then
-      G2.setColor(0.36, 0.33, 0.29, 1)
-      G2.polygon("fill", pts)
-    end
-    local PD = Sc.PAD
-    local x, y, d = project(PD.x, PD.h, PD.z)
-    if x then
-      G2.setColor(0.5, 0.5, 0.52, 1)
-      G2.ellipse("fill", x, y, PD.r * cam.F / d, PD.r * cam.F / d * 0.3, 32)
-    end
+    local hy = horizonY() or (ey + eh * 0.5)
+    G2.setColor(0.42, 0.2, 0.24, 1)
+    G2.rectangle("fill", ex, hy, ew, max(0, ey + eh - hy))
+    G2.setColor(0.6, 0.3, 0.34, 1)
+    local near = hy + (ey + eh - hy) * 0.35
+    G2.rectangle("fill", ex, near, ew, max(0, ey + eh - near))
   end
 
   -- the den over ex, ey, ew, eh at clock t: boss = { image, quad, box, size } (or nil),
   -- members = list of { image, quad, box } (nil skips a place)
   function Sc.draw(G2, ex, ey, ew, eh, t, boss, members)
     clock = t or clock
+    Sc.setRect(ex, ey, ew, eh)
+    place()
+    -- the night behind it all: sky, stars, the aurora, the mist on the horizon
+    local hy = horizonY()
+    skyGradient(G2, ex, ey, ew, eh, hy)
+    stars(G2, ex, ey, ew, eh, hy)
+    aurora(G2, ex, ey, ew, eh)
+    horizonMist(G2, ex, ey, ew, eh, hy)
     local ok = false
     if Sc.available() and scene then ok = renderer().draw(G2, scene, ex, ey, ew, eh) end
-    if not ok then Sc.drawFlat(G2, ex, ey, ew, eh) else
-      Sc.setRect(ex, ey, ew, eh)
-      place()
-    end
-    shaft(G2, ex, ey, ew, eh)
+    if not ok then Sc.drawFlat(G2, ex, ey, ew, eh) end
+    -- the portal over the boss, the energy at its feet
+    local size = boss and boss.size or 3.5
+    portal(G2, size)
+    pillars(G2, size, false)
     -- (the move effects' back layer: the ground and what stands behind the boss; their middle layer
     -- between the boss and the party: Sc.onBack / Sc.onMid, set by the raid)
     if Sc.onBack then Sc.onBack(G2) end
     if boss then drawBoss(G2, boss, boss.size, clock) end
+    pillars(G2, size, true)
     if Sc.onMid then Sc.onMid(G2) end
     for i = 1, #Sc.MEMBERS do
       if members and members[i] then drawMember(G2, i, members[i], clock) end

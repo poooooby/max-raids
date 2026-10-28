@@ -521,11 +521,27 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
   - Driver `tests/drivers/den_screen_probe.lua` (a party of six, two boxed: the slots, the menu, the
     party list, a swap, the PC, its menu, the summary, BACK, SELECT, START with the boxed one in
     slot 3, a quiet den; shots p01..p12).
-- `src/raid_scene.lua` (Sc), the den in 3D, built in code in metres.
-  - **Geometry:** a plateau (superellipse rim, cliff), the cave floor, walls with a tunnel mouth and a
-    ceiling, stalagmites and stalactites, boulders, the boss's pad (metal, a glowing ring, rim lights).
-  - **Lighting** per vertex: `lit()`, an ambient, a key light from the upper left, the pad's warm glow,
-    fog.
+- `src/raid_scene.lua` (Sc), Sword / Shield's raid battlefield (2026-10-27, Wooble's captures: "a barren
+  land with rocks/boulders on the sides", an aurora "with purples, pinks, blues, greens, that shift in
+  hue and dance", "a dark night sky dotted with stars", "a purple and pink swirling portal that
+  radiates out and dissipates" above the boss; it replaced the cave), built in code in metres.
+  - **Geometry** (`build`, `Sc.ARENA`): the ground (rings out to `r` 140 from the boss's feet, flat on
+    the battle's ground, dunes beyond - `Sc.groundY`; texture `dirt()`: grit, blotches, lit pebbles,
+    cracks), crags (`crag`: rings pushed by noise into rounded, layered, crevassed domes; `CRAGS` in a
+    ring `cragNear`..`cragFar` round the sides and back, none in front), boulders, small stones;
+    texture `cragTex()`. No pad: `Sc.PAD` is where the boss stands (h 0.02).
+  - **Lighting** per vertex: `lit()`, a violet ambient, a cool key from high in front, the Dynamax
+    energy's pink round the boss's feet (`pad`), a violet haze with distance. The 3D picture's sky is
+    clear (`Sc.CLEAR` alpha 0; render3d clears to it and places such a picture premultiplied).
+  - **The night, in 2D behind the 3D** (`Sc.draw`): `skyGradient` (`Sc.SKY`, to `horizonY()`),
+    `stars` (`Sc.SKY.STARS` directions projected at infinity, twinkling, `G.points`), `aurora`
+    (`Sc.AURORA`: three curtains on rings round the arena, strips whose foot / top / radius wave each
+    frame, `AURORA_SHADER`: drifting rays, a palette loop violet - magenta - blue - teal-green, a hem
+    fading up, added light), `horizonMist`. Over the 3D: `portal` (`Sc.PORTAL`, a horizontal disc of
+    `GRID` cells over the boss at `MEMBER_H x size x UP + LIFT`, radius `max(R_MIN, h x R_K)`;
+    `PORTAL_SHADER`: a log spiral turning, fbm cloud along its arms, waves radiating out, a dark
+    heart ringed magenta, fading to its edge), `pillars` (`Sc.PILLARS` pink beams flickering round its
+    feet, those behind before the boss, those in front after; the energy pooled under it).
   - **Camera shots:** `Sc.shot(name | "member" i | pose, dur)` eases eye, look-at and FOV
     (smootherstep). Shots are `field`, `close`, `reveal`, `boss`, `wide` and `spread` (all four and
     the boss, nearer than wide); `targetShot(i, T)` (Wooble 2026-10-26: almost directly behind the
@@ -534,7 +550,7 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
     member stands clear of the message band over the screen's foot), `Sc.CHOOSE` for its own turn -
     choosing, its moves - via `memberShot(i)` (no band: aimed higher, the boss whole); BACK 3.6 / 3.4
     (Wooble: pulled back so more of the member is in shot). `Sc.shake(amp, dur)`, `Sc.burst()` (the roar), `Sc.setTime(t)`.
-  - **Drawing over the 3D, in 2D at projected points:** the light shaft; the motes (one mesh moved by
+  - **Drawing over the 3D, in 2D at projected points:** the motes (specks of energy, pink and violet; one mesh moved by
     a vertex shader, no `VertexPosition` in its format, see Conventions); the boss (`drawBoss`: shadow,
     pad glow, a red silhouette-shader halo and outline, wisps, swirling streaks, sparks); the members
     (`drawMember`: one pixel scale for all, `MEMBER_PIC_H` 1.75 m per 64-px pic, shadow, breath);

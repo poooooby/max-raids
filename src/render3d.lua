@@ -16,7 +16,8 @@
 --   R.stats                     { prepared, placed, inline (rendered in the draw: 0), waiting
 --                               (the sky colour while a size awaits its first render) }
 --
--- A scene is { clear = { r, g, b } | nil, pieces = { { model, pass = 1 | 2 | 3, uv = { u, v } |
+-- A scene is { clear = { r, g, b, a? } | nil (a < 1: the picture placed premultiplied, what is
+-- behind it showing through), pieces = { { model, pass = 1 | 2 | 3, uv = { u, v } |
 -- nil, ... } } }: pass 1 far away with no depth (a sky), 2 solid (depth written, alpha below 0.5
 -- discarded), 3 see-through (depth tested, not written), each pass in list order.
 --
@@ -202,14 +203,18 @@ return function(mod, opts)
     -- corner on Android
     if not tg.rw then
       local sky = scene.clear or SKY
-      G2.setColor(sky[1], sky[2], sky[3], 1)
+      G2.setColor(sky[1], sky[2], sky[3], sky[4] or 1)
       G2.rectangle("fill", ex, ey, ew, eh)
       R.stats.waiting = R.stats.waiting + 1
       return true
     end
     R.stats.placed = R.stats.placed + 1
     G2.setColor(1, 1, 1, 1)
+    -- (a sky left clear, alpha 0: the picture's colours are already multiplied by their alpha)
+    local clearSky = scene.clear and (scene.clear[4] or 1) < 1
+    if clearSky then G2.setBlendMode("alpha", "premultiplied") end
     G2.draw(tg.color, tg.rx, tg.ry, 0, tg.rw / w, tg.rh / h)
+    if clearSky then G2.setBlendMode("alpha") end
     return true
   end
 
@@ -232,7 +237,7 @@ return function(mod, opts)
     else canvasArg.depthstencil, canvasArg.depth = nil, true end
     G.setCanvas(canvasArg)
     local sky = scene.clear or SKY
-    G.clear(sky[1], sky[2], sky[3], 1, true, true)
+    G.clear(sky[1], sky[2], sky[3], sky[4] or 1, true, true)
     G.setMeshCullMode(cull or "none")
     G.setBlendMode("alpha")
     G.setColor(1, 1, 1, 1)
