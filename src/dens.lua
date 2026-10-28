@@ -188,7 +188,10 @@ return function(mod, deps)
   function Dn.today()
     local Rtc = engine("src.core.game3.rtc")
     local s = session()
-    if Rtc and Rtc.enabled and s and Rtc.enabled(s) and Rtc.calcLocalTime then
+    -- (the cart's clock unless National Dex Gen 3's CLOCK SOURCE is Device, which the time of day
+    -- then follows too: the dens turn over with it, at the device's midnight)
+    local src = Dn.clockSource or (deps.clockSource and deps.clockSource())
+    if src ~= "device" and Rtc and Rtc.enabled and s and Rtc.enabled(s) and Rtc.calcLocalTime then
       local ok, t = pcall(Rtc.calcLocalTime, s)
       if ok and type(t) == "table" and tonumber(t.days) then return tonumber(t.days) end
     end

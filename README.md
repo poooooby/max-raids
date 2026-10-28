@@ -28,7 +28,9 @@ battlefield in 3D, then try to catch it.
   evolved: as you'd find it at 1★ and 2★, one evolution on at 3★, fully evolved at 4★ and 5★.
 - 🟣 **Purple beams:** the rare beam, about one den in ten: a Gigantamax Pokémon.
 - 📅 **A new raid every day:** each den holds a new Pokémon each day, or sits quiet. A den you've
-  beaten goes quiet until tomorrow.
+  beaten goes quiet until tomorrow. The day turns over at midnight by the same clock as National
+  Dex Gen 3's **Clock Source**: your device's time when it's set to Device, the in-game clock on
+  Ruby, Sapphire and Emerald when it's set to In-game.
 - ⭐ **Harder raids as you go:** the stars follow your Gym Badges as in Sword and Shield: 1★–2★
   with one or two, 1★–3★ with three, 2★–3★ with four, 3★–4★ with five or six, and 3★–5★
   with seven or eight.

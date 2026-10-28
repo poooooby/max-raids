@@ -130,19 +130,23 @@ return function(mod)
   -- else its default); nil when the Gear is not installed, disabled or failed (as PlayNav reads it)
   local lastGame = nil   -- (the game, from the hooks)
   local gearForced = nil -- (drivers: _test.gearOptions(t), a stand-in Gear's options; false = no Gear)
-  local function gearOption(key)
-    if gearForced ~= nil then return gearForced and gearForced[key] or nil end
+  -- (any mod's option the same way: modOption(id, key))
+  local function modOption(id, key)
     local loader = lastGame and lastGame.mods
-    local rec = loader and loader.mods and loader.mods.kanto_gear
+    local rec = loader and loader.mods and loader.mods[id]
     if not rec or rec.state == "disabled" or rec.state == "failed" then return nil end
-    local stored = loader.modOptions and loader.modOptions.kanto_gear
+    local stored = loader.modOptions and loader.modOptions[id]
     local v = stored and stored[key]
     if v == nil then
-      for _, row in ipairs(loader.optionSchemas and loader.optionSchemas.kanto_gear or {}) do
+      for _, row in ipairs(loader.optionSchemas and loader.optionSchemas[id] or {}) do
         if row.key == key then v = row.default end
       end
     end
     return v
+  end
+  local function gearOption(key)
+    if gearForced ~= nil then return gearForced and gearForced[key] or nil end
+    return modOption("kanto_gear", key)
   end
   -- the battle pad on the second screen: KANTO GEAR on follows the Gear's DISPLAY MODE (SEPARATE
   -- SCREENS -> second; FULLSCREEN, COMBINED, PHONE -> main; no Gear -> second when a display is
@@ -226,7 +230,9 @@ return function(mod)
 
   -- ------- dens on the routes: A on one opens its den screen (src/dens.lua)
   if makeDens then
-    local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, Dyna = Dyna, open = function(den) return Raid.openDen(den) end })
+    -- (the day follows National Dex Gen 3's CLOCK SOURCE: Device -> the device's date)
+    local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, Dyna = Dyna, open = function(den) return Raid.openDen(den) end,
+      clockSource = function() return modOption("national_dex_gen3", "clock_source") end })
     if ok and type(dn) == "table" then
       Dens = dn
       Dens.registerSprites()

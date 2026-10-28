@@ -38,6 +38,31 @@ local function body(game, log)
   log(("today %d; the cart's clock %s%s; the device's local day %d (%s)"):format(Dn.today(), tostring(cart),
     t and (" (day %d, %02d:%02d)"):format(t.days or -1, t.hours or -1, t.minutes or -1) or "", deviceDay,
     os.date("%Y-%m-%d %H:%M")))
+
+  -- National Dex Gen 3's CLOCK SOURCE: with the cart's clock set 3 hours behind the device (the wall
+  -- clock set off at the start), Device turns the dens' day over at the device's midnight, In-game at
+  -- the cart's. (Run at 1 am to see the two differ: POKEPORT_RTC=2026-10-28T01:00:00.)
+  if cart then
+    local keep = s0.localTimeOffset and Rtc.copyTime(s0.localTimeOffset) or nil
+    local info = Rtc.hostInfo(s0)
+    local dc = Rtc.getDayCount(info)
+    local h = info.hour - 3
+    local days = dc
+    if h < 0 then h, days = h + 24, dc - 1 end
+    Rtc.calcLocalTimeOffset(s0, days, h, info.minute, info.second)
+    local c = Rtc.calcLocalTime(s0)
+    Dn.clockSource = "game"
+    local onGame = Dn.today()
+    Dn.clockSource = "device"
+    local onDevice = Dn.today()
+    Dn.clockSource = nil
+    local devDay = math.floor(os.time({ year = 2000 + info.year, month = info.month, day = info.day, hour = 12 }) / 86400)
+    log(("the cart 3 h behind: %02d:%02d day %d; In-game -> %d, Device -> %d (the device's day %d)"):format(
+      c.hours, c.minutes, c.days, onGame, onDevice, devDay))
+    check(onGame == c.days, "In-game: the cart's day")
+    check(onDevice == devDay, "Device: the device's own day, whatever the cart's clock says")
+    if keep then s0.localTimeOffset = keep end
+  end
   if not cart then check(Dn.today() == deviceDay, "no cart clock: the device's local date") end
 
   -- on a route with its dens
