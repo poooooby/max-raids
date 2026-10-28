@@ -480,6 +480,17 @@ return function(mod, deps)
   end
   Sc.groundY = groundY
 
+  -- the textures, drawn once (Sc.warm draws them ahead, a step a frame)
+  local tex = { dirt = nil, crag = nil }
+  local function dirtTex() tex.dirt = tex.dirt or dirt(); return tex.dirt end
+  local function cragImg() tex.crag = tex.crag or cragTex(); return tex.crag end
+
+  -- (made by Sc.warm a piece at a time: build pauses at `pause()` while it runs as warm's coroutine)
+  local buildCo = nil
+  local function pause()
+    if buildCo and coroutine.running() == buildCo then coroutine.yield() end
+  end
+
   local function build()
     local lib = renderer().g3d()
     local pieces = {}
@@ -512,8 +523,9 @@ return function(mod, deps)
           else quad(v, V(ri, i), V(ri, i + 1), V(ri + 1, i + 1), V(ri + 1, i)) end
         end
       end
-      add(v, dirt(), 2, "ground")
+      add(v, dirtTex(), 2, "ground")
     end
+    pause()
 
     -- the crags and boulders: lumpy rounded spires, layered, with crevices (rings of vertices pushed
     -- in and out by noise), and low boulders
@@ -563,6 +575,7 @@ return function(mod, deps)
             crag(x + 2.5 * cos(ang + 1.4), z + 2.5 * sin(ang + 1.4), 1 + 1.3 * hash(k, 87), h * 0.55, k * 5.1, 0)
           end
         end
+        if k % 6 == 0 then pause() end
       end
       -- boulders scattered round the arena's edge and the sides near the party
       for k = 1, A.BOULDERS do
@@ -572,9 +585,12 @@ return function(mod, deps)
         if not (z > PD.z + 3 and abs(x) < 9) and not (abs(x) < 7 and z > -14 and z < 8) then
           crag(x, z, 0.5 + 1.1 * hash(k, 90), 0.6 + 1.6 * hash(k, 91), k * 2.3 + 40, 0)
         end
+        if k % 12 == 0 then pause() end
       end
-      add(v, cragTex(), 2, "rocks")
+      pause()
+      add(v, cragImg(), 2, "rocks")
     end
+    pause()
 
     -- pebbles and stones on the battle's ground (small flat lumps)
     do
@@ -595,7 +611,7 @@ return function(mod, deps)
             lv(top[1], top[2], top[3], 0.5, 0, 0, 1, 0, CRAG[1] * 1.1, CRAG[2] * 1.1, CRAG[3] * 1.1))
         end
       end
-      add(v, cragTex(), 2, "stones")
+      add(v, cragImg(), 2, "stones")
     end
 
     return { clear = Sc.CLEAR, pieces = pieces }
@@ -947,6 +963,22 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 ]]
   local portalShader, portalFailed, portalMesh = nil, false, nil
   local portalV = {}
+  -- the portal's grid mesh and its triangles (made once)
+  function Sc._portalInit(G2)
+    local GN = Sc.PORTAL.GRID
+    for i = 1, (GN + 1) * (GN + 1) do portalV[i] = { 0, 0, 0, 0, 1, 1, 1, 1 } end
+    local map = {}
+    for j = 0, GN - 1 do
+      for i = 0, GN - 1 do
+        local a = j * (GN + 1) + i + 1
+        local b, c, d = a + 1, a + GN + 1, a + GN + 2
+        map[#map + 1] = a; map[#map + 1] = b; map[#map + 1] = d
+        map[#map + 1] = a; map[#map + 1] = d; map[#map + 1] = c
+      end
+    end
+    portalMesh = G2.newMesh(portalV, "triangles", "stream")
+    portalMesh:setVertexMap(map)
+  end
   local function portal(G2, size)
     if portalFailed then return end
     local PO = Sc.PORTAL
@@ -955,19 +987,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local ok, s = pcall(G2.newShader, PORTAL_SHADER)
       if not ok then portalFailed = true; return end
       portalShader = s
-      for i = 1, (GN + 1) * (GN + 1) do portalV[i] = { 0, 0, 0, 0, 1, 1, 1, 1 } end
-      local map = {}
-      for j = 0, GN - 1 do
-        for i = 0, GN - 1 do
-          local a = j * (GN + 1) + i + 1
-          local b, c, d = a + 1, a + GN + 1, a + GN + 2
-          map[#map + 1] = a; map[#map + 1] = b; map[#map + 1] = d
-          map[#map + 1] = a; map[#map + 1] = d; map[#map + 1] = c
-        end
-      end
-      portalMesh = G2.newMesh(portalV, "triangles", "stream")
-      portalMesh:setVertexMap(map)
+      Sc._portalInit(G2)
     end
+    if not portalMesh then return end
     local PD = Sc.PAD
     local h = Sc.MEMBER_H * (size or 3.5)
     local Y = h * PO.UP + PO.LIFT
@@ -1498,6 +1520,53 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
     vignette(G2, ex, ey, ew, eh)
     G2.setColor(1, 1, 1, 1)
+  end
+
+  -- the battlefield made ahead, a step each call (outside any draw): the dust's texture, the crags',
+  -- the meshes a part at a time, then the sky's shaders - so the raid's first frame does not do it
+  -- all at once. true once all done. Sc.warmAll does every step now (the raid calls it while the
+  -- screen is black between the den screen and the raid).
+  local warmStep = 0
+  function Sc.warm()
+    if warmStep >= 4 or not (love and love.graphics) then return true end
+    local G2 = love.graphics
+    -- (the meshes: the build resumed until it is done, a part each call)
+    if warmStep == 2 and not scene and not Sc.failed then
+      if not buildCo then buildCo = coroutine.create(build) end
+      local ok, res = coroutine.resume(buildCo)
+      if coroutine.status(buildCo) == "dead" then
+        if ok and res then scene = res else
+          Sc.failed, Sc.why = true, "the den did not build (" .. tostring(res) .. ")"
+          if mod.log then mod.log:warn("Max Raids: %s; drawn flat", Sc.why) end
+        end
+        buildCo = nil
+        warmStep = 3
+      end
+      return false
+    end
+    warmStep = warmStep + 1
+    pcall(function()
+      if warmStep == 1 then dirtTex()
+      elseif warmStep == 2 then cragImg()
+      elseif warmStep == 3 then Sc.scene()
+      elseif warmStep == 4 then
+        if not auroraShader and not auroraFailed then
+          local ok, sh = pcall(G2.newShader, AURORA_SHADER)
+          if ok then auroraShader = sh else auroraFailed = true end
+        end
+        if not portalShader and not portalFailed then
+          local ok, sh = pcall(G2.newShader, PORTAL_SHADER)
+          if ok then portalShader = sh; Sc._portalInit(G2) else portalFailed = true end
+        end
+        motesBuild(G2)
+      end
+    end)
+    return warmStep >= 4
+  end
+
+  function Sc.warmAll()
+    for _ = 1, 200 do if Sc.warm() then return true end end
+    return false
   end
 
   return Sc

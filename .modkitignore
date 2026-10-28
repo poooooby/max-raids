@@ -36,3 +36,4 @@ tests/drivers/portrait_probe.lua
 tests/drivers/team_moves_probe.lua
 tests/drivers/gmax_probe.lua
 tests/drivers/shiny_probe.lua
+tests/drivers/open_hitch_probe.lua

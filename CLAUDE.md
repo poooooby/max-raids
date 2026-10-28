@@ -542,6 +542,18 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
     `PORTAL_SHADER`: a log spiral turning, fbm cloud along its arms, waves radiating out, a dark
     heart ringed magenta, fading to its edge), `pillars` (`Sc.PILLARS` pink beams flickering round its
     feet, those behind before the boss, those in front after; the energy pooled under it).
+  - **Made while the screen is black** (2026-10-27, Wooble: "build that in the transition when the screen
+    is black"): the textures (`tex`, drawn once), the meshes (`build`, ~60 ms of Lua lighting every
+    vertex) and the sky's shaders cost ~120 ms. `Sc.warm()` does it a step a call (the build runs as a
+    coroutine pausing at `pause()`: after the ground, every 6 crags, every 12 boulders, before the
+    rocks' model), `Sc.warmAll()` every step; raid.lua `stepStarting` calls `warmAll` once the den
+    screen's fade out is whole (`Rd.DEN_FADE.OUT`), in the black it holds (`BLACK`); the raid's own
+    first frame (~65 ms: its first 3D render, the boss's sheet) is the fade in's first, still black.
+    A raid opened without the den screen (`exports.open`) makes it on its first frame. Driver
+    `tests/drivers/open_hitch_probe.lua` (`PROBE_DEN=1` the den -> START -> black path, every frame
+    over `HITCH_MS` 25 marked "under black" or "SEEN"; `PROBE_WARM=1` each warm step timed).
+    Measured 2026-10-27: the old cave's open 87 ms (its build 20); the plain unwarmed 131; through
+    the den screen 120 + 65, both under black.
   - **Camera shots:** `Sc.shot(name | "member" i | pose, dur)` eases eye, look-at and FOV
     (smootherstep). Shots are `field`, `close`, `reveal`, `boss`, `wide` and `spread` (all four and
     the boss, nearer than wide); `targetShot(i, T)` (Wooble 2026-10-26: almost directly behind the

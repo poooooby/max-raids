@@ -588,10 +588,16 @@ return function(mod, deps)
     r.denMenu, r.denParty = nil, nil
     return true
   end
-  -- (each den-screen frame: into the raid once the black has held)
+  -- (each den-screen frame: once the screen is black the battlefield is made, all at once - its
+  -- textures, meshes and the sky's shaders, unseen; into the raid once the black has held)
   local function stepStarting()
     local st = r.starting
-    if not st or r.t - st.t0 < Rd.DEN_FADE.OUT + Rd.DEN_FADE.BLACK then return end
+    if not st then return end
+    if not st.made and r.t - st.t0 >= Rd.DEN_FADE.OUT then
+      st.made = true
+      if Scene and Scene.warmAll then pcall(Scene.warmAll) end
+    end
+    if r.t - st.t0 < Rd.DEN_FADE.OUT + Rd.DEN_FADE.BLACK then return end
     r.starting = nil
     begin(st.members)
     r.fadeIn = Rd.DEN_FADE.IN
