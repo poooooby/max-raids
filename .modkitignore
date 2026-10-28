@@ -39,3 +39,8 @@ tests/drivers/shiny_probe.lua
 tests/drivers/open_hitch_probe.lua
 tests/drivers/music_probe.lua
 assets/Galarrising.png
+assets/gpillars.png
+assets/gdenintro.gif
+assets/gdenui.png
+assets/gdenatflow.gif
+assets/grewards.png

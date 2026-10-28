@@ -14,6 +14,46 @@ battlefield in 3D, then try to catch it.
 > [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)** (your Pokémon's
 > animated sprites in the raid).
 
+## 📸 Showcase
+
+### 1. A pillar of light on the route
+
+<p align="center"><img src="assets/gpillars.png" width="760" alt="A red pillar of light rising from a Pokémon Den on Route 104"></p>
+
+*After your first Gym Badge, dens appear along the routes. A beam of light means a Pokémon is waiting
+inside: red for one of the route's own Pokémon, Dynamaxed, and purple for a rare Gigantamax one.
+Walk up and press A.*
+
+### 2. Into the den
+
+<p align="center"><img src="assets/gdenintro.gif" width="760" alt="The raid's intro: the camera pulls back from your team to reveal Gigantamax Charizard"></p>
+
+*Pick your four and press Start. The camera pulls back from your team to the giant towering over
+them, and it bursts in with a roar under the night sky, the aurora and the Dynamax vortex.*
+
+### 3. Choose your moves
+
+<p align="center"><img src="assets/gdenui.png" width="760" alt="The battle menu: Torchic's Max Moves against a Dynamax Tentacool, with the DYNAMAX button"></p>
+
+*Each of your four picks a move, an item or Run. The order runs down the left, the one choosing is at
+the bottom, and its moves show their type and how they'll do. Press **DYNAMAX** and its moves become
+Max Moves for three turns.*
+
+### 4. Every move acted out
+
+<p align="center"><img src="assets/gdenatflow.gif" width="760" alt="Attacks in action: G-Max Wildfire, a sea of flames around the team, and the turn's messages"></p>
+
+*Moves play out across the battlefield: beams, waves of water and fire, falling rocks and bites.
+G-Max Moves leave lasting effects, like Wildfire's sea of flames burning your team each turn, and the
+camera follows every hit.*
+
+### 5. Catch it and claim your rewards
+
+<p align="center"><img src="assets/grewards.png" width="760" alt="The rewards card: &quot;You caught Charizard!&quot; with four stars and the items won"></p>
+
+*Win, and you get one throw to catch it. Then the rewards card shows what you caught and everything
+you won: Exp. Candies, TMs, berries and more.*
+
 ## ✨ Features
 
 ### Pokémon Dens
