@@ -307,6 +307,12 @@ return function(mod)
   mod.exports.close = function() return Raid.close() end
   mod.exports.state = function() return Raid.state() end
   mod.exports.bosses = function() return Bosses.ORDER end
+  -- whether the battle pad is on the second display now (a raid open past its den screen, the pad
+  -- sent there): a mod sharing the display (NaviPlay) stands down meanwhile. Cheap: the flag the
+  -- pad's last update step left, so it can be asked every frame
+  mod.exports.secondScreenShown = function()
+    return Screen2 ~= nil and Screen2.state.on == true and Raid ~= nil and Raid.active() == true
+  end
   mod.exports.dens = Dens
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,

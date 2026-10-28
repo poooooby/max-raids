@@ -6,7 +6,8 @@
 -- PlayNav do; else the blocking read), then pushed; its taps come back through pollTouch in the
 -- pushed frame's pixels. Kanto Gear stands down meanwhile (main.lua's store module).
 --   S2 = screen2(mod, { Pad, raid = Raid, on = function() -> bool, press = function(id, released) })
---   S2.update(now) ; S2.active() ; S2.bridge (a stand-in for drivers; false = none)
+--   S2.update(now) ; S2.active() ; S2.state.on (the pad on the display this step) ; S2.bridge (a
+--   stand-in for drivers; false = none)
 
 return function(mod, deps)
   local S2 = { W = 960, H = 840, FPS = 30, STALE_S = 1.0 }
@@ -38,11 +39,14 @@ return function(mod, deps)
     return SS ~= nil and call(SS, "detected") == true
   end
 
-  -- up when the option says so, a raid is on and the display is there
+  -- up when the option says so, a raid is on past its den screen (nothing to show there) and the
+  -- display is there
   function S2.active()
     if not (deps.on and deps.on()) then return false end
     local raid = deps.raid
     if not (raid and raid.active and raid.active()) then return false end
+    local r = raid.current and raid.current()
+    if r and r.phase == "den" then return false end
     local SS = bridge()
     return SS ~= nil and call(SS, "detected") == true
   end
@@ -99,7 +103,10 @@ return function(mod, deps)
   end
 
   function S2.update(now)
-    if not S2.active() then
+    -- (state.on: whether the pad is on the display this step - main's exports.secondScreenShown,
+    -- for a mod sharing the display to stand down meanwhile)
+    state.on = S2.active()
+    if not state.on then
       state.held, state.pending, state.enabled = nil, nil, false
       return false
     end

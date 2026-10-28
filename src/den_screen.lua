@@ -577,8 +577,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
-  -- the party to pick from: a card over the pale panel, a row a Pokemon (icon, name, level, HP);
-  -- the slot it is in, if any; fainted ones dimmed
+  -- the party to pick from: a card over the pale panel, a row a Pokemon (icon, name, level);
+  -- fainted ones dimmed (the slots show who is where)
   local function drawParty(G, w, h, u, r)
     local p = r.denParty
     clear(where.party)
@@ -594,8 +594,6 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.setFont(font(15 * u))
     G.setColor(0.1, 0.1, 0.12, 1)
     G.print(("Who goes in slot %d?"):format(p.slot), x + 16 * u, y + 12 * u)
-    local inSlot = {}
-    for i = 1, 4 do if r.slots[i] then inSlot[r.slots[i].mon] = i end end
     for j, row in ipairs(r.party) do
       local t = rset(where.party[j] or {}, x + 10 * u, y + 40 * u + (j - 1) * (rowH + 4 * u), cw - 20 * u, rowH)
       where.party[j] = t
@@ -611,7 +609,6 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G.print(row.name, t.x + rowH * 1.25, ty)
       G.print(row.name, t.x + rowH * 1.25 + max(1, u * 0.7), ty)
       local right = live and ("Lv. " .. row.level) or "Fainted"
-      if inSlot[row.mon] then right = ("[%d]  "):format(inSlot[row.mon]) .. right end
       G.printf(right, t.x, ty, t.w - 16 * u, "right")
     end
     local back = rset(where.partyBack, x + cw - 110 * u, y + ch - 38 * u, 96 * u, 28 * u)

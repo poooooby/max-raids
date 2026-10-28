@@ -136,6 +136,8 @@ battlefield in 3D, then try to catch it.
   words sit at the foot at a size made for it, and the den screen and rewards card sit in the middle.
 - 🧭 **Follows Kanto Gear:** with **Kanto Gear**, the battle menu goes where its Display Mode
   says. Its Separate Screens setting puts the menu on the second screen.
+- 🤝 **Shares the second screen with NaviPlay:** while the battle menu is on the second screen,
+  NaviPlay (Super Training, Pokémon-Amie) steps aside, and comes back when the raid ends.
 - 🎵 **Sword and Shield's raid music:** a red den plays the raid den themes, a purple Gigantamax
   den and a legendary raid the Dynamax Adventure ones: their adventure theme on the den screen, the
   battle theme in the raid (a legendary raid its own, Eternatus its own), the capture theme while you

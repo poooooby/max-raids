@@ -83,6 +83,16 @@ local function body(game, log)
   frame("q01_commands")
   shot("q01_main")
   check(S2.state.pushes > 0, "frames pushed to the second screen")
+  -- (NaviPlay shares the display: it stands down while the pad is there)
+  check(X.secondScreenShown and X.secondScreenShown() == true, "the pad reports the second screen taken")
+  local PN = game.mods and game.mods.exports and game.mods.exports.play_nav
+  if PN and PN.state then
+    local mode = (PN.state() or {}).mode
+    log("NaviPlay's mode during the raid:", tostring(mode))
+    check(mode == "off", "NaviPlay stands down while the pad is on the second screen")
+  else
+    log("NaviPlay not loaded: its stand-down not checked")
+  end
   U.tap(game, "down")
   U.wait(3)
   frame("q02_cursor_pokemon")
@@ -161,8 +171,33 @@ local function body(game, log)
   after(0.2)
   shot("q08_main_pad_run")
   log("pushes:", pushes)
-  log(("%d failures"):format(fails))
   X.close()
+  U.wait(10)
+  check(X.secondScreenShown and X.secondScreenShown() == false, "the second screen handed back once the raid closes")
+  if PN and PN.state then log("NaviPlay's mode after the raid:", tostring((PN.state() or {}).mode)) end
+  -- NaviPlay up (Super Training open): it stands down for a raid's pad, and comes back after
+  if PN and PN.state and PN.training and PN.training.open then
+    local okT, why = pcall(PN.training.open)
+    U.wait(30)
+    local before = (PN.state() or {}).mode
+    log("Super Training open:", tostring(okT), tostring(why), "NaviPlay's mode", tostring(before))
+    if before and before ~= "off" then
+      X._test.padSecond(true)
+      X.open(os.getenv("PROBE_BOSS") or "CHARIZARD_4")
+      waitFor(function() return X.state().phase == "command" end, 20000)
+      U.wait(10)
+      log("  the pad's flag", tostring(X.secondScreenShown()), "S2 on", tostring(S2.state.on), "phase", tostring(X.state().phase))
+      check((PN.state() or {}).mode == "off", "Super Training's NaviPlay stands down for the raid's pad")
+      X.close()
+      X._test.padSecond(false)
+      U.wait(30)
+      check((PN.state() or {}).mode == before, "NaviPlay comes back once the raid is done (" .. tostring(before) .. ")")
+    else
+      log("NaviPlay did not come up for Super Training: its stand-down not checked")
+    end
+    if PN.training.finish then pcall(PN.training.finish) end
+  end
+  log(("%d failures"):format(fails))
   log("done")
 end
 
