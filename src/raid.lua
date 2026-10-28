@@ -1951,6 +1951,8 @@ return function(mod, deps)
   -- the bag holds, its description, Use. No chance is shown.
   function Rd.startCatch()
     r.phase = "catch"
+    -- (the battle's last words have had their time: the choice comes up at once, its taps taken)
+    r.say = nil
     r.events, r.rows, r.bossShow = nil, {}, true
     if r.boss then r.boss.shieldShown = nil end
     local balls = Rewards.balls()

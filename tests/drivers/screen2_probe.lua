@@ -122,6 +122,8 @@ local function body(game, log)
   check(X.state().actor == 2, "a move picked: the next member")
   frame("q06_second_member")
   -- the catch on the second screen: Catch / Don't Catch, the ball box, a ball thrown
+  -- (as after a real win: the battle's last words still up when the catch begins)
+  R.say("Charizard fainted!")
   R.startCatch()
   after(0.9)
   frame("q10_catch_choice")

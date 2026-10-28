@@ -109,11 +109,21 @@ local function body(game, log)
       end
     end
   end
+  -- (as after a real win: the battle's last words still up when the catch begins)
+  R.say("Charizard fainted!")
   R.startCatch()
   after(0.9)
   shot("c01_choice")
   check(X.state().phase == "catch", "the choice is up")
-  U.tap(game, "a")
+  -- a touch on Catch (the main screen's pill) opens the ball box, as A does
+  local cw = R.catchWhere and R.catchWhere.catch
+  if cw and cw.w then
+    local x, y = cw.x + cw.w / 2, cw.y + cw.h / 2
+    love.touchpressed("probe", x, y, 0, 0, 1); U.wait(2); love.touchreleased("probe", x, y, 0, 0, 1); U.wait(4)
+    log("after the touch on Catch: menu", tostring(R.current().cmd.menu))
+    check(R.current().cmd.menu == "ballbox", "a touch on Catch opens the ball box")
+  end
+  if R.current().cmd.menu ~= "ballbox" then U.tap(game, "a") end
   U.wait(4)
   after(0.2)
   shot("c02_ballbox")
