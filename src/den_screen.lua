@@ -336,22 +336,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 
   -- the chevron before the selected one: black with a white stroke inside, as the battle pad's
   local function chevron(G, t)
-    local hh = t.h * 0.34
-    local x1, x2, cy = t.x - t.h * 0.42, t.x + t.h * 0.0, t.y + t.h / 2
-    G.setLineJoin("miter")
-    G.setColor(0, 0, 0, 1)
-    G.setLineWidth(t.h * 0.2)
-    G.line(x1, cy - hh, x2, cy, x1, cy + hh)
+    local hh = t.h * 0.2
+    if Pad and Pad.chevronAt then return Pad.chevronAt(G, t.x - t.h * 0.1 - hh * 0.3, t.y + t.h / 2, hh) end
     G.setColor(1, 1, 1, 1)
     G.setLineWidth(t.h * 0.09)
-    G.line(x1, cy - hh, x2, cy, x1, cy + hh)
-    G.setLineJoin("bevel")
+    G.line(t.x - t.h * 0.3, t.y + t.h * 0.3, t.x - t.h * 0.1, t.y + t.h / 2, t.x - t.h * 0.3, t.y + t.h * 0.7)
   end
 
   -- a pill: the face, the words bold (the default face twice, a pixel apart), a chevron when selected
-  local function pill(G, t, word, sel, u, live, accent)
+  local function pill(G, t, word, sel, u, live, accent, alone)
     local y = face(G, t, t.h / 2, sel, accent or Den.ACCENT[word] or Den.ACCENT.BACK, u)
-    if sel then chevron(G, t) end
+    if sel and not alone then chevron(G, t) end
     local f = font(t.h * 0.46)
     G.setFont(f)
     if sel then G.setColor(1, 1, 1, live == false and 0.5 or 1)
@@ -361,21 +356,52 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.printf(word, t.x + max(1, u * 0.8), ty, t.w, "center")
   end
 
-  -- a type's badge: its colour square with the initial, the name on a dark slanted plate
+  -- the types' icons (assets/ui/types/<TYPE>.png: a white sign on a disc of its colour), loaded once
+  -- each (false: not there, the colour's disc and the initial stand in)
+  local typeIcons = {}
+  local function typeIcon(typeName)
+    local key = (typeName or ""):upper()
+    if typeIcons[key] == nil then
+      typeIcons[key] = false
+      local ok, img = pcall(function()
+        local bytes = mod:read("assets/ui/types/" .. key .. ".png")
+        if not bytes then return nil end
+        local i = love.graphics.newImage(love.image.newImageData(love.filesystem.newFileData(bytes, key .. ".png")))
+        i:setFilter("linear", "linear")
+        return i
+      end)
+      if ok and img then typeIcons[key] = img end
+    end
+    return typeIcons[key] or nil
+  end
+
+  -- a type's badge: its icon, the name on a dark slanted plate behind it
   local function typeBadge(G, x, y, u, typeName)
     local rgb = Battle and Battle.TYPE_RGB and Battle.TYPE_RGB[typeName] or { 0.6, 0.6, 0.6 }
     local h = 22 * u
+    local d = h * 1.3
     local f = font(13 * u)
     local word = typeName:upper()
     local tw = f:getWidth(word) + 26 * u
     G.setColor(0.3, 0.27, 0.28, 0.92)
     G.polygon("fill", x + h * 0.6, y, x + h + tw, y, x + h + tw - h * 0.3, y + h, x + h * 0.6, y + h)
-    G.setColor(rgb[1], rgb[2], rgb[3], 1)
-    G.rectangle("fill", x, y, h, h, 3 * u, 3 * u)
-    G.setColor(1, 1, 1, 1)
-    G.setFont(font(14 * u))
-    G.printf(word:sub(1, 1), x, y + (h - font(14 * u):getHeight()) / 2, h, "center")
+    local cx, cy = x + h / 2, y + h / 2
+    local img = typeIcon(typeName)
+    if img then
+      local k = d / img:getWidth()
+      G.setColor(0, 0, 0, 0.25)
+      G.circle("fill", cx + u, cy + 1.5 * u, d / 2, 32)
+      G.setColor(1, 1, 1, 1)
+      G.draw(img, cx, cy, 0, k, k, img:getWidth() / 2, img:getHeight() / 2)
+    else
+      G.setColor(rgb[1], rgb[2], rgb[3], 1)
+      G.circle("fill", cx, cy, d / 2, 32)
+      G.setColor(1, 1, 1, 1)
+      G.setFont(font(14 * u))
+      G.printf(word:sub(1, 1), x, y + (h - font(14 * u):getHeight()) / 2, h, "center")
+    end
     G.setFont(f)
+    G.setColor(1, 1, 1, 1)
     G.print(word, x + h + 10 * u, y + (h - f:getHeight()) / 2)
     return tw + h
   end
@@ -468,18 +494,21 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G.setShader()
     end
     -- the rule at the foot
+    -- (one slanted plate behind all its lines, as wide as the longest)
     local L = Den.LOOK
-    local bandY, bandH = h - 78 * u, 22 * u
     local f = font(13 * u)
     G.setFont(f)
-    local bw = f:getWidth(L.RULE[1]) + 40 * u
+    local lh, pad = f:getHeight() * 1.1, 6 * u
+    local bandH = pad * 2 + lh * (#L.RULE - 1) + f:getHeight()
+    local bandY = h - 78 * u
+    local bw = 0
+    for _, line in ipairs(L.RULE) do bw = max(bw, f:getWidth(line)) end
+    bw = bw + 30 * u
     local c = L.RULE_BAND
     G.setColor(c[1], c[2], c[3], c[4])
-    G.polygon("fill", 0, bandY, bw + bandH * 0.4, bandY, bw, bandY + bandH, 0, bandY + bandH)
+    G.polygon("fill", 0, bandY, bw + bandH * 0.3, bandY, bw, bandY + bandH, 0, bandY + bandH)
     G.setColor(1, 1, 1, 1)
-    G.print(L.RULE[1], 14 * u, bandY + (bandH - f:getHeight()) / 2)
-    G.print(L.RULE[2], 14 * u, bandY + bandH + 6 * u)
-    G.print(L.RULE[3], 14 * u, bandY + bandH + 6 * u + f:getHeight() * 1.1)
+    for i, line in ipairs(L.RULE) do G.print(line, 14 * u, bandY + pad + (i - 1) * lh) end
   end
 
   -- the slots, two by two: the icon and the name (a soft card behind, ringed while the cursor is on it)
@@ -526,8 +555,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 
   -- the slot's menu, left of the slots level with the chosen slot's row (the slot stays ringed)
   local function drawMenu(G, w, h, u, r)
+    -- (put away while the party list is up: the list stands where it was)
     local m = r.denMenu
-    if not m then clear(where.menu); return end
+    if not m or r.denParty then clear(where.menu); return end
     local s = where.slots[m.slot]
     local pw, ph = w * 0.12, 30 * u
     local x = where.slots[1].x - pw - 22 * u
@@ -608,7 +638,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       clear(where.slots)
       rset(where.start, 0, 0, 0, 0)
       local t = rset(where.exit, w * 0.62, h - 70 * u, w * 0.34, 34 * u)
-      pill(G, t, "EXIT", r.cursor ~= 7, u)
+      -- (the screen's one button without a crystal: lit, no chevron)
+      pill(G, t, "EXIT", r.cursor ~= 7, u, nil, nil, not crystalShown(r))
       crystalPill(h - 114 * u, r.cursor == 7)
       return
     end

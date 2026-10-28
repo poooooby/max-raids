@@ -155,7 +155,8 @@ battlefield in 3D, then try to catch it.
 - **A** picks, **B** goes back, the **D-pad** moves the cursor; **START** on the den screen starts
   the raid; **SELECT** or **R** on the move list presses DYNAMAX.
 - Every button can be tapped on a touch screen, on the main screen or the second one.
-- On the second screen the D-pad moves between the buttons as they are laid out.
+- The second screen works by touch: a button presses in under your finger. Use the D-pad there
+  and a highlight appears, moving between the buttons as they are laid out.
 
 ## 📦 Install
 
@@ -177,6 +178,7 @@ battlefield in 3D, then try to catch it.
 - **Raid music:** from Lucidious89's [DBK] Raid Battles (Pokémon Essentials Deluxe Battle Kit),
   Pokémon Sword and Shield's raid themes.
 - **3D:** [g3d](https://github.com/groverburger/g3d) by groverburger (MIT).
+- **Type icons:** from [PokéSprite](https://github.com/msikma/pokesprite) by msikma and contributors.
 - **Max Move power:** after Pokémon Showdown's data (MIT).
 
 Pokémon and their designs are © Nintendo / Creatures Inc. / GAME FREAK Inc. This is an unofficial

@@ -110,8 +110,23 @@ return function(mod, deps)
       G.setColor(r, g, b, a)
       G.setLineWidth(lw)
     end,
+    yes = function(G, cx, cy, s)
+      G.setLineJoin("miter")
+      G.line(cx - s * 0.75, cy + s * 0.02, cx - s * 0.22, cy + s * 0.55, cx + s * 0.78, cy - s * 0.55)
+      G.setLineJoin("bevel")
+    end,
+    no = function(G, cx, cy, s)
+      G.line(cx - s * 0.58, cy - s * 0.58, cx + s * 0.58, cy + s * 0.58)
+      G.line(cx - s * 0.58, cy + s * 0.58, cx + s * 0.58, cy - s * 0.58)
+    end,
   }
+  EMBLEM.catch, EMBLEM.use, EMBLEM.leave = EMBLEM.pokemon, EMBLEM.pokemon, EMBLEM.no
   Pad.EMBLEM = EMBLEM
+  -- Yes / No (Rd.ask's question): pills as the commands', each with its emblem
+  Pad.YESNO = {
+    { id = "yes", word = "Yes", rgb = { 0.2, 0.75, 0.35 } },
+    { id = "no", word = "No", rgb = { 0.9, 0.3, 0.3 } },
+  }
 
   -- ------- a button's face, textured: a rounded rect drawn by a shader - a lit gradient, a fine
   -- brushed grain, a gloss over its upper half, a bevel (lit along the top, shaded along the foot;
@@ -152,12 +167,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if (cut > 0.0) col = mix(col, accent * (1.0 - 0.25 * y), 0.92);
     col += (1.0 - smoothstep(0.0, 0.012, abs(cut))) * 0.35;
   }
-  // a gloss over the upper half (not when pressed)
-  col += (1.0 - smoothstep(0.0, 0.48, y)) * 0.12 * (1.0 - pressed);
+  // a gloss over the upper half, fading out softly (not when pressed)
+  col += (1.0 - smoothstep(0.0, 0.62, y)) * 0.1 * (1.0 - pressed);
   // the bevel: the band just inside the edge, light at the top and shade at the foot (turned over
   // when pressed)
-  float band = 1.0 - clamp(-d / max(2.0, size.y * 0.07), 0.0, 1.0);
-  float side = (y < 0.5) ? 1.0 : -1.0;
+  // (its width held to a few pixels on a tall face; lit to shaded blended down the sides, no step)
+  float band = 1.0 - clamp(-d / max(2.0, min(size.y * 0.07, 7.0)), 0.0, 1.0);
+  float side = 1.0 - 2.0 * smoothstep(0.2, 0.8, y);
   col += band * side * mix(0.2, -0.28, pressed);
   col -= pressed * (1.0 - smoothstep(0.0, 0.22, y)) * 0.22;
   return vec4(clamp(col, 0.0, 1.0), a * color.a);
@@ -179,7 +195,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
     return faceShader and faceTexel
   end
-  local LIGHT_TOP, LIGHT_BOTTOM = { 1, 1, 1 }, { 0.82, 0.84, 0.89 }
+  local LIGHT_TOP, LIGHT_BOTTOM = { 0.95, 0.95, 0.97 }, { 0.82, 0.84, 0.89 }
   local DARK_TOP, DARK_BOTTOM = { 0.22, 0.22, 0.27 }, { 0.03, 0.03, 0.05 }
   local GREY = { 0.6, 0.6, 0.62 }
   local faceSize = { 0, 0 }   -- (reused: a table a call would be garbage every frame)
@@ -238,7 +254,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if selected then G.setColor(c[1], c[2], c[3], 1) else G.setColor(c[1], c[2], c[3], 0.85 * k) end
     EMBLEM[item.id](G, ex, ey, s, selected and { 0.05, 0.05, 0.06 } or { 1, 1, 1 })
     G.setLineWidth(1)
+    -- (the words shrink to end before the emblem: "Don't Catch")
     local f = font(t.h * 0.44)
+    local room = ex - s * 1.3 - (t.x + t.h * 0.36)
+    if f:getWidth(item.word) > room then f = font(t.h * 0.44 * room / f:getWidth(item.word)) end
     G.setFont(f)
     local tx, ty = t.x + t.h * 0.36, t.y + (t.h - f:getHeight()) / 2
     if selected then G.setColor(1, 1, 1, 1)
@@ -249,21 +268,35 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.print(item.word, tx + max(1, u * 0.8), ty)
   end
 
-  -- the chevron at the selected pill's left: white with a black edge
-  local function chevron(G, t, u)
-    local hh = t.h * 0.34
-    local x1 = t.x - t.h * 0.4
-    local x2 = t.x + t.h * 0.02
-    local cy = t.y + t.h / 2
-    G.setLineJoin("miter")
-    G.setColor(0, 0, 0, 1)
-    G.setLineWidth(t.h * 0.2)
-    G.line(x1, cy - hh, x2, cy, x1, cy + hh)
-    G.setColor(1, 1, 1, 1)
-    G.setLineWidth(t.h * 0.1)
-    G.line(x1, cy - hh, x2, cy, x1, cy + hh)
-    G.setLineWidth(1)
+  -- the selection's chevron: white with a black edge, its point and ends rounded, its point at
+  -- (tipX, cy) and its arms hh up and down from it
+  function Pad.chevronAt(G, tipX, cy, hh)
+    local x1 = tipX - hh * 0.85
+    local lw = max(1.5, hh * 0.3)
     G.setLineJoin("bevel")
+    for pass = 1, 2 do
+      local wd = pass == 1 and lw * 1.9 or lw
+      if pass == 1 then G.setColor(0, 0, 0, 1) else G.setColor(1, 1, 1, 1) end
+      G.setLineWidth(wd)
+      G.line(x1, cy - hh, tipX, cy, x1, cy + hh)
+      G.circle("fill", x1, cy - hh, wd / 2, 16)
+      G.circle("fill", tipX, cy, wd / 2, 16)
+      G.circle("fill", x1, cy + hh, wd / 2, 16)
+    end
+    G.setLineWidth(1)
+  end
+
+  -- the chevron beside the selected pill's left end, clear of it
+  local function chevron(G, t, u)
+    local hh = t.h * 0.2
+    Pad.chevronAt(G, t.x - t.h * 0.1 - hh * 0.3, t.y + t.h / 2, hh)
+  end
+
+  -- a pill as the commands' (its emblem EMBLEM[item.id]) with the chevron at it while selected: the
+  -- raid's other choices (Catch / Don't Catch, Use); `alone`, a screen's one button: no chevron
+  function Pad.commandPill(G, t, item, sel, live, alone)
+    pill(G, t, item, sel, live ~= false, t.h / 92)
+    if sel and not alone then chevron(G, t, t.h / 92) end
   end
 
   -- the stack: pills of pw x ph, its foot at bottom, its right edge at right
@@ -317,18 +350,23 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     -- its own words, `live` whether it can be picked)
     local live
     if mv.live ~= nil then live = mv.live else live = (mv.pp or 0) > 0 end
-    -- the type chip
+    -- the type chip (an item: its bag picture in its place)
     local cw, ch = t.h * 1.05, t.h * 0.42
     local cx, cy = t.x + t.h * 0.3, t.y + (t.h - ch) / 2
-    G.setColor(c[1], c[2], c[3], live and 1 or 0.5)
-    G.rectangle("fill", cx, cy, cw, ch, ch / 2, ch / 2)
-    local chip = mv.chip or ((mv.typeName or ""):sub(1, 1) .. (mv.typeName or ""):sub(2):lower())
-    -- (a longer word, "Immune", shrinks to the chip)
-    local fc = font(ch * 0.62)
-    if fc:getWidth(chip) > cw * 0.9 then fc = font(ch * 0.62 * cw * 0.9 / fc:getWidth(chip)) end
-    G.setFont(fc)
-    G.setColor(1, 1, 1, 1)
-    G.printf(chip, cx, cy + (ch - fc:getHeight()) / 2, cw, "center")
+    if mv.itemId and Pad.itemIcon then
+      local is = t.h * 0.62
+      Pad.itemIcon(G, mv.itemId, cx + (cw - is) / 2, t.y + (t.h - is) / 2, is, c)
+    else
+      G.setColor(c[1], c[2], c[3], live and 1 or 0.5)
+      G.rectangle("fill", cx, cy, cw, ch, ch / 2, ch / 2)
+      local chip = mv.chip or ((mv.typeName or ""):sub(1, 1) .. (mv.typeName or ""):sub(2):lower())
+      -- (a longer word, "Immune", shrinks to the chip)
+      local fc = font(ch * 0.62)
+      if fc:getWidth(chip) > cw * 0.9 then fc = font(ch * 0.62 * cw * 0.9 / fc:getWidth(chip)) end
+      G.setFont(fc)
+      G.setColor(1, 1, 1, 1)
+      G.printf(chip, cx, cy + (ch - fc:getHeight()) / 2, cw, "center")
+    end
     -- the PP's width first: the name shrinks to fit before it
     local fp = font(t.h * 0.28)
     local ppText = mv.right or ("%d/%d"):format(mv.pp or 0, mv.maxPp or 0)
@@ -358,6 +396,242 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if selected then G.setColor(0.85, 0.85, 0.88, 1) else G.setColor(0.25, 0.25, 0.28, 1) end
     if not live then G.setColor(0.9, 0.25, 0.25, 1) end
     G.printf(ppText, t.x, t.y + (t.h - fp:getHeight()) / 2, t.w - t.h * 0.42, "right")
+  end
+
+  -- ------- the Pokemon as pills (Sword / Shield's target screen): its party icon, its name and, under
+  -- it, how the move does on it; the boss's icon in a Dynamax red cast
+
+  EFF_WORD.normal = "Effective"
+  Pad.EFF_WORD, Pad.EFF_RGB = EFF_WORD, EFF_RGB
+
+  -- a party icon (two frames, `w` px each; Rd.drawPixel when the raid set it) s across at (x, y)
+  local function monIcon(G, ic, x, y, s, now, alpha, red)
+    if not (ic and ic.image) then return end
+    local f = (ic.frames or 1) > 1 and (math.floor((now or 0) * 4) % 2) or 0
+    local q = ic.quads and ic.quads[f]
+    local k = s / (ic.w or 32)
+    local draw = Pad.drawPixel or G.draw
+    if red then G.setColor(1, 0.5, 0.56, alpha or 1) else G.setColor(1, 1, 1, alpha or 1) end
+    if q then draw(ic.image, q, x, y, 0, k, k) else draw(ic.image, x, y, 0, k, k) end
+  end
+  Pad.monIcon = monIcon
+
+  -- an HP bar: a dark track, the fill green / yellow / red by the share left
+  local function hpBar(G, x, y, w, h, share, alpha)
+    share = max(0, min(1, share or 0))
+    G.setColor(0.12, 0.12, 0.14, 0.85 * (alpha or 1))
+    G.rectangle("fill", x, y, w, h, h / 2, h / 2)
+    if share > 0.5 then G.setColor(0.2, 0.86, 0.3, alpha or 1)
+    elseif share > 0.2 then G.setColor(0.98, 0.78, 0.15, alpha or 1)
+    else G.setColor(0.95, 0.25, 0.2, alpha or 1) end
+    if share > 0 then G.rectangle("fill", x, y, max(h, w * share), h, h / 2, h / 2) end
+  end
+
+  -- a Pokemon's pill, w x h with corners rad, the face textured as the buttons' (dark while sel, a rim
+  -- in rgb); its icon at the left, the name, `sub` under it (in subRgb, else grey); with `hp` (a
+  -- share) a bar under them; faded while it cannot be picked; pressed: lower, no shadow
+  local function monPill(G, x, y, w, h, rad, ic, name, sub, subRgb, sel, live, pressed, rgb, now, red, hp)
+    local a = live and 1 or 0.55
+    if pressed then
+      y = y + h * 0.04
+    else
+      G.setColor(0, 0, 0, 0.28 * a)
+      G.rectangle("fill", x + h * 0.03, y + h * 0.06, w, h, rad, rad)
+    end
+    local o = Pad.faceOpts(sel, pressed, rgb, false, sel and 0.22 or 0.06)
+    o.alpha = a
+    Pad.face(G, x, y, w, h, rad, o)
+    if sel and rgb then
+      G.setColor(rgb[1], rgb[2], rgb[3], 0.9)
+      G.setLineWidth(max(1.5, min(w, h) * 0.035))
+      G.rectangle("line", x, y, w, h, rad, rad)
+      G.setLineWidth(1)
+    end
+    local inset = min(rad, h / 2) * 0.45 + h * 0.04
+    local is = min(h * (hp and 0.62 or 0.92), w * 0.3)
+    local ix = x + inset
+    monIcon(G, ic, ix, y + (h - is) / 2 - h * 0.03, is, now, live and 1 or 0.5, red)
+    local nx = ix + is + min(h, w) * 0.06
+    local room = x + w - nx - inset
+    local nm = name or "?"
+    local size = min(h * 0.3, w * 0.085)
+    local fn = font(size)
+    if fn:getWidth(nm) > room then fn = font(max(size * 0.6, size * room / fn:getWidth(nm))) end
+    G.setFont(fn)
+    local fs = font(size * 0.72)
+    local nh = fn:getHeight()
+    local ny
+    if hp then ny = y + h * 0.14
+    elseif sub then ny = y + (h - nh - fs:getHeight()) / 2
+    else ny = y + (h - nh) / 2 end
+    if sel then G.setColor(1, 1, 1, 1) elseif live then G.setColor(0.08, 0.08, 0.1, 1) else G.setColor(0.4, 0.4, 0.44, a) end
+    G.print(nm, nx, ny)
+    G.print(nm, nx + max(1, size * 0.04), ny)
+    if sub then
+      G.setFont(fs)
+      if subRgb then G.setColor(subRgb[1], subRgb[2], subRgb[3], a)
+      elseif sel then G.setColor(0.82, 0.82, 0.86, 1) else G.setColor(0.35, 0.35, 0.4, a) end
+      G.print(sub, nx, ny + nh)
+    end
+    if hp then hpBar(G, nx, y + h * 0.74, x + w - inset - nx, max(3, h * 0.08), hp, a) end
+  end
+
+  -- a dark slanted plate, w x h at (x, y), its words centred (the HP under a target pill)
+  local function plate(G, x, y, w, h, words, alpha)
+    local s = h * 0.35
+    G.setColor(0.04, 0.04, 0.05, 0.95 * (alpha or 1))
+    G.polygon("fill", x + s, y, x + w + s, y, x + w, y + h, x, y + h)
+    local f = font(h * 0.62)
+    G.setFont(f)
+    G.setColor(1, 1, 1, alpha or 1)
+    G.printf(words, x + s * 0.5, y + (h - f:getHeight()) / 2, w, "center")
+  end
+
+  -- what a member's pill says under its name: how the move does on it, else why it cannot be picked
+  local function memberSub(c, row, m, i, live)
+    if row and row.eff then return EFF_WORD[row.eff], EFF_RGB[row.eff] end
+    if live then return nil end
+    if (m.b.down or 0) > 0 then return "Fainted" end
+    if row and row.note then return row.note end
+    if i == c.actor then return "User" end
+    return nil
+  end
+
+  -- the row a target list gives the boss (Pollen Puff's), or nil
+  local function bossRow(list)
+    for i = 1, 4 do if list[i] and list[i].boss then return i end end
+    return nil
+  end
+
+  -- the D-pad on the targets: the four across (two by two when `grid`), the boss above them; a press
+  -- toward no one stays
+  function Pad.targetMove(list, cursor, dir, grid)
+    list = list or NO_OPTS
+    cursor = cursor or 1
+    local bi = bossRow(list)
+    if cursor == bi then
+      if dir ~= "down" then return cursor end
+      local first
+      for i = 1, 4 do
+        if list[i] and i ~= bi then
+          if list[i].live ~= false then return i end
+          first = first or i
+        end
+      end
+      return first or cursor
+    end
+    local col, row = cursor - 1, 0
+    if grid then col, row = (cursor - 1) % 2, math.floor((cursor - 1) / 2) end
+    if dir == "up" and row == 0 then return bi or cursor end
+    local step
+    if dir == "left" then step = -1 elseif dir == "right" then step = 1
+    elseif grid and dir == "up" then step = -2 elseif grid and dir == "down" then step = 2 end
+    if not step then return cursor end
+    local to = cursor + step
+    if grid then
+      if (step == 1 or step == -1) and math.floor((to - 1) / 2) ~= row then return cursor end
+    else
+      while to >= 1 and to <= 4 and (not list[to] or to == bi) do to = to + step end
+    end
+    if to < 1 or to > 4 or not list[to] or to == bi then return cursor end
+    return to
+  end
+
+  -- ------- the main screen's target screen (Sword / Shield's): a red band across the middle, the
+  -- boss's pill above, the four in a row under it, each with a plate of its HP; the chevron at the
+  -- one picked (at each a move reaches); Back at its top right
+
+  Pad.TARGET = { TOP = 0.265, H = 0.47, PILL_W = 0.365, PILL_H = 0.11, BOSS_Y = 0.15, ROW_Y = 0.56,
+    PITCH = 0.235, RGB = { 0.84, 0.08, 0.22 }, BOSS_RGB = { 0.93, 0.18, 0.42 } }
+
+  local chevAt = {}
+  local function targetBand(G, w, h, r)
+    local T = Pad.TARGET
+    local c = r.cmd
+    local list = c.moveList or NO_OPTS
+    local now = r.t or 0
+    local all = c.allPick ~= nil
+    local y0, bh = h * T.TOP, h * T.H
+    rset(where.panel, 0, y0, w, bh)
+    rset(where.dynamax, 0, 0, 0, 0)
+    for i = 1, 4 do rset(where["move" .. i], 0, 0, 0, 0) end
+    -- the band: red, a little see-through, lighter slanted sheens and edges
+    local B = T.RGB
+    G.setColor(B[1], B[2], B[3], 0.82)
+    G.rectangle("fill", 0, y0, w, bh)
+    G.setColor(1, 0.45, 0.55, 0.08)
+    for k = 0, 2 do
+      local x0 = w * (0.12 + k * 0.33)
+      G.polygon("fill", x0, y0, x0 + bh * 0.5, y0, x0 + bh * 0.1, y0 + bh, x0 - bh * 0.4, y0 + bh)
+    end
+    G.setColor(1, 0.55, 0.62, 0.7)
+    G.rectangle("fill", 0, y0, w, max(1, h * 0.003))
+    G.rectangle("fill", 0, y0 + bh - max(1, h * 0.003), w, max(1, h * 0.003))
+    -- Back, at its top right
+    local bw, bbh = h * 0.15, h * 0.052
+    local b = rset(where.back, w - bw - h * 0.02, y0 + h * 0.018, bw, bbh)
+    Pad.face(G, b.x, b.y, b.w, b.h, bbh / 2, Pad.faceOpts(true, false, nil, false, 0))
+    local fb = font(bbh * 0.55)
+    G.setFont(fb)
+    G.setColor(1, 1, 1, 1)
+    G.printf("Back", b.x, b.y + (bbh - fb:getHeight()) / 2, b.w, "center")
+    -- the pills' size: the four must fit across a narrow screen
+    local pitch = min(w * T.PITCH, h * T.PILL_W * 1.08)
+    local pw = min(h * T.PILL_W, pitch * 0.86)
+    local ph = min(h * T.PILL_H, pw * 0.32)
+    local u = ph / 92
+    -- the boss
+    local bi = bossRow(list)
+    local boss = r.boss
+    if boss then
+      local live = bi ~= nil or c.allPick == "spread"
+      local sel = (c.allPick == "spread") or (bi ~= nil and c.cursor == bi)
+      local x, y = (w - pw) / 2, y0 + bh * T.BOSS_Y
+      local share = (boss.dispHp or boss.mon.hp or 0) / max(1, tonumber(boss.mon.maxHp) or 1)
+      local sub, subRgb = nil, nil
+      if c.bossEff then sub, subRgb = EFF_WORD[c.bossEff], EFF_RGB[c.bossEff] end
+      monPill(G, x, y, pw, ph, ph / 2, r.bossIcon or nil, boss.name, sub, subRgb, sel, live, false, T.BOSS_RGB, now, true)
+      plate(G, x + pw * 0.4, y + ph * 0.86, pw * 0.5, ph * 0.38, ("%d%%"):format(math.ceil(100 * share)), live and 1 or 0.6)
+      local t = bi and rset(where["move" .. bi], x, y, pw, ph) or nil
+      if sel then chevron(G, t or rset(chevAt, x, y, pw, ph), u) end
+    end
+    -- the four
+    local y = y0 + bh * T.ROW_Y
+    for i = 1, 4 do
+      local m = r.members and r.members[i]
+      local row = list[i]
+      if m and m.b then
+        local x = w / 2 + (i - 2.5) * pitch - pw / 2
+        local isBoss = row and row.boss
+        local live = row ~= nil and not isBoss and row.live ~= false
+        local sel
+        if all then sel = row ~= nil and row.hit == true else sel = not isBoss and c.cursor == i end
+        local sub, subRgb = memberSub(c, (not isBoss) and row or nil, m, i, live)
+        local rgb = T.BOSS_RGB
+        monPill(G, x, y, pw, ph, ph / 2, m.info and m.info.icon, m.info and m.info.name or m.b.name, sub, subRgb,
+          sel, live, false, rgb, now, false)
+        local hp, mhp = tonumber(m.b.mon.hp) or 0, max(1, tonumber(m.b.mon.maxHp) or 1)
+        plate(G, x + pw * 0.34, y + ph * 0.86, pw * 0.62, ph * 0.38, ("%d/%d"):format(hp, mhp), live and 1 or 0.6)
+        if not isBoss and row then rset(where["move" .. i], x, y, pw, ph) end
+        if sel then chevron(G, rset(chevAt, x, y, pw, ph), u) end
+      end
+    end
+  end
+
+  -- Yes / No on the main screen: two pills as the commands', each with its emblem
+  local function yesNoStack(G, right, bottom, pw, ph, pitch, r)
+    local top = bottom - ph - pitch
+    rset(where.panel, right - pw - ph * 0.45, top, pw + ph * 0.45, bottom - top)
+    rset(where.back, 0, 0, 0, 0)
+    rset(where.dynamax, 0, 0, 0, 0)
+    rset(where.move3, 0, 0, 0, 0)
+    rset(where.move4, 0, 0, 0, 0)
+    local cur = r.cmd and r.cmd.cursor or 1
+    local u = ph / 92
+    for i, item in ipairs(Pad.YESNO) do
+      pill(G, rset(where["move" .. i], right - pw, top + (i - 1) * pitch, pw, ph), item, i == cur, true, u)
+    end
+    chevron(G, where["move" .. cur] or where.move1, u)
   end
 
   -- the Dynamax mark (assets/ui/icon_dynamax.png, 34 x 34), loaded once (false: not there, the drawn
@@ -546,8 +820,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     -- the Back tab above them
     local bw, bh = ph * 1.6, ph * 0.5
     local b = rset(where.back, right - bw, top - bh - ph * 0.22, bw, bh)
-    G.setColor(0.08, 0.08, 0.1, 0.92)
-    G.rectangle("fill", b.x, b.y, b.w, b.h, bh / 2, bh / 2)
+    G.setColor(0, 0, 0, 0.25)
+    G.rectangle("fill", b.x + bh * 0.04, b.y + bh * 0.08, b.w, b.h, bh / 2, bh / 2)
+    Pad.face(G, b.x, b.y, b.w, b.h, bh / 2, Pad.faceOpts(true, false, nil, false, 0))
     G.setFont(font(bh * 0.55))
     G.setColor(1, 1, 1, 1)
     G.printf("Back", b.x, b.y + (bh - font(bh * 0.55):getHeight()) / 2, b.w, "center")
@@ -586,7 +861,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   function Pad.draw(G, w, h, r)
     local L = Pad.LOOK
     G.push("all")
-    if r and r.cmd and r.cmd.menu and r.cmd.menu ~= "main" then
+    local menu = r and r.cmd and r.cmd.menu
+    if menu == "target" then
+      targetBand(G, w, h, r)
+    elseif menu == "yesno" then
+      yesNoStack(G, w - h * L.EDGE, h - h * L.EDGE, h * L.W, h * L.H, h * L.PITCH, r)
+    elseif menu and menu ~= "main" then
       moveStack(G, w - h * L.EDGE, h - h * L.EDGE, h * Pad.MOVE_W, h * L.H, h * L.PITCH, r)
     else
       stack(G, w - h * L.EDGE, h - h * L.EDGE, h * L.W, h * L.H, h * L.PITCH, r)
@@ -631,8 +911,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- over a background of its own - a deep navy to Dynamax magenta, light streaks, a faint hexagon
   -- grid and the band's ring. A header names who is choosing; the four commands (or the moves, the
   -- pouch, the targets, Yes / No) fill a 2 x 2 grid of large buttons, each its emblem over its words.
-  -- The selected button (and one held under a finger) is pressed in: lower, its shadow gone, a dark
-  -- inner edge along its top.
+  -- A touch screen: no button shows a selection; one held under a finger is pressed in - lower, its
+  -- shadow gone, a dark inner edge along its top - and letting go on it picks it. The cursor (on the
+  -- top left at first) shows only once the D-pad moves it; a tap then moves it like a press.
   --   Pad.drawSecond(G, w, h, r, held) ; Pad.hitSecond(x, y) -> an id as Pad.hit's, or nil
 
   local sWhere = { cells = {}, back = {}, dynamax = {} }
@@ -691,7 +972,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- a large button: rounded, a light face lit from above with a soft shadow; pressed (only while a
   -- finger or button holds it), it sits lower with no shadow and a dark edge inside its top; sel (the
   -- cursor on it) turns it black with a rim in its colour, standing up
-  local function quadButton(G, t, rgb, sel, pressed, live, drawIcon, word, sub, iconY)
+  local function quadButton(G, t, rgb, sel, pressed, live, drawIcon, word, sub, iconY, wordY)
     local rad = min(t.w, t.h) * 0.16
     local depth = t.h * 0.045
     local down = pressed and depth or 0
@@ -718,7 +999,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local f = font(drawIcon and h * 0.17 or (sub and h * 0.2 or min(h * 0.34, w * 0.06)))
     G.setFont(f)
     if sel then G.setColor(1, 1, 1, 1) elseif live then G.setColor(0.08, 0.08, 0.1, 1) else G.setColor(0.6, 0.6, 0.62, 1) end
-    local ty = drawIcon and (iconY and (y + h * 0.5 - f:getHeight() / 2) or (y + h * 0.7))
+    -- (wordY: the words' middle, as a share of the height)
+    local ty = wordY and (y + h * wordY - f:getHeight() / 2)
+      or drawIcon and (iconY and (y + h * 0.5 - f:getHeight() / 2) or (y + h * 0.7))
       or (y + h * (sub and 0.28 or 0.5) - f:getHeight() / 2)
     local word2 = word or "?"
     if f:getWidth(word2) > w * 0.9 then
@@ -749,6 +1032,61 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
+  -- a member's card between commands (the second screen): the face as the buttons', its icon large at
+  -- the left, its name and level, the HP bar and numbers across its foot
+  local function memberCard(G, x, y, w, h, m, now)
+    local info = m.info or NO_OPTS
+    local out = (m.b.down or 0) > 0
+    local a = out and 0.55 or 1
+    local rad = min(w, h) * 0.16
+    G.setColor(0, 0, 0, 0.35 * a)
+    G.rectangle("fill", x + h * 0.02, y + h * 0.045, w, h, rad, rad)
+    local o = Pad.faceOpts(false, false, Pad.TARGET.BOSS_RGB, true, 0.06)
+    o.alpha = a
+    Pad.face(G, x, y, w, h, rad, o)
+    if m.b.dmax then
+      -- (Dynamaxed: a red frame, glowing)
+      local pulse = 0.6 + 0.4 * sin(now * 5)
+      G.setColor(1, 0.12, 0.32, 0.4 * pulse)
+      G.setLineWidth(max(4, h * 0.05))
+      G.rectangle("line", x, y, w, h, rad, rad)
+      G.setColor(0.95, 0.12, 0.3, 1)
+      G.setLineWidth(max(2, h * 0.018))
+      G.rectangle("line", x, y, w, h, rad, rad)
+      G.setLineWidth(1)
+    end
+    local is = min(h * 0.62, w * 0.36)
+    local ix = x + h * 0.08
+    monIcon(G, info.icon, ix, y + h * 0.06, is, now, out and 0.5 or 1)
+    local nx = ix + is + h * 0.04
+    local room = x + w - nx - h * 0.08
+    local nm = info.name or m.b.name or "?"
+    local size = min(h * 0.17, w * 0.085)
+    local fn = font(size)
+    if fn:getWidth(nm) > room then fn = font(max(size * 0.6, size * room / fn:getWidth(nm))) end
+    G.setFont(fn)
+    G.setColor(0.08, 0.08, 0.1, a)
+    local ny = y + h * 0.14
+    G.print(nm, nx, ny)
+    G.print(nm, nx + max(1, size * 0.04), ny)
+    local fs = font(size * 0.72)
+    G.setFont(fs)
+    G.setColor(0.3, 0.3, 0.35, a)
+    G.print(out and "Fainted" or ("Lv. %d"):format(tonumber(m.mon and m.mon.level) or 1), nx, ny + fn:getHeight() * 1.05)
+    local most = max(1, tonumber(m.b.mon and m.b.mon.maxHp) or 1)
+    local shown = m.b.dispHp or m.b.mon.hp or 0
+    local by = y + h * 0.76
+    local bh = max(4, h * 0.075)
+    local fh = font(bh * 1.9)
+    local nums = ("%d/%d"):format(math.floor(shown + 0.5), most)
+    local bx = x + h * 0.1
+    local bw = x + w - h * 0.1 - fh:getWidth(nums) - h * 0.06 - bx
+    hpBar(G, bx, by, bw, bh, shown / most, a)
+    G.setFont(fh)
+    G.setColor(0.1, 0.1, 0.12, a)
+    G.print(nums, bx + bw + h * 0.06, by + bh / 2 - fh:getHeight() / 2)
+  end
+
   function Pad.drawSecond(G, w, h, r, held)
     G.push("all")
     secondBackground(G, w, h, r and r.t or 0)
@@ -762,6 +1100,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.setFont(fh)
     G.setColor(1, 1, 1, 1)
     local c = r and r.cmd
+    -- (the cursor shown only once the D-pad has moved it - r.padHi, for the rest of the raid; a tap
+    -- moves it as a press does; `on(i)` whether button i is the shown cursor's)
+    local hi = r and r.padHi and c and c.cursor
+    local function on(i) return hi ~= nil and hi ~= false and hi == i end
     local cmdUp = r and r.phase == "command" and c and not r.say
     local ask = r and (r.phase == "after" or r.phase == "leaveq") and r.ask and r.ask.kind == "yesno"
     local catchUp = r and r.phase == "catch" and c and (c.menu == "catchq" or c.menu == "ballbox")
@@ -769,20 +1111,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if cmdUp then
       local m = c.actor and r.members and r.members[c.actor]
       local nm = m and m.b and m.b.name or "your Pok\195\169mon"
-      -- (the moves need no title: the grid says what it is)
+      -- (the moves and the targets need no title: the buttons and arrows say what they are)
       if c.menu == "moves" then title = ""
-      elseif c.menu == "items" then title = "Choose an item"
-      elseif c.menu == "target" then
-        local mv = c.moveSlot and m and m.b and m.b.moves[c.moveSlot]
-        if mv and c.allPick == "spread" then
-          title = ("%s hits %s and your team"):format(mv.name, r.boss and r.boss.name or "the boss")
-        elseif mv and c.allPick then title = ("%s works on your team"):format(mv.name)
-        else title = mv and ("Use %s on whom?"):format(mv.name) or "Use it on whom?" end
+      elseif c.menu == "items" then title = ""
+      elseif c.menu == "target" then title = ""
       else title = ("What will %s do?"):format(nm) end
     elseif ask then title = r.phase == "leaveq" and "Leave the den?" or "Yes or no?"
     elseif catchUp then
       title = c.menu == "ballbox" and "Choose a Pok\195\169 Ball" or "Will you catch it?"
-    else title = "Max Raid Battle" end
+    else title = "" end
     -- (shrunk to end before Back: "Surf hits Snorlax and your team")
     local room = w - hh * 2.2 - h * 0.03 - h * 0.08
     if fh:getWidth(title) > room then
@@ -806,7 +1143,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       for i, row in ipairs(rows) do
         local t = { x = gx, y = gy + (i - 1) * (bh + pad), w = gw, h = bh, id = row.id }
         sWhere.cells[i] = t
-        quadButton(G, t, row.rgb, c.cursor == i, held == row.id, row.live, row.icon, row.word)
+        quadButton(G, t, row.rgb, on(i), held == row.id, row.live, row.icon, row.word)
       end
     elseif catchUp then
       -- the ball box: < the ball (its icon, name, how many) >, its words, Use
@@ -866,7 +1203,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local uy = gy + rowH + pad * 1.2 + gh * 0.3
       local t = { x = gx + gw * 0.15, y = uy, w = gw * 0.7, h = gy + gh - uy, id = "use" }
       sWhere.cells[#sWhere.cells + 1] = t
-      quadButton(G, t, { 0.93, 0.18, 0.42 }, true, held == "use", bl ~= nil, nil, "Use")
+      quadButton(G, t, { 0.93, 0.18, 0.42 }, hi ~= nil and hi ~= false, held == "use", bl ~= nil, nil, "Use")
     elseif cmdUp and c.menu == "main" then
       -- Fight large across the top; Bag and Run side by side under it
       for i, item in ipairs(Pad.ITEMS) do
@@ -875,10 +1212,78 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         local t = { x = x, y = y, w = ww, h = ch, id = item.id }
         sWhere.cells[i] = t
         local live = LIVE[item.id] and not (item.id == "bag" and c.bagEmpty)
-        quadButton(G, t, item.rgb, c.cursor == i, held == item.id, live, EMBLEM[item.id], item.word)
+        quadButton(G, t, item.rgb, on(i), held == item.id, live, EMBLEM[item.id], item.word)
       end
-    elseif cmdUp or ask then
-      -- a list: the moves (type chip, name, PP), the pouch, the targets, Yes / No
+    elseif ask then
+      -- Yes / No: two wide buttons, each with its emblem
+      local bh = (gh - pad) / 2
+      for i, item in ipairs(Pad.YESNO) do
+        local t = { x = gx, y = gy + (i - 1) * (bh + pad), w = gw, h = bh, id = "move" .. i }
+        sWhere.cells[i] = t
+        quadButton(G, t, item.rgb, on(i), held == t.id, true, EMBLEM[item.id], item.word)
+      end
+    elseif cmdUp and c.menu == "target" then
+      -- whom: the boss's pill across the top, the four two by two under it - each its icon, its name,
+      -- how the move does on it and its HP
+      local list = c.moveList or NO_OPTS
+      local all = c.allPick ~= nil
+      local now = r.t or 0
+      local bi = bossRow(list)
+      local bossH = gh * 0.22
+      local boss = r.boss
+      -- (a move reaching several: a finger on any one it reaches presses every one it reaches - the
+      -- boss too for friendly fire - as one button)
+      local allHeld = false
+      if all and held then
+        for j = 1, 4 do if list[j] and list[j].hit and held == "move" .. j then allHeld = true end end
+      end
+      if boss then
+        local live = bi ~= nil or c.allPick == "spread"
+        local sel = c.allPick == "spread" or (bi ~= nil and on(bi))
+        local bw = gw * 0.62
+        local t = { x = gx + (gw - bw) / 2, y = gy, w = bw, h = bossH, id = bi and ("move" .. bi) or "boss" }
+        if bi then sWhere.cells[#sWhere.cells + 1] = t end
+        local share = (boss.dispHp or boss.mon.hp or 0) / max(1, tonumber(boss.mon.maxHp) or 1)
+        local sub, subRgb = nil, nil
+        if c.bossEff then sub, subRgb = EFF_WORD[c.bossEff], EFF_RGB[c.bossEff] end
+        local pressed = (bi ~= nil and held == t.id) or (allHeld and sel)
+        monPill(G, t.x, t.y, t.w, t.h, t.h / 2, r.bossIcon or nil, boss.name, sub, subRgb, sel, live, pressed,
+          Pad.TARGET.BOSS_RGB, now, true, share)
+        if sel then Pad.chevronAt(G, t.x - pad * 0.3, t.y + bossH / 2 + (pressed and bossH * 0.04 or 0), pad * 0.42) end
+      end
+      local ty = gy + bossH + pad
+      local th = (gy + gh - ty - pad) / 2
+      for i = 1, 4 do
+        local m = r.members and r.members[i]
+        local row = list[i]
+        if m and m.b then
+          local x = gx + ((i - 1) % 2) * (cw + pad)
+          local y = ty + math.floor((i - 1) / 2) * (th + pad)
+          local isBoss = row and row.boss
+          local live = row ~= nil and not isBoss and row.live ~= false
+          local sel
+          if all then sel = row ~= nil and row.hit == true else sel = not isBoss and on(i) end
+          local sub, subRgb = memberSub(c, (not isBoss) and row or nil, m, i, live)
+          local id = "move" .. i
+          if row and not isBoss then sWhere.cells[#sWhere.cells + 1] = { x = x, y = y, w = cw, h = th, id = id } end
+          local pressed = (held == id and row ~= nil and not isBoss) or (allHeld and sel)
+          local share = (m.b.dispHp or m.b.mon.hp or 0) / max(1, tonumber(m.b.mon.maxHp) or 1)
+          monPill(G, x, y, cw, th, th * 0.2, m.info and m.info.icon, m.info and m.info.name or m.b.name, sub, subRgb,
+            sel, live, pressed, Pad.TARGET.BOSS_RGB, now, false, share)
+          if sel then Pad.chevronAt(G, x - pad * 0.3, y + th / 2 + (pressed and th * 0.04 or 0), pad * 0.42) end
+        end
+      end
+      -- Back, in the header's right end
+      local bw, bh = hh * 2.2, hh * 0.66
+      local b = rset(sWhere.back, w - bw - h * 0.03, (hh - bh) / 2, bw, bh)
+      local down = held == "back" and bh * 0.06 or 0
+      Pad.face(G, b.x, b.y + down, b.w, b.h, bh / 2, Pad.faceOpts(false, held == "back"))
+      local fb = font(bh * 0.5)
+      G.setFont(fb)
+      G.setColor(0.08, 0.08, 0.1, 1)
+      G.printf("Back", b.x, b.y + (bh - fb:getHeight()) / 2 + down, b.w, "center")
+    elseif cmdUp then
+      -- a list: the moves (type chip, name, PP), the pouch
       local list = c and c.moveList or {}
       for i = 1, min(4, #list) do
         local mv = list[i]
@@ -889,18 +1294,33 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         if mv.live ~= nil then live = mv.live else live = (mv.pp or 0) > 0 end
         local sub = mv.note or mv.right or (mv.maxPp and ("PP %d/%d"):format(mv.pp or 0, mv.maxPp or 0)) or nil
         local icon = nil
-        if mv.typeName and not mv.chip then
+        if mv.itemId and Pad.itemIcon then
+          -- (an item: its bag picture over its name, how many in the corner)
+          local id, rgb = mv.itemId, mv.rgb
+          icon = function(G2, icx, icy, s) Pad.itemIcon(G2, id, icx - s * 0.95, icy - s * 0.95, s * 1.9, rgb) end
+        elseif mv.typeName and not mv.chip then
           icon = typeChip(mv.rgb or { 0.6, 0.6, 0.6 }, (mv.typeName:sub(1, 1) .. mv.typeName:sub(2):lower()))
         end
         local subIn = nil
         if not icon then subIn = sub end
+        local cornerNote = mv.itemId and icon and sub or nil
         local all = c.menu == "target" and c.allPick ~= nil
-        quadButton(G, t, mv.rgb, (all and mv.hit == true) or (not all and c.cursor == i), held == t.id, live, icon, mv.name, subIn,
-          icon and 0.24 or nil)
+        -- (an item: its picture clear of the top, its name low under it)
+        local iconY, wordY = icon and 0.24 or nil, nil
+        if mv.itemId and icon then iconY, wordY = 0.42, 0.76 end
+        quadButton(G, t, mv.rgb, (all and mv.hit == true) or (not all and on(i)), held == t.id, live, icon, mv.name, subIn,
+          iconY, wordY)
+        if cornerNote then
+          local down = held == t.id and ch * 0.045 or 0
+          local fs = font(ch * 0.13)
+          G.setFont(fs)
+          if on(i) then G.setColor(0.85, 0.85, 0.9, 1) else G.setColor(0.3, 0.3, 0.35, 1) end
+          G.printf(cornerNote, x, y + down + ch * 0.08, cw - ch * 0.1, "right")
+        end
         -- (a move reaching several: the arrow on each it reaches)
         if all and mv.hit then
           local down = held == t.id and ch * 0.045 or 0
-          chevron(G, { x = x + ch * 0.2, y = y + down + ch * 0.36, h = ch * 0.28 })
+          Pad.chevronAt(G, x - pad * 0.3, y + down + ch / 2, pad * 0.42)
         end
         if mv.max then
           -- (a Max form: the Dynamax red round it)
@@ -915,12 +1335,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           G.rectangle("line", x, y + down, cw, ch, rad, rad)
           G.setLineWidth(1)
         end
-        if icon then
+        if icon and not mv.itemId then
           -- a move: its PP, and how it does on the boss, under its name
           local down = held == t.id and ch * 0.045 or 0
           local fs = font(ch * 0.12)
           G.setFont(fs)
-          if c.cursor == i then G.setColor(0.8, 0.8, 0.85, 1) else G.setColor(0.3, 0.3, 0.35, 1) end
+          if on(i) then G.setColor(0.8, 0.8, 0.85, 1) else G.setColor(0.3, 0.3, 0.35, 1) end
           if not live then G.setColor(0.9, 0.25, 0.25, 1) end
           if sub then G.printf(sub, x, y + down + ch * 0.66, cw, "center") end
           local EW = { super = "Super effective", weak = "Not very effective", none = "No effect" }
@@ -937,8 +1357,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         -- Back, in the header's right end
         local bw, bh = hh * 2.2, hh * 0.66
         local b = rset(sWhere.back, w - bw - h * 0.03, (hh - bh) / 2, bw, bh)
-        G.setColor(held == "back" and 0.75 or 1, held == "back" and 0.75 or 1, held == "back" and 0.78 or 1, 1)
-        G.rectangle("fill", b.x, b.y + (held == "back" and bh * 0.06 or 0), b.w, b.h, bh / 2, bh / 2)
+        Pad.face(G, b.x, b.y + (held == "back" and bh * 0.06 or 0), b.w, b.h, bh / 2, Pad.faceOpts(false, held == "back"))
         local fb = font(bh * 0.5)
         G.setFont(fb)
         G.setColor(0.08, 0.08, 0.1, 1)
@@ -954,24 +1373,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         end
       end
     else
-      -- between commands: the four and how they stand
-      local fm = font(h * 0.05)
+      -- between commands: the four as cards - icon, name, level, HP bar and numbers; a Dynamaxed one
+      -- in a glowing red frame, one sitting out faded
+      local now = r and r.t or 0
       for i = 1, 4 do
         local m = r and r.members and r.members[i]
         local x, y = cell(i)
-        G.setColor(1, 1, 1, 0.08)
-        G.rectangle("fill", x, y, cw, ch, ch * 0.12, ch * 0.12)
         if m and m.b then
-          G.setFont(fm)
-          G.setColor(1, 1, 1, 0.9)
-          G.printf(m.b.name or "?", x, y + ch * 0.3, cw, "center")
-          local most = max(1, tonumber(m.b.mon and m.b.mon.maxHp) or 1)
-          local f = max(0, min(1, (m.b.dispHp or m.b.mon.hp or 0) / most))
-          local bx, by, bw2, bh2 = x + cw * 0.12, y + ch * 0.6, cw * 0.76, ch * 0.08
-          G.setColor(0, 0, 0, 0.5)
-          G.rectangle("fill", bx, by, bw2, bh2, bh2 / 2, bh2 / 2)
-          if f > 0.5 then G.setColor(0.3, 0.85, 0.4, 1) elseif f > 0.2 then G.setColor(0.95, 0.75, 0.2, 1) else G.setColor(0.9, 0.25, 0.25, 1) end
-          G.rectangle("fill", bx, by, bw2 * f, bh2, bh2 / 2, bh2 / 2)
+          memberCard(G, x, y, cw, ch, m, now)
+        else
+          G.setColor(1, 1, 1, 0.06)
+          G.rectangle("fill", x, y, cw, ch, ch * 0.12, ch * 0.12)
         end
       end
     end

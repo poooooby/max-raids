@@ -322,7 +322,34 @@ return function(mod, deps)
   end
   Rd.hdTagOf = hdTagOf
 
+  -- the boss's icon for the target pills, as a party icon { image, quads, frames, w }: the pack's
+  -- own (assets/bosses/icons/<KEY>.png, two 64 x 64 frames; its shiny one for a shiny boss), else
+  -- the game's icon of its species; false when there is none
+  local function bossIconOf(r)
+    if not (r.key and Bosses and Bosses[r.key]) or (Bosses[r.key] and Bosses[r.key].dyna) then
+      if Pokemon and Pokemon.monIcon and r.boss and r.boss.mon then
+        local ok, ic = pcall(Pokemon.monIcon, r.boss.mon)
+        if ok and type(ic) == "table" then return ic end
+      end
+      return false
+    end
+    local ok, ic = pcall(function()
+      local bytes = mod:read("assets/bosses/icons/" .. r.key .. (r.shiny and "_shiny" or "") .. ".png")
+        or mod:read("assets/bosses/icons/" .. r.key .. ".png")
+      if not bytes then return nil end
+      local img = love.graphics.newImage(love.image.newImageData(love.filesystem.newFileData(bytes, "icon.png")))
+      img:setFilter("nearest", "nearest")
+      local s = img:getHeight()
+      local n = max(1, floor(img:getWidth() / s))
+      local quads = {}
+      for f = 0, n - 1 do quads[f] = love.graphics.newQuad(f * s, 0, s, s, img:getWidth(), s) end
+      return { image = img, quads = quads, frames = n, w = s }
+    end)
+    return ok and ic or false
+  end
+
   local function memberPics(r)
+    if r.boss and r.bossIcon == nil then r.bossIcon = bossIconOf(r) end
     for _, m in ipairs(r.members) do
       memberInfo(m)
       local pic = backPicOf(m.mon)
@@ -890,6 +917,15 @@ return function(mod, deps)
     for _, c in pairs(r.cmd and r.cmd.chosen or {}) do if c.item == id then n = n - 1 end end
     return n
   end
+  -- the bag's item id of a pouch item, for its picture (false: none found)
+  local pouchIds = {}
+  local function pouchItemId(id)
+    if pouchIds[id] == nil then
+      local ok, n = pcall(function() return Rewards and Rewards.itemId("ITEM_" .. id:upper()) end)
+      pouchIds[id] = ok and n or false
+    end
+    return pouchIds[id] or nil
+  end
   local function bagEmpty()
     for _, id in ipairs(Rd.POUCH_ORDER) do if pouchFree(id) > 0 then return false end end
     return true
@@ -1020,6 +1056,10 @@ return function(mod, deps)
     if share > 0.5 then return { 0.2, 0.75, 0.3 } elseif share > 0.2 then return { 0.9, 0.7, 0.1 } end
     return { 0.9, 0.25, 0.2 }
   end
+  local function effOn(mv, target)
+    if not (mv and not mv.status and r.adapter and target) then return nil end
+    return effOf(r.adapter.effectiveness(mv.type, target)) or "normal"
+  end
   function Rd.moveList()
     local c = r and r.cmd
     local b = c and c.actor and r.members[c.actor] and r.members[c.actor].b
@@ -1032,6 +1072,10 @@ return function(mod, deps)
     c.maxShown = maxForms
     c.moveList = c.moveList or {}
     local list = c.moveList
+    -- (the target pills: how the move does on the boss and on each it hits - "normal" for a plain
+    -- hit, shown as Sword / Shield's "Effective")
+    local tmv = c.menu == "target" and c.moveSlot and b.moves[c.moveSlot] or nil
+    c.bossEff = (c.allPick == "spread" or (tmv and tmv.team and tmv.team.orFoe)) and effOn(tmv, r.boss) or nil
     for i = 1, 4 do
       local row = list[i] or {}
       for k in pairs(row) do row[k] = nil end
@@ -1041,6 +1085,7 @@ return function(mod, deps)
         if id then
           local n = pouchFree(id)
           row.id, row.name, row.chip, row.right = id, Sim and Sim.ITEM_NAME[id] or id, "Item", "x" .. n
+          row.itemId = pouchItemId(id)
           row.rgb, row.live = { 0.35, 0.6, 0.85 }, n > 0
         else
           list[i] = nil
@@ -1053,6 +1098,7 @@ return function(mod, deps)
           local here = r.sim ~= nil and r.sim:present(i)
           local hit = here and (c.allPick == "team" or i ~= c.actor)
           row.member, row.name, row.hit = i, m.b.name, hit or nil
+          row.eff = hit and c.allPick == "spread" and effOn(tmv, m.b) or nil
           -- (the second screen's cell has no chip: the word under its name)
           row.note = here and not hit and "Immune" or nil
           row.chip = not here and "Out" or (not hit and "Immune") or "HP"
@@ -1068,6 +1114,7 @@ return function(mod, deps)
         if i == c.actor and T.orFoe and r.boss then
           local hp, mhp = tonumber(r.boss.mon.hp) or 0, max(1, tonumber(r.boss.mon.maxHp) or 1)
           row.boss, row.name, row.chip, row.right = true, r.boss.name, "Foe", ("%d%%"):format(math.ceil(100 * hp / mhp))
+          row.eff = c.bossEff
           row.rgb, row.live = { 0.85, 0.25, 0.35 }, true
         elseif m and m.b then
           local hp, mhp = tonumber(m.b.mon.hp) or 0, max(1, tonumber(m.b.mon.maxHp) or 1)
@@ -1963,87 +2010,100 @@ return function(mod, deps)
   Rd.catchWhere = catchWhere
   local function rsetC(t, x, y, w, h) t.x, t.y, t.w, t.h = x, y, w, h; return t end
 
-  local function catchPill(G, t, word, sel, live)
+  -- the choices as the battle pad's pills (each its emblem), the chevron at the selected one
+  local CATCH_ITEMS = {
+    catch = { id = "catch", word = "Catch", rgb = { 0.93, 0.18, 0.42 } },
+    leave = { id = "leave", word = "Don't Catch", rgb = { 0.6, 0.6, 0.66 } },
+    use = { id = "use", word = "Use", rgb = { 0.93, 0.18, 0.42 } },
+  }
+  local function catchPill(G, t, item, sel, live, alone)
+    if Pad and Pad.commandPill then return Pad.commandPill(G, t, item, sel, live, alone) end
     local rad = t.h / 2
-    G.setColor(0, 0, 0, 0.25)
-    G.rectangle("fill", t.x + 2, t.y + 3, t.w, t.h, rad, rad)
-    if Pad and Pad.face then
-      Pad.face(G, t.x, t.y, t.w, t.h, rad, Pad.faceOpts(sel))
-    else
-      if sel then G.setColor(0.04, 0.04, 0.05, 1) else G.setColor(1, 1, 1, 1) end
-      G.rectangle("fill", t.x, t.y, t.w, t.h, rad, rad)
-    end
+    if sel then G.setColor(0.04, 0.04, 0.05, 1) else G.setColor(1, 1, 1, 1) end
+    G.rectangle("fill", t.x, t.y, t.w, t.h, rad, rad)
     local f = Rd.font(t.h * 0.5)
     G.setFont(f)
     if sel then G.setColor(1, 1, 1, 1) elseif live then G.setColor(0.08, 0.08, 0.1, 1) else G.setColor(0.6, 0.6, 0.62, 1) end
-    G.printf(word, t.x, t.y + (t.h - f:getHeight()) / 2, t.w, "center")
-    if sel then
-      local hh, x1, x2, cy = t.h * 0.34, t.x - t.h * 0.62, t.x - t.h * 0.16, t.y + t.h / 2
-      G.setLineJoin("miter")
-      G.setColor(0, 0, 0, 1)
-      G.setLineWidth(t.h * 0.2)
-      G.line(x1, cy - hh, x2, cy, x1, cy + hh)
-      G.setColor(1, 1, 1, 1)
-      G.setLineWidth(t.h * 0.1)
-      G.line(x1, cy - hh, x2, cy, x1, cy + hh)
-      G.setLineWidth(1)
-    end
+    G.printf(item.word, t.x, t.y + (t.h - f:getHeight()) / 2, t.w, "center")
+  end
+
+  -- a round arrow button, d across at (x, y) top left: the face as the pad's, a dark triangle
+  local function arrowButton(G, x, y, d, dir)
+    G.setColor(0, 0, 0, 0.3)
+    G.circle("fill", x + d / 2 + d * 0.03, y + d / 2 + d * 0.06, d / 2, 32)
+    if Pad and Pad.face then Pad.face(G, x, y, d, d, d / 2, Pad.faceOpts(false, false, nil, false, 0))
+    else G.setColor(1, 1, 1, 1); G.circle("fill", x + d / 2, y + d / 2, d / 2, 32) end
+    local cx, cy, s = x + d / 2 + dir * d * 0.04, y + d / 2, d * 0.2
+    G.setColor(0.1, 0.1, 0.12, 1)
+    G.polygon("fill", cx + dir * s, cy, cx - dir * s * 0.7, cy - s * 1.05, cx - dir * s * 0.7, cy + s * 1.05)
   end
 
   function Rd.drawCatch(G, w, h)
     local c = r.cmd
     if not c then return end
     G.push("all")
+    local L = Pad and Pad.LOOK
     if c.menu == "catchq" then
-      local pw, ph, pitch = h * 0.37, h * 0.066, h * 0.08
-      local right, bottom = w - h * 0.012, h - h * 0.03
+      -- (as the commands' stack: its sizes, its corner)
+      local pw, ph, pitch = h * (L and L.W or 0.326), h * (L and L.H or 0.092), h * (L and L.PITCH or 0.108)
+      local right, bottom = w - h * (L and L.EDGE or 0.012), h - h * (L and L.EDGE or 0.012)
       local t1 = rsetC(catchWhere.catch, right - pw, bottom - ph - pitch, pw, ph)
       local t2 = rsetC(catchWhere.leave, right - pw, bottom - ph, pw, ph)
       rsetC(catchWhere.panel, t1.x - ph * 0.5, t1.y, pw + ph * 0.5, bottom - t1.y)
-      catchPill(G, t1, "Catch", c.cursor == 1, #c.balls > 0)
-      catchPill(G, t2, "Don't Catch", c.cursor == 2, true)
+      catchPill(G, t1, CATCH_ITEMS.catch, c.cursor == 1, #c.balls > 0)
+      catchPill(G, t2, CATCH_ITEMS.leave, c.cursor == 2, true)
     else
+      -- the ball box: a card textured as the pad's buttons - a dark bar with round arrows round the
+      -- ball (its icon, name and how many), its words, Use
       local bl = c.balls[c.ball]
-      local pw = min(w * 0.6, h * 0.72)
-      local px, py, pb = w - pw - h * 0.005, h * 0.6, h * 0.97
-      local hh = h * 0.075
+      local pw = min(w * 0.6, h * 0.74)
+      local px, py, pb = w - pw - h * 0.014, h * 0.56, h - h * 0.014
+      local rad = h * 0.03
+      local pad = h * 0.016
+      local hh = h * 0.085
       rsetC(catchWhere.panel, px, py, pw, pb - py)
       G.setColor(0, 0, 0, 0.3)
-      G.rectangle("fill", px + 3, py + 4, pw, pb - py)
-      G.setColor(1, 1, 1, 1)
-      G.rectangle("fill", px, py, pw, pb - py)
-      G.setColor(0, 0, 0, 1)
-      G.rectangle("fill", px, py, pw, hh)
-      -- the arrows
-      local ax = hh * 0.55
-      G.setColor(1, 1, 1, 1)
-      G.polygon("fill", px + ax * 0.6, py + hh / 2, px + ax * 1.15, py + hh * 0.25, px + ax * 1.15, py + hh * 0.75)
-      G.polygon("fill", px + pw - ax * 0.6, py + hh / 2, px + pw - ax * 1.15, py + hh * 0.25, px + pw - ax * 1.15, py + hh * 0.75)
-      rsetC(catchWhere.left, px, py, hh * 1.4, hh)
-      rsetC(catchWhere.right, px + pw - hh * 1.4, py, hh * 1.4, hh)
+      G.rectangle("fill", px + h * 0.004, py + h * 0.007, pw, pb - py, rad, rad)
+      if Pad and Pad.face then Pad.face(G, px, py, pw, pb - py, rad, Pad.faceOpts(false, false, CATCH_ITEMS.catch.rgb, false, 0.04))
+      else G.setColor(1, 1, 1, 1); G.rectangle("fill", px, py, pw, pb - py, rad, rad) end
+      -- the bar
+      local bx, by, bw = px + pad, py + pad, pw - pad * 2
+      if Pad and Pad.face then Pad.face(G, bx, by, bw, hh, hh / 2, Pad.faceOpts(true, false, nil, false, 0))
+      else G.setColor(0.05, 0.05, 0.06, 1); G.rectangle("fill", bx, by, bw, hh, hh / 2, hh / 2) end
+      local d = hh * 0.78
+      local inset = (hh - d) / 2
+      arrowButton(G, bx + inset, by + inset, d, -1)
+      arrowButton(G, bx + bw - inset - d, by + inset, d, 1)
+      rsetC(catchWhere.left, bx, by, d + inset * 2, hh)
+      rsetC(catchWhere.right, bx + bw - d - inset * 2, by, d + inset * 2, hh)
       if bl then
         -- its icon, name (plural, as the box says), how many
-        local is = hh * 0.62
-        Rd.itemIcon(G, bl.item, px + hh * 1.45, py + (hh - is) / 2, is, BALL_RGB[bl.key])
-        local fN = Rd.font(hh * 0.46)
+        local fN = Rd.font(hh * 0.42)
         G.setFont(fN)
-        G.setColor(1, 1, 1, 1)
         local nm = bl.name or "?"
         if (bl.n or 1) > 1 and not nm:match("s$") then nm = nm .. "s" end
-        G.printf(nm, px, py + (hh - fN:getHeight()) / 2, pw, "center")
-        local fC = Rd.font(hh * 0.38)
+        local is = hh * 0.62
+        local nw = fN:getWidth(nm)
+        local gx = bx + (bw - nw - is - hh * 0.15) / 2
+        Rd.itemIcon(G, bl.item, gx, by + (hh - is) / 2, is, BALL_RGB[bl.key])
+        G.setColor(1, 1, 1, 1)
+        G.print(nm, gx + is + hh * 0.15, by + (hh - fN:getHeight()) / 2)
+        local fC = Rd.font(hh * 0.34)
         G.setFont(fC)
-        G.printf("\195\151" .. tostring(bl.n or 0), px, py + (hh - fC:getHeight()) / 2, pw - hh * 1.5, "right")
+        G.setColor(0.82, 0.82, 0.86, 1)
+        G.printf("\195\151" .. tostring(bl.n or 0), bx, by + (hh - fC:getHeight()) / 2, bw - d - inset * 2 - hh * 0.25, "right")
         -- the description
-        local fD = Rd.font(h * 0.04)
+        local fD = Rd.font(h * 0.036)
         G.setFont(fD)
-        G.setColor(0.1, 0.1, 0.12, 1)
-        G.printf(bl.desc or "", px + h * 0.035, py + hh + h * 0.022, pw - h * 0.07, "left")
+        G.setColor(0.12, 0.12, 0.14, 1)
+        G.printf(bl.desc or "", px + h * 0.035, by + hh + h * 0.02, pw - h * 0.07, "left")
       end
-      -- Use
-      local uw, uh = pw * 0.48, h * 0.058
-      local u = rsetC(catchWhere.use, px + (pw - uw) / 2 + uh * 0.3, pb - uh - h * 0.03, uw, uh)
-      catchPill(G, u, "Use", true, true)
+      -- Use, as a command pill
+      local uh = h * 0.07
+      local uw = pw * 0.5
+      local u = rsetC(catchWhere.use, px + (pw - uw) / 2 + uh * 0.3, pb - uh - pad * 1.2, uw, uh)
+      -- (the box's one button: lit, no chevron)
+      catchPill(G, u, CATCH_ITEMS.use, true, bl ~= nil, true)
     end
     G.pop()
   end
@@ -2574,7 +2634,12 @@ return function(mod, deps)
       local spatial = deps.padOnSecond() and Pad.secondMove
       local dir = (input:wasPressed("up") and "up") or (input:wasPressed("down") and "down")
         or (input:wasPressed("left") and "left") or (input:wasPressed("right") and "right") or nil
-      if dir and spatial then r.cmd.cursor = Pad.secondMove(r.cmd.menu, r.cmd.cursor, n, dir)
+      -- (whom: the four across, or two by two on the second screen, the boss above them)
+      -- (the D-pad on the second screen shows the cursor there from then on)
+      if dir and spatial then r.padHi = true end
+      if dir and r.cmd.menu == "target" and Pad.targetMove then
+        r.cmd.cursor = Pad.targetMove(r.cmd.moveList, r.cmd.cursor, dir, spatial and true or false)
+      elseif dir and spatial then r.cmd.cursor = Pad.secondMove(r.cmd.menu, r.cmd.cursor, n, dir)
       elseif dir == "up" then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
       elseif dir == "down" then r.cmd.cursor = r.cmd.cursor % n + 1
       -- (SELECT or R on the move list: DYNAMAX)
@@ -2582,6 +2647,8 @@ return function(mod, deps)
       elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
       elseif input:wasPressed("b") then Rd.back() end
     elseif r.phase == "catch" then
+      if deps.padOnSecond() and (input:wasPressed("up") or input:wasPressed("down") or input:wasPressed("left")
+        or input:wasPressed("right")) then r.padHi = true end
       if r.cmd.menu == "catchq" then
         if input:wasPressed("up") or input:wasPressed("down") then r.cmd.cursor = 3 - r.cmd.cursor
         elseif input:wasPressed("a") then Rd.catchChoose(r.cmd.cursor == 1 and "catch" or "leave")
@@ -2603,6 +2670,7 @@ return function(mod, deps)
       if r.ask.kind == "yesno" then
         -- (Yes / No side by side on the second screen: left / right there)
         local across = deps.padOnSecond() and (input:wasPressed("left") or input:wasPressed("right"))
+        if deps.padOnSecond() and (across or input:wasPressed("up") or input:wasPressed("down")) then r.padHi = true end
         if input:wasPressed("up") or input:wasPressed("down") or across then r.cmd.cursor = 3 - r.cmd.cursor
         elseif input:wasPressed("a") then Rd.answer(r.cmd.cursor == 1)
         elseif input:wasPressed("b") then Rd.answer(false) end
@@ -3107,18 +3175,17 @@ return function(mod, deps)
     G.circle("fill", x + size / 2, y + size / 2, size * 0.38, 16)
   end
   Rd.itemIcon = itemIcon
-  if Pad then Pad.itemIcon = itemIcon end
+  if Pad then Pad.itemIcon, Pad.drawPixel = itemIcon, drawPixel end
 
   local function chevron(G, x, y, s)
-    G.setColor(0, 0, 0, 1)
-    G.setLineWidth(max(2, s * 0.32))
-    G.line(x - s * 0.45, y - s * 0.55, x + s * 0.2, y, x - s * 0.45, y + s * 0.55)
+    if Pad and Pad.chevronAt then return Pad.chevronAt(G, x, y, s * 0.42) end
     G.setColor(1, 1, 1, 1)
     G.setLineWidth(max(1, s * 0.14))
     G.line(x - s * 0.45, y - s * 0.55, x + s * 0.2, y, x - s * 0.45, y + s * 0.55)
     G.setLineWidth(1)
   end
 
+  local NEXT_RGB = { 0.93, 0.18, 0.42 }
   function Rd.drawRewards(G, w, h)
     local out = r.rewards
     if not out then return end
@@ -3139,8 +3206,6 @@ return function(mod, deps)
     -- the purple strip along the foot
     G.setColor(0.6, 0.26, 0.62, a)
     G.rectangle("fill", 0, h * 0.92, w, h * 0.08)
-    G.setColor(0.45, 0.12, 0.45, 0.6 * a)
-    G.polygon("fill", w * 0.05, h * 0.955, w * 0.3, h * 0.945, w * 0.32, h * 0.95, w * 0.07, h * 0.962)
     -- the black bar and the title tab
     local b = Bosses[r.key]
     local name = b and b.name or "It"
@@ -3235,9 +3300,24 @@ return function(mod, deps)
     -- Next
     local nx, ny, nw, nh = lx + lw * 0.12, h * 0.845, lw * 0.76, h * 0.058
     local onNext = rw.cursor > n
-    G.setColor(onNext and 0 or 1, onNext and 0 or 1, onNext and 0 or 1, a)
-    G.rectangle("fill", nx, ny, nw, nh, nh / 2, nh / 2)
-    if onNext then chevron(G, nx - nh * 0.32, ny + nh / 2, nh * 0.42) end
+    -- (textured as the pad's buttons: dark with a rim while selected, a soft shadow under it; the
+    -- card's one button, so no chevron)
+    G.setColor(0, 0, 0, 0.22 * a)
+    G.rectangle("fill", nx + nh * 0.04, ny + nh * 0.09, nw, nh, nh / 2, nh / 2)
+    if Pad and Pad.face then
+      local o = Pad.faceOpts(onNext, false, NEXT_RGB, false, onNext and 0.22 or 0.06)
+      o.alpha = a
+      Pad.face(G, nx, ny, nw, nh, nh / 2, o)
+    else
+      G.setColor(onNext and 0 or 1, onNext and 0 or 1, onNext and 0 or 1, a)
+      G.rectangle("fill", nx, ny, nw, nh, nh / 2, nh / 2)
+    end
+    if onNext then
+      G.setColor(NEXT_RGB[1], NEXT_RGB[2], NEXT_RGB[3], 0.9 * a)
+      G.setLineWidth(max(1.5, nh * 0.04))
+      G.rectangle("line", nx, ny, nw, nh, nh / 2, nh / 2)
+      G.setLineWidth(1)
+    end
     G.setColor(onNext and 1 or 0, onNext and 1 or 0, onNext and 1 or 0, a)
     G.printf("Next", nx, ny + nh / 2 - fR:getHeight() / 2, nw, "center")
     cardWhere.next.x, cardWhere.next.y, cardWhere.next.w, cardWhere.next.h = nx, ny, nw, nh

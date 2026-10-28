@@ -960,13 +960,20 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   end
   local SHOT_GAP = 0.09
 
-  -- the wall's depth now (wave): from in front of the boss to past the party
+  -- the wall's depth now (wave): the boss's from in front of it to past the party; a member's from
+  -- behind the team, through it, to the boss and past it
   local function wallZ(m, t)
     local pz = Sc and Sc.PAD.z or -9.2
-    local z0, z1 = pz + 2.5, 0.9
+    local z0, z1, past = pz + 2.5, 0.9, 1.8
+    if not (m.from and m.from.boss) then z0, z1, past = 0.9, pz, -1.8 end
     local imp = m.impact or m.len
     if t <= imp then return z0 + (z1 - z0) * (t / imp) end
-    return z1 + (t - imp) / (m.len - imp) * 1.8
+    return z1 + (t - imp) / (m.len - imp) * past
+  end
+  -- whether the wall has reached a target at depth Z (it runs toward the boss when a member's)
+  local function wallPast(m, z, Z)
+    if m.from and m.from.boss then return z >= Z end
+    return z <= Z
   end
   local function wallH(m) return (m.big and 3.3 or 2.5) end
   local WALL = {
@@ -1268,16 +1275,18 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         -- spray along the crest
         if tick and t < m.len * 0.85 then
           local H = wallH(m)
+          -- (thrown ahead of the wall: toward the party, or the boss when a member's)
+          local dz = (m.from and m.from.boss) and 1 or -1
           for j = 1, 3 do
             seedN = seedN + 1
             local x = (rnd(seedN, 1) - 0.5) * 16
-            if sh == "fire" then emit("ember", x, H * (0.2 + 0.7 * rnd(seedN, 4)), z, (rnd(seedN, 5) - 0.5) * 1.5, 1 + 2 * rnd(seedN, 6), 1, 0.9, 0.05, 1, 0.5, 0.1, 1)
-            elseif sh == "ground" then emit("dust", x, H, z + 0.2, 0, 0.6, 1.5, 1, 0.45, 0.62, 0.5, 0.36, 0.5)
-            else emit("drop", x, H, z + 0.1, (rnd(seedN, 2) - 0.5), 2 + rnd(seedN, 3) * 2, 2.5, 0.8, 0.05, 0.6, 0.85, 1, 0.9) end
+            if sh == "fire" then emit("ember", x, H * (0.2 + 0.7 * rnd(seedN, 4)), z, (rnd(seedN, 5) - 0.5) * 1.5, 1 + 2 * rnd(seedN, 6), dz, 0.9, 0.05, 1, 0.5, 0.1, 1)
+            elseif sh == "ground" then emit("dust", x, H, z + 0.2 * dz, 0, 0.6, 1.5 * dz, 1, 0.45, 0.62, 0.5, 0.36, 0.5)
+            else emit("drop", x, H, z + 0.1 * dz, (rnd(seedN, 2) - 0.5), 2 + rnd(seedN, 3) * 2, 2.5 * dz, 0.8, 0.05, 0.6, 0.85, 1, 0.9) end
           end
         end
         for ti, T in ipairs(m.targets) do
-          if z >= T.Z then
+          if wallPast(m, z, T.Z) then
             if not m.landed[ti] and sh ~= "fire" and sh ~= "ground" then
               burstOf("drop", 30, T.X, 1.2, T.Z + 0.3, 5, 0.75, 1, 0.06, 0.6, 0.85, 1, 0.9, 0)
             end

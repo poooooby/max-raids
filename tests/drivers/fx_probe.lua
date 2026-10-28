@@ -52,6 +52,8 @@ local function body(game, log)
     { "bolt", { "bolt" }, "ELECTRIC", "boss", { 3 } },
     { "wave_water", { "wave", shape = "water" }, "WATER", "boss", ALL },
     { "wave_fire", { "wave", shape = "fire" }, "FIRE", "boss", ALL },
+    -- (a member's Surf: from behind the team, through its allies, at the boss)
+    { "wave_member", { "wave", shape = "water" }, "WATER", 1, { 2, 3, 4, "boss" } },
     { "wave_ground", { "wave", shape = "ground" }, "GROUND", "boss", ALL },
     { "wave_light", { "wave", shape = "light" }, "FAIRY", "boss", ALL, true },
     { "wave_wind", { "wave", shape = "wind" }, "FLYING", "boss", ALL },

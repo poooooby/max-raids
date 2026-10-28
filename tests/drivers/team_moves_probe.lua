@@ -160,6 +160,16 @@ local function body(game, log)
   else
     log("FAIL no second-screen frame")
   end
+  -- a finger on one of Surf's allies: every one it reaches (the boss too) pressed together
+  if X._test.pad and X._test.pad.drawSecond and R.current then
+    local c = love.graphics.newCanvas(960, 840, { dpiscale = 1 })
+    love.graphics.push("all"); love.graphics.setCanvas(c); love.graphics.clear(0, 0, 0, 1)
+    X._test.pad.drawSecond(love.graphics, 960, 840, R.current(), "move2")
+    love.graphics.setCanvas(); love.graphics.pop()
+    local f = io.open(dir .. "/t14c_surf_second_held.png", "wb")
+    if f then f:write(c:newImageData():encode("png"):getString()); f:close() end
+    log("frame t14c_surf_second_held")
+  end
   X._test.padSecond(false)
   S2.bridge = keep
   U.wait(5)
