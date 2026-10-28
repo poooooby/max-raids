@@ -78,9 +78,8 @@ battlefield in 3D, then try to catch it.
   stats, or breaking the barrier.
 - ⏳ **Ten turns, four faints:** the raid is lost if your Pokémon faint four times or the battle
   runs past ten turns. A fainted Pokémon is back at full health the turn after next.
-- 🔴 **Dynamax your own:** as in Sword and Shield, each turn one of your four holds the Dynamax
-  Energy (your first Pokémon first, then the next each turn), shown by a glowing ring beside it.
-  The one holding it can press **DYNAMAX** on its move list: it grows giant for three turns, its HP
+- 🔴 **Dynamax your own:** any of your four can Dynamax while none of the others is giant, shown
+  by a glowing ring beside each one that can. Press **DYNAMAX** on its move list: it grows giant for three turns, its HP
   raised by its Dynamax Level (×1.5 up to ×2), and its moves become Max Moves (status moves become
   Max Guard). A Pokémon with the Gigantamax Factor and a Gigantamax form Gigantamaxes: it takes
   its Gigantamax form (fully animated, from the pack) and uses its G-Max Move. The factor comes

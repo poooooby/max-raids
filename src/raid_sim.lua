@@ -12,10 +12,10 @@
 --            CHEER, POUCH) ; words: data/raid_gmax.lua WORDS
 --   sim:turn(choices) -> events     choices[i] = { move = slot, dmax = true? } | { item = id, target = j }
 --   sim:canAct(i) ; sim:pouchLeft(id) ; sim.turnNo ; sim.faints ; sim.over ("win" | "faints" |
---   "storm" | nil) ; sim:canDynamax(i) ; sim.energy (who holds the Dynamax Energy) ; sim.money
--- Dynamax (Sword / Shield's raids): each turn one member holds the Dynamax Energy - slot 1 first,
--- then the next each turn, skipping one that has Dynamaxed, cannot (m.canDmax false) or is out; none
--- while one is Dynamaxed. Only the holder may Dynamax, at the turn's start: its HP and max HP x
+--   "storm" | nil) ; sim:canDynamax(i) ; sim.money
+-- Dynamax: any member may Dynamax while no other is Dynamaxed - one that has not yet, can
+-- (m.canDmax not false) and is on the field; one at a time (the first to choose it in a turn), at
+-- the turn's start: its HP and max HP x
 -- m.dmaxMult (its Dynamax Level's), its moves their Max forms (m.maxMoves) for three turns, then it
 -- reverts keeping its HP's share (at once if it faints). Each member once a raid. Max Guard (a
 -- status move's Max form) protects from every move but the piercing G-Max ones, failing more
@@ -87,9 +87,8 @@ function Sim.new(o)
     self.pouch[it.id] = { id = it.id, n = it.n, heal = it.heal }
   end
   -- Dynamax: who holds the Energy, who has used it, who is Dynamaxed; coins picked up
-  self.energyFrom, self.energy, self.dmaxUsed, self.dmaxActive = 1, nil, {}, nil
+  self.dmaxUsed, self.dmaxActive = {}, nil
   self.money, self.coinUses = 0, 0
-  self:giveEnergy()
   return self
 end
 
@@ -156,23 +155,9 @@ local function eligible(self, i)
   local m = self.members[i]
   return m ~= nil and not self.dmaxUsed[i] and m.canDmax ~= false and self:present(i)
 end
--- the turn's Dynamax Energy: to the next member in turn order able to use it (none while one is
--- Dynamaxed)
-function Sim:giveEnergy()
-  self.energy = nil
-  if self.over or self.dmaxActive then return end
-  local n = #self.members
-  for k = 0, n - 1 do
-    local i = (self.energyFrom - 1 + k) % n + 1
-    if eligible(self, i) then
-      self.energy = i
-      self.energyFrom = i % n + 1
-      return
-    end
-  end
-end
+-- whether member i may Dynamax now: any member not yet Dynamaxed this raid, while no one is giant
 function Sim:canDynamax(i)
-  return not self.over and self.energy == i and eligible(self, i)
+  return not self.over and self.dmaxActive == nil and eligible(self, i)
 end
 
 function Sim:dynamax(ev, m, i)
@@ -181,7 +166,7 @@ function Sim:dynamax(ev, m, i)
   m.mon.maxHp = floor(base * mult)
   m.mon.hp = max(1, floor(hpOf(m) * mult))
   m.dmax = { turns = 3, mult = mult, baseMax = base }
-  self.dmaxUsed[i], self.dmaxActive, self.energy = true, m, nil
+  self.dmaxUsed[i], self.dmaxActive = true, m
   ev[#ev + 1] = { kind = "dynamax", who = m, hp = m.mon.hp, maxHp = m.mon.maxHp, gmax = m.gmaxId ~= nil,
     text = ("%s %s!"):format(m.name, m.gmaxId and "Gigantamaxed" or "Dynamaxed") }
 end
@@ -1285,8 +1270,6 @@ function Sim:turn(choices)
     self.turnNo = self.turnNo + 1
     if self.turnNo > (self.rules.TURNS or 10) then self.over = "storm" end
   end
-  -- the next turn's Dynamax Energy
-  self:giveEnergy()
   if self.over then
     local text
     if self.over == "win" then text = ("You defeated %s!"):format(self.boss.name)

@@ -832,7 +832,7 @@ return function(mod, deps)
       -- (the HUD: Dynamaxed and its turns left; holding the Dynamax Energy while choosing)
       if m.info then
         m.info.dmax = m.b and m.b.dmax and m.b.dmax.turns or nil
-        m.info.energy = r.phase == "command" and r.sim ~= nil and r.sim:canDynamax(i) or nil
+        m.info.energy = r.phase == "command" and Rd.mayDynamax(i) or nil
       end
     end
     if Scene and Scene.prepare then Scene.prepare(r.t) end
@@ -1060,13 +1060,23 @@ return function(mod, deps)
     if not (mv and not mv.status and r.adapter and target) then return nil end
     return effOf(r.adapter.effectiveness(mv.type, target)) or "normal"
   end
+  -- whether member i may Dynamax this turn: the sim allows it (any member not yet Dynamaxed, while
+  -- no one is giant) and no other member has already chosen to this turn (one at a time)
+  function Rd.mayDynamax(i)
+    if not (r and r.sim and r.sim:canDynamax(i)) then return false end
+    local chosen = r.cmd and r.cmd.chosen
+    if chosen then
+      for j, ch in pairs(chosen) do if j ~= i and ch.dmax then return false end end
+    end
+    return true
+  end
   function Rd.moveList()
     local c = r and r.cmd
     local b = c and c.actor and r.members[c.actor] and r.members[c.actor].b
     if not b then return end
     c.bagEmpty = bagEmpty()
     -- (the DYNAMAX button: shown while this member holds the Energy, lit while toggled on)
-    c.canDmax = c.menu == "moves" and r.sim ~= nil and r.sim:canDynamax(c.actor) or false
+    c.canDmax = c.menu == "moves" and Rd.mayDynamax(c.actor) or false
     if not c.canDmax then c.dmax = nil end
     local maxForms = b.dmax ~= nil or c.dmax == true
     c.maxShown = maxForms

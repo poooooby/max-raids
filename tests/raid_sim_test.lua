@@ -436,21 +436,35 @@ do
   check(other.name == "Max Airstream", "a move of another type stays a Max Move")
 end
 
--- the Energy: slot 1 first, then on round the team each turn, never to one used or out
+-- who may Dynamax: any member not yet Dynamaxed, on the field, while no one is giant; one a turn
 do
   local boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true)
   local m = dmaxTeam(4, 100, 0, tackle)
   local s = Sim.new{ boss = boss, members = m, adapter = adapter(), rng = rngOf(7) }
-  local held = {}
-  for t = 1, 5 do held[t] = s.energy; s:turn(all(4)) end
-  check(table.concat(held, " ") == "1 2 3 4 1", "unused, it passes on: " .. table.concat(held, " "))
-  check(s:canDynamax(s.energy) and not s:canDynamax(s.energy % 4 + 1), "only the holder may")
-  -- member 2 out: skipped
-  m[2].mon.hp = 0
-  m[2].down = 1
-  local s2 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), members = m, adapter = adapter(), rng = rngOf(8) }
-  s2:turn(all(4))
-  check(s2.energy == 3, "one out is passed over (" .. tostring(s2.energy) .. ")")
+  check(s:canDynamax(1) and s:canDynamax(2) and s:canDynamax(3) and s:canDynamax(4), "turn 1: any of the four may")
+  -- the third Dynamaxes on turn 1, not the first
+  local c = all(4)
+  c[3].dmax = true
+  local ev = s:turn(c)
+  check(ev[1].kind == "dynamax" and ev[1].who == m[3], "the third Dynamaxes on turn 1")
+  check(not s:canDynamax(1) and not s:canDynamax(2) and not s:canDynamax(4), "no one else while it is giant")
+  s:turn(all(4)); s:turn(all(4))
+  check(m[3].dmax == nil, "three turns on, it is its own size")
+  check(s:canDynamax(1) and s:canDynamax(2) and s:canDynamax(4) and not s:canDynamax(3),
+    "then any of the others may, never the one that has")
+  -- two choosing it in one turn: the first in party order grows, the other only attacks
+  local c2 = all(4)
+  c2[2].dmax, c2[4].dmax = true, true
+  local ev2 = s:turn(c2)
+  local grew = {}
+  for _, e in ipairs(ev2) do if e.kind == "dynamax" then grew[#grew + 1] = e.who end end
+  check(#grew == 1 and grew[1] == m[2] and m[4].dmax == nil, "one at a time: two asking, the first grows")
+  -- one out cannot
+  local m2 = dmaxTeam(4, 100, 0, tackle)
+  m2[2].mon.hp = 0
+  m2[2].down = 1
+  local s2 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 1 }) }, true), members = m2, adapter = adapter(), rng = rngOf(8) }
+  check(not s2:canDynamax(2) and s2:canDynamax(3), "one out cannot, the others can")
 end
 
 -- Dynamaxing: HP x the level's, the Max forms, three turns, back with its HP's share, once each
@@ -467,11 +481,11 @@ do
   for _, e in ipairs(ev) do if e.kind == "use" and e.who == m[1] then maxUse = e.move end end
   check(maxUse and maxUse.name == "Max Strike" and boss.mon.hp < 100000, "its Tackle is Max Strike")
   check(m[1].moves[1].pp == 34, "the Max Move spends Tackle's PP")
-  check(s.energy == nil, "no Energy while one is Dynamaxed")
+  check(not s:canDynamax(2), "no one else while one is Dynamaxed")
   s:turn(all(4)); s:turn(all(4))
   check(m[1].dmax == nil and m[1].mon.maxHp == 100, "after three turns: its own size")
   check(m[1].mon.hp > 0 and m[1].mon.hp <= 100, "its HP back to its share (" .. m[1].mon.hp .. ")")
-  check(s.energy ~= nil and s.energy ~= 1, "the Energy again, never to the one that has used it")
+  check(s:canDynamax(2) and not s:canDynamax(1), "free again, never to the one that has used it")
   -- a share: 150 of 200 -> 75 of 100
   local m2 = dmaxTeam(1, 100, 10, tackle)
   local s3 = Sim.new{ boss = battler("Boss", 100000, 1, { mv("Hit", { power = 50 }) }, true), members = m2, adapter = adapter(), rng = rngOf(1) }

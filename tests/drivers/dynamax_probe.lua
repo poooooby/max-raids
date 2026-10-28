@@ -51,7 +51,7 @@ local function body(game, log)
     local mx = m1.maxMoves[i]
     log(("  %s (%s %d) -> %s %d"):format(mv.name, mv.typeName, mv.power or 0, mx.name, mx.power or 0))
   end
-  check(cur.sim.energy == 1, "turn 1: slot 1 holds the Energy")
+  check(cur.sim:canDynamax(1) and cur.sim:canDynamax(3), "turn 1: any member may Dynamax")
   -- member 1: Fight, DYNAMAX, its first damaging move
   R.choose("fight")
   U.wait(4)
@@ -61,6 +61,11 @@ local function body(game, log)
   local slot = 1
   for i, mv in ipairs(m1.moves) do if not mv.status and mv.typeName == "FIRE" then slot = i; break end end
   R.choose("move" .. slot)
+  -- (member 1 has chosen to Dynamax: the others are not offered it this turn)
+  R.choose("fight"); U.wait(4)
+  check(R.current().cmd.actor == 2 and R.current().cmd.canDmax == false and not R.mayDynamax(2),
+    "one a turn: member 2 is not offered DYNAMAX once member 1 has chosen it")
+  R.back(); U.wait(2)
   for _ = 2, 4 do
     local c = R.current().cmd
     if c and c.actor then R.choose("fight"); R.choose("move1") end
@@ -92,7 +97,7 @@ local function body(game, log)
   check(seenMax, "its G-Max Move")
   waitFor(function() return X.state().phase == "command" and not R.current().say end, 20000)
   shot("m06_hud")
-  check(R.current().sim.energy == nil, "no Energy while it is Dynamaxed")
+  check(not R.current().sim:canDynamax(2), "no one else while it is Dynamaxed")
   -- two more turns: Max Moves, then back to its size
   local reverted = false
   for _ = 1, 3 do
@@ -124,7 +129,8 @@ local function body(game, log)
     if not X.state().active then break end
   end
   check(reverted and m1.dmax == nil, "back to its size after three turns")
-  log("Energy now with", tostring(R.current() and R.current().sim and R.current().sim.energy))
+  local sim = R.current() and R.current().sim
+  check(sim and not sim:canDynamax(1) and sim:canDynamax(2), "free again for the others, not the one that has")
   X.close()
   U.wait(30)
 
