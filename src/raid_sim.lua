@@ -1293,6 +1293,8 @@ function Sim:turn(choices)
     elseif self.over == "storm" then text = ("The storm around %s grew too strong!"):format(self.boss.name)
     else text = "Too many Pok\195\169mon fainted..." end
     ev[#ev + 1] = { kind = "over", outcome = self.over, text = text }
+    -- a member still giant shrinks back before the catch
+    if self.over == "win" and self.dmaxActive then self:undynamax(ev, self.dmaxActive) end
     if self.over ~= "win" then
       ev[#ev + 1] = { kind = "over", outcome = self.over, text = "You were blown out of the den!" }
     end
