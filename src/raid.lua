@@ -17,12 +17,14 @@ return function(mod, deps)
   local Rewards = deps.Rewards
   local Fx, MoveFx = deps.Fx, deps.MoveFx
   local Sounds = deps.Sounds
+  local Music, MusicData = deps.Music, deps.MusicData
   local Battle, Sim = deps.Battle, deps.Sim
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
   local sin, cos, pi, sqrt = math.sin, math.cos, math.pi, math.sqrt
 
   local Rd = { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Fx = Fx }
+  Rd.music_ = Music
   -- an animation frame lasts AnimationSpeed of these (the pack's metrics, Essentials' units)
   Rd.ANIM_UNIT_S = 1 / 20
 
@@ -498,7 +500,8 @@ return function(mod, deps)
       Scene.setTime(0)
       Scene.shot("close", 0)
     end
-    r.song = playSong(Rd.SONGS)
+    -- (the raid's own track; the game's legendary battle music without it)
+    r.song = Rd.music("battle") or playSong(Rd.SONGS)
   end
 
   -- straight into a raid (drivers, tests): no den screen
@@ -522,6 +525,28 @@ return function(mod, deps)
   -- the den screen takes no presses for this long after it opens
   Rd.DEN_ARM_S = 0.25
 
+  -- ------- the music (src/raid_music.lua, data/raid_music.lua): the Basic set for a red den (a Pokemon
+  -- of the route, Dynamaxed), the Max set for a purple one (Gigantamax) and a legendary raid; `what`
+  -- "den" (its adventure track), "battle" (a legendary raid's own, Eternatus' own) or "capture"
+  function Rd.musicFor(what, key, legend)
+    key = key or (r and r.key)
+    legend = legend == nil and r and r.legend or legend
+    local basic = type(key) ~= "string" or (key:match("^DYNA:") ~= nil and not legend)
+    local set = basic and "basic" or "max"
+    if what == "den" then return set .. "_adventure" end
+    if what == "capture" then return set .. "_capture" end
+    local b = key and Bosses[key]
+    if b and MusicData and tonumber(b.national) == MusicData.ETERNATUS then return "max_battle_eternatus" end
+    if legend then return "max_battle_legend" end
+    return set .. "_battle"
+  end
+  function Rd.music(what)
+    if not Music then return false end
+    local name = Rd.musicFor(what)
+    local ok, played = pcall(Music.play, name)
+    return ok and played and name or false
+  end
+
   function Rd.openDen(den)
     if r then return false, "busy" end
     if type(den) ~= "table" then return false, "no den" end
@@ -532,6 +557,7 @@ return function(mod, deps)
     -- (what the den holds of itself, for putting a Dynamax Crystal away again)
     r.denKey = r.key
     if deps.onOpen then deps.onOpen(r) end
+    Rd.music("den")
     return true
   end
 
@@ -564,6 +590,7 @@ return function(mod, deps)
     r.key, r.legend, r.warm = key, true, nil
     r.cursor = 5
     if Sounds then Rd.se(Sounds.EVENT.dmaxOn) end
+    Rd.music("den")
     return true
   end
   function Rd.putCrystalAway()
@@ -571,6 +598,7 @@ return function(mod, deps)
     r.key, r.legend, r.warm = r.denKey, nil, nil
     if r.key and not Rd.load(r.key) then r.key = nil end
     r.cursor = r.key and 7 or 6
+    Rd.music("den")
     return true
   end
 
@@ -609,6 +637,7 @@ return function(mod, deps)
     Rd.shinyKey = nil
     if Fx then Fx.clear() end
     Rd.release()
+    if Music then pcall(Music.stop) end
     -- the field's song back, the raid's faded out under it (not cut, not over it)
     if Audio then
       local okM, mapSong = pcall(function() return Audio.specialMapSong and Audio.specialMapSong() or Audio._mapSong end)
@@ -1884,6 +1913,7 @@ return function(mod, deps)
     end
     r.cmd = { menu = "catchq", cursor = 1, balls = balls, ball = 1, chosen = {}, moveList = {} }
     if Scene then Scene.shot("field", 0.8) end
+    Rd.music("capture")
     if #balls == 0 then r.cmd.cursor = 2 end
     return true
   end
@@ -2216,6 +2246,7 @@ return function(mod, deps)
         -- the battle's music fades out under the shrink, before the fanfare (else the fanfare holds
         -- it and it comes back after)
         if Audio and Audio.fadeOutBgm then pcall(Audio.fadeOutBgm, 4) end
+        if Music then pcall(Music.stop) end
       end
       if not th.caught and once("seBurst", M.done) then Rd.se(C.burst) end
       if th.caught and once("seFanfare", M.gotcha) then Rd.caughtFanfare() end

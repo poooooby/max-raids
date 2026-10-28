@@ -622,7 +622,7 @@ return function(mod, deps)
     local ok, s = pcall(build)
     if ok and s then scene = s else
       Sc.failed, Sc.why = true, "the den did not build (" .. tostring(s) .. ")"
-      if mod.log then mod.log:warn("Max Raids: %s; drawn flat", Sc.why) end
+      if mod.log then mod.log:warn("Dynamax Raids: %s; drawn flat", Sc.why) end
     end
     return scene
   end
@@ -1537,7 +1537,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       if coroutine.status(buildCo) == "dead" then
         if ok and res then scene = res else
           Sc.failed, Sc.why = true, "the den did not build (" .. tostring(res) .. ")"
-          if mod.log then mod.log:warn("Max Raids: %s; drawn flat", Sc.why) end
+          if mod.log then mod.log:warn("Dynamax Raids: %s; drawn flat", Sc.why) end
         end
         buildCo = nil
         warmStep = 3

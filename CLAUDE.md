@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-`max_raids` (Max Raids), a Lua mod for **gen1recomp** (engine checkout `~\Documents\GitHub\gen1recomp`,
+`max_raids` (Dynamax Raids), a Lua mod for **gen1recomp** (engine checkout `~\Documents\GitHub\gen1recomp`,
 LÖVE 11.5). The repo is `~\Documents\GitHub\max-raids`, installed into the engine as a directory
 junction `gen1recomp/mods/max_raids` -> this repo. **Gen 3 only** (Emerald, FireRed, LeafGreen, Ruby,
 Sapphire). **Depends on `national_dex_gen3`** (`~\Documents\GitHub\national_dex_gen3`) for modern species,
@@ -22,7 +22,7 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
   anything no longer true, and write new behaviour in the present tense. Its layout follows
   PlayNav's and Wilds of Hoenn's (a tagline, sections with an emoji each, an options table,
   Controls, Install, Credits).
-- **A release:** manifest `version` X.Y.Z, tag `vX.Y.Z`, title `Max Raids vX.Y.Z`, the package
+- **A release:** manifest `version` X.Y.Z, tag `vX.Y.Z`, title `Dynamax Raids vX.Y.Z`, the package
   `max_raids-X.Y.Z.zip` from `python tools/modkit.py pack mods/max_raids --base imported -o ...`
   (run in the engine checkout) attached to it; notes say what changed for players.
 - **A test build** that players must not auto-update to: version `X.Y.Z-beta.N`, tag `vX.Y.Z-beta.N`,
@@ -190,6 +190,24 @@ GitHub: `poooooby/max-raids` (public; manifest `github`, so the engine's mod upd
     driver `tests/drivers/gmax_probe.lua` (HATTERENE_2: Dazzling Gleam on all four, G-Max Smite on one
     and confusing all; g01-g03); driver `tests/drivers/team_moves_probe.lua` (t00 Light Screen's arrows, t01-t13 shots, t14 / t14b
     Surf's target screen on both screens, t15 Surf on the allies).
+- **The raids' music** (2026-10-27, Wooble: the [DBK] Raid Battles plugin's BGM, "the adventure music for
+  the den screen and based on the type of raid (max vs basic)"): `assets/music/` eight .ogg (22 MB) from
+  `1SpriteReferences/Raid Battles/Audio/BGM` (Basic adventure / battle v1 / capture; Max adventure /
+  battle v1 / v2 / v3 / capture; Tera and Ultra not used, Basic v2 = the plugin's rank-7 raids, none
+  here). Which: the plugin's RaidType.rb + Battle Setup.rb (v2 rank 7 / an Adventure's final boss, v3
+  ETERNATUS_1); ours `Rd.musicFor(what, key, legend)`: a red den (`DYNA:` key, not a legend) "basic",
+  a purple den and a crystal's legend "max"; "den" -> adventure (openDen, useCrystal,
+  putCrystalAway), "battle" (begin; legend -> max_battle_legend, National 890 -> eternatus; the
+  engine's MUS_VS_* only without it), "capture" (startCatch; stopped at the ball's click, before the
+  engine's fanfare and caught song); `Rd.close` fades it. `src/raid_music.lua` (RM, built in main,
+  `Rd.music_`, ticked from main's render.hud so a fade runs past the close): a Decoder (4096-sample
+  chunks) into a QueueableSource (8 buffers), looped at `data/raid_music.lua`'s loopStart / loopLength
+  (the files' own LOOPSTART / LOOPLENGTH tags, samples; the chunk at the loop's end cut there and the
+  decoder sent back); the game's music faded out (Audio.fadeOutBgm) when ours starts; volume
+  Audio._bgmVolume x Audio._duck x the track's `gain` (each levelled to -19.5 dB RMS, the game's music
+  as heard; max_battle at its own -21.8, gain capped at 1) x MIX, faded over FADE_S; paused while
+  Audio._suspended. Driver `tests/drivers/music_probe.lua` (the choice per raid kind, the den screen
+  and the raid playing, a loop's seam wrapping, the close, each file's loudness).
 - **Shiny bosses** (2026-10-27, Wooble: 1/4096, a Dynamax Adventure 1/300; "the art shiny in battle",
   "a shiny sparkle when they appear, after their explosion entrance"): `RAID.SHINY` { ODDS 4096,
   ADVENTURE 300 } (EVIDENCE); `setupBattle` rolls `r.shiny` (a crystal's legend raid `r.legend` - our

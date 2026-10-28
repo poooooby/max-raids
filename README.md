@@ -1,4 +1,4 @@
-# Max Raids
+# Dynamax Raids
 
 *Sword and Shield's Max Raid Battles in Ruby, Sapphire, Emerald, FireRed and LeafGreen.*
 
@@ -136,8 +136,11 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
   words sit at the foot at a size made for it, and the den screen and rewards card sit in the middle.
 - 🧭 **Follows Kanto Gear:** with **Kanto Gear**, the battle menu goes where its Display Mode
   says. Its Separate Screens setting puts the menu on the second screen.
-- 🔊 **The game's own sounds:** moves, hits, barriers and the catch use Gen 3's sound effects, and
-  the raid plays the game's legendary battle music.
+- 🎵 **Sword and Shield's raid music:** a red den plays the raid den themes, a purple Gigantamax
+  den and a legendary raid the Dynamax Adventure ones: their adventure theme on the den screen, the
+  battle theme in the raid (a legendary raid its own, Eternatus its own), the capture theme while you
+  catch. Each loops seamlessly and follows the game's music volume.
+- 🔊 **The game's own sounds:** moves, hits, barriers and the catch use Gen 3's sound effects.
 
 ## ⚙️ Options
 
@@ -158,7 +161,7 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
 
 1. Install [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3) first.
 2. Download `max_raids-X.Y.Z.zip` from the latest release and add it in Gen1Recomp's mod manager.
-3. Turn on Max Raids for a Gen 3 game.
+3. Turn on Dynamax Raids for a Gen 3 game.
 
 ## 👏 Credits
 
@@ -170,6 +173,8 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon in a 3D den
   Leparagon (Gen 8), Marin, MapleBranchWing and the DS Styled Gen 7+ Repository (Gen 7), shinies
   by StarrWolf and the Pokémon Shattered Light Team, compiled by Golisopod User, UberDunsparce and
   Caruban.
+- **Raid music:** from Lucidious89's [DBK] Raid Battles (Pokémon Essentials Deluxe Battle Kit),
+  Pokémon Sword and Shield's raid themes.
 - **3D:** [g3d](https://github.com/groverburger/g3d) by groverburger (MIT).
 - **Max Move power:** after Pokémon Showdown's data (MIT).
 

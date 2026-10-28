@@ -1,4 +1,4 @@
--- Max Raids: Sword / Shield's Max Raid Battles on the Gen 3 games, with National Dex Gen 3's
+-- Dynamax Raids: Sword / Shield's Max Raid Battles on the Gen 3 games, with National Dex Gen 3's
 -- species, moves, Fairy type and abilities. A giant Gigantamax boss (the Giga Megas pack) against
 -- four of the party in a 3D den, on a layer of its own over the field, drawn at the window's
 -- resolution.
@@ -53,6 +53,8 @@ return function(mod)
   local Gmax = loadSibling(mod, "data/raid_gmax.lua")
   local MaxPower = loadSibling(mod, "data/raid_maxpower.lua")
   local TeamMoves = loadSibling(mod, "data/raid_team_moves.lua")
+  local MusicData = loadSibling(mod, "data/raid_music.lua")
+  local makeMusic = loadSibling(mod, "src/raid_music.lua")
   local HD = loadSibling(mod, "src/hd.lua")
   local makeRender3d = loadSibling(mod, "src/render3d.lua")
   local makeScene = loadSibling(mod, "src/raid_scene.lua")
@@ -72,7 +74,7 @@ return function(mod)
   local makePick = loadSibling(mod, "src/pc_pick.lua")
   local makeDyna = loadSibling(mod, "src/dyna.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
-    mod.log:error("Max Raids is missing files; it stays off -- reinstall the mod")
+    mod.log:error("Dynamax Raids is missing files; it stays off -- reinstall the mod")
     return
   end
   if HD then mod.hd = HD end
@@ -190,7 +192,13 @@ return function(mod)
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax, TeamMoves = TeamMoves,
     Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene }) or nil, MoveFx = MoveFx, Sounds = Sounds,
-    makeDen = makeDen, Pick = Pick, Dyna = Dyna,
+    makeDen = makeDen, Pick = Pick, Dyna = Dyna, MusicData = MusicData,
+    Music = (function()
+      if not makeMusic then return nil end
+      local okA, AudioM = pcall(require, "src.core.game3.audio")
+      local ok, m = pcall(makeMusic, mod, { data = MusicData, Audio = okA and AudioM or nil })
+      return ok and m or nil
+    end)(),
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome, raid)
       -- (won, or left by Run: spent for the day - not by a Dynamax Crystal's legendary raid, which
@@ -233,6 +241,8 @@ return function(mod)
   mod.hooks:wrap("render.hud", function(next, game, viewport)
     lastGame = game or lastGame
     local res = next(game, viewport)
+    -- (the raid's music: fed and faded every frame, a raid up or not - a fade out runs past its close)
+    if Raid and Raid.music_ then pcall(Raid.music_.update, love.timer and love.timer.getDelta() or 1 / 60) end
     -- (the game's summary over the raid: it draws itself, with the engine's touch pad)
     local up = Raid.active() and not Raid.summaryUp()
     if PadHide then pcall(PadHide.apply, PadHide, up and not padOnSecond(), game) end
@@ -302,5 +312,5 @@ return function(mod)
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,
     padSecond = function(on) padForced = on end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }
-  mod.log:info("Max Raids ready (%d bosses)", #(Bosses.ORDER or {}))
+  mod.log:info("Dynamax Raids ready (%d bosses)", #(Bosses.ORDER or {}))
 end

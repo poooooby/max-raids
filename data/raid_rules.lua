@@ -1,4 +1,4 @@
--- Max Raids' numbers (src/training/raid_sim.lua, src/training/raid.lua). Sword / Shield's Max Raid
+-- Dynamax Raids' numbers (src/training/raid_sim.lua, src/training/raid.lua). Sword / Shield's Max Raid
 -- Battles where they are documented; ours where they are not (no official source gives the
 -- shield's thresholds or its damage cut). EVIDENCE classifies each group
 -- (dotted key path) as Super Training's rules file does: verified / measured / inferred /

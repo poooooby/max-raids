@@ -1,6 +1,6 @@
 {
   "id": "max_raids",
-  "name": "Max Raids",
+  "name": "Dynamax Raids",
   "version": "0.1.0",
   "api": 2,
   "entry": "main.lua",
@@ -22,7 +22,7 @@
   ],
   "conflicts": [],
   "incompatible": [],
-  "description": "Max Raid Battles on the Gen 3 games: dens on the routes, a giant Gigantamax boss against four of your party in a 3D den, shields, Max moves and a catch at the end.",
+  "description": "Sword and Shield's Max Raid Battles on the Gen 3 games: dens on the routes, a giant Dynamax or Gigantamax boss against four of your party on the raid battlefield in 3D, your own Dynamax, barriers, Max Moves and a catch at the end.",
   "dependency_sources": {
     "national_dex_gen3": "https://github.com/poooooby/national_dex_gen3"
   },

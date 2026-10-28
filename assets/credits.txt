@@ -1,4 +1,4 @@
-Max Raids - asset credits
+Dynamax Raids - asset credits
 
 ---------------------------------------------
 The raid bosses (assets/bosses/, data/raid_sprites.lua): the 37 Gigantamax and other forms of the
@@ -31,7 +31,12 @@ tools/raid_pack.py. From the pack's credits:
     Resource Compilation - Golisopod User, UberDunsparce, Caruban
 
 ---------------------------------------------
+Raid music (assets/music): from Lucidious89's [DBK] Raid Battles add-on for the Deluxe Battle Kit
+(https://eeveeexpo.com/resources/1780/) - its Basic and Max sets: Pokemon Sword and Shield's raid
+den, Dynamax Adventure, Max Raid battle and capture themes (c) Nintendo / GAME FREAK Inc.
+
+---------------------------------------------
 g3d (src/g3d) by groverburger, MIT licence (src/g3d/LICENSE).
 
-Pokemon and their designs are (c) Nintendo / Creatures Inc. / GAME FREAK Inc.; Max Raids is an
+Pokemon and their designs are (c) Nintendo / Creatures Inc. / GAME FREAK Inc.; Dynamax Raids is an
 unofficial fan project.
