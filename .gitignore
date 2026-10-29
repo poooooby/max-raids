@@ -3,3 +3,4 @@ __pycache__/
 
 # Local Tooling
 CLAUDE.md
+.claude/skills/lua-developer/
