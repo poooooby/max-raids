@@ -61,6 +61,19 @@ local function body(game, log)
       c.hours, c.minutes, c.days, onGame, onDevice, devDay))
     check(onGame == c.days, "In-game: the cart's day")
     check(onDevice == devDay, "Device: the device's own day, whatever the cart's clock says")
+    -- the same through National Dex Gen 3's stored option, as a player sets it (no override)
+    local ndx = game.mods.exports and game.mods.exports.national_dex_gen3
+    check(ndx ~= nil and type(ndx.clockSource) == "function", "National Dex Gen 3 exports its CLOCK SOURCE")
+    local opts = game.mods and game.mods.modOptions
+    if opts then
+      opts.national_dex_gen3 = opts.national_dex_gen3 or {}
+      local was = opts.national_dex_gen3.clock_source
+      opts.national_dex_gen3.clock_source = "device"
+      check(Dn.today() == devDay, "the option set to Device: the device's own day")
+      opts.national_dex_gen3.clock_source = "game"
+      check(Dn.today() == c.days, "the option set to In-game: the cart's day")
+      opts.national_dex_gen3.clock_source = was
+    end
     if keep then s0.localTimeOffset = keep end
   end
   if not cart then check(Dn.today() == deviceDay, "no cart clock: the device's local date") end

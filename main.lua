@@ -135,7 +135,9 @@ return function(mod)
   local gearForced = nil -- (drivers: _test.gearOptions(t), a stand-in Gear's options; false = no Gear)
   -- (any mod's option the same way: modOption(id, key))
   local function modOption(id, key)
-    local loader = lastGame and lastGame.mods
+    -- (mod.game until the HUD has drawn: the dens roll from input.step, which can come first)
+    local game = lastGame or mod.game
+    local loader = game and game.mods
     local rec = loader and loader.mods and loader.mods[id]
     if not rec or rec.state == "disabled" or rec.state == "failed" then return nil end
     local stored = loader.modOptions and loader.modOptions[id]
@@ -233,9 +235,19 @@ return function(mod)
 
   -- ------- dens on the routes: A on one opens its den screen (src/dens.lua)
   if makeDens then
-    -- (the day follows National Dex Gen 3's CLOCK SOURCE: Device -> the device's date)
+    -- (the day follows National Dex Gen 3's CLOCK SOURCE: Device -> the device's date. Its own
+    -- export first; an older National Dex has none, and its option is read from the loader)
+    local function clockSource()
+      local nd = mod:find("national_dex_gen3")
+      local fn = nd and nd.exports and nd.exports.clockSource
+      if type(fn) == "function" then
+        local okC, v = pcall(fn)
+        if okC and v ~= nil then return v end
+      end
+      return modOption("national_dex_gen3", "clock_source")
+    end
     local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, Dyna = Dyna, open = function(den) return Raid.openDen(den) end,
-      clockSource = function() return modOption("national_dex_gen3", "clock_source") end })
+      clockSource = clockSource })
     if ok and type(dn) == "table" then
       Dens = dn
       Dens.registerSprites()
