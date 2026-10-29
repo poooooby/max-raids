@@ -28,9 +28,17 @@ return function(mod, deps)
   -- an animation frame lasts AnimationSpeed of these (the pack's metrics, Essentials' units)
   Rd.ANIM_UNIT_S = 1 / 20
 
+  -- an engine module (found ones kept: a mod's require makes garbage each call, and some are
+  -- looked up while drawing)
+  local engineMods = {}
   local function engine(name)
-    local ok, m = pcall(require, name)
-    return ok and type(m) == "table" and m or nil
+    local m = engineMods[name]
+    if m then return m end
+    local ok
+    ok, m = pcall(require, name)
+    m = ok and type(m) == "table" and m or nil
+    engineMods[name] = m
+    return m
   end
   local Pokemon = engine("src.core.game3.pokemon")
   local Runtime = engine("src.core.game3.runtime")
@@ -298,11 +306,15 @@ return function(mod, deps)
     info.level = tonumber(mon.level) or 1
     info.maxHp = tonumber(mon.maxHp) or 0
     info.hp = m.b and floor((m.b.dispHp or 0) + 0.5) or (tonumber(mon.hp) or 0)
-    info.exp = 0
-    if Summary and Summary.expProgress then
-      local okG, gr = pcall(function() return Pokemon.growthRate(Pokemon.speciesOf(mon)) end)
-      local ok, e = pcall(Summary.expProgress, mon, okG and gr or nil)
-      if ok and type(e) == "table" then info.exp = tonumber(e.progressPercent) or 0 end
+    -- (the EXP bar, worked out once: a raid's copies gain none, and its look-up made a table and a
+    -- closure every frame)
+    if info.exp == nil then
+      info.exp = 0
+      if Summary and Summary.expProgress then
+        local okG, gr = pcall(function() return Pokemon.growthRate(Pokemon.speciesOf(mon)) end)
+        local ok, e = pcall(Summary.expProgress, mon, okG and gr or nil)
+        if ok and type(e) == "table" then info.exp = tonumber(e.progressPercent) or 0 end
+      end
     end
   end
   Rd.memberInfo = memberInfo
@@ -310,13 +322,16 @@ return function(mod, deps)
   -- gen3-hd-sprites hands out a 64 x 64 stand-in cropped for the battle's own framing, and tags it
   -- with the whole frame at its full resolution: { texture, quad, scale (the frame's px to the
   -- stand-in's) } (its exports.tagOf), drawn here instead - the stand-in cut big Pokemon off
+  -- (its tagOf found once: the look-up and a closure each call were garbage every frame)
+  local hdTag = nil
   local function hdTagOf(image)
-    local ok, spec = pcall(function()
-      local lib = mod.find and mod:find("gen3-hd-sprites")
-      local ex = lib and lib.exports
-      if not (type(ex) == "table" and type(ex.tagOf) == "function") then return nil end
-      return ex.tagOf(image)
-    end)
+    if hdTag == nil then
+      local okL, lib = pcall(function() return mod.find and mod:find("gen3-hd-sprites") end)
+      local ex = okL and lib and lib.exports
+      hdTag = type(ex) == "table" and type(ex.tagOf) == "function" and ex.tagOf or false
+    end
+    if not hdTag then return nil end
+    local ok, spec = pcall(hdTag, image)
     if ok and type(spec) == "table" and spec.texture then return spec end
     return nil
   end
@@ -588,9 +603,11 @@ return function(mod, deps)
   end
 
   -- from the den screen into the raid with the slots' Pokemon (slot order): the screen fades to
-  -- black (OUT), holds (BLACK), the raid begins and fades in (IN) with its intro held until it has,
-  -- so the camera's pull-back starts on a clear screen
-  Rd.DEN_FADE = { OUT = 0.45, BLACK = 0.25, IN = 0.7 }
+  -- black (OUT), holds (BLACK, and longer until the battlefield and the effects are made), the raid
+  -- begins and fades in (IN) with its intro held until it has, so the camera's pull-back starts on a
+  -- clear screen. In the black the making runs a step a frame for up to WARM_S of each, so a slow
+  -- device's frames stay short; the sounds warm with WARM_SE_S more.
+  Rd.DEN_FADE = { OUT = 0.45, BLACK = 0.25, IN = 0.7, WARM_S = 0.012, WARM_SE_S = 0.008 }
   -- ------- the Dynamax Crystal (National Dex's item): at any den, a legendary Pokemon's raid instead
   -- (the den itself left as it is); spent only when the raid starts
   local function crystalId()
@@ -642,16 +659,25 @@ return function(mod, deps)
     r.denMenu, r.denParty = nil, nil
     return true
   end
-  -- (each den-screen frame: once the screen is black the battlefield is made, all at once - its
-  -- textures, meshes and the sky's shaders, unseen; into the raid once the black has held)
+  -- (each den-screen frame: once the screen is black the battlefield is made a step at a time - its
+  -- textures, meshes and the sky's shaders -, then the effects' shaders, unseen; into the raid once
+  -- the black has held and all is made)
   local function stepStarting()
     local st = r.starting
     if not st then return end
     if not st.made and r.t - st.t0 >= Rd.DEN_FADE.OUT then
-      st.made = true
-      if Scene and Scene.warmAll then pcall(Scene.warmAll) end
+      local t0 = love.timer.getTime()
+      repeat
+        local ok, done = true, true
+        if Scene and Scene.warm then ok, done = pcall(Scene.warm) end
+        if not ok or done then
+          if Fx and Fx.warm then pcall(Fx.warm) end
+          if Rd.prepIcons then pcall(Rd.prepIcons) end
+          st.made = true
+        end
+      until st.made or love.timer.getTime() - t0 >= Rd.DEN_FADE.WARM_S
     end
-    if r.t - st.t0 < Rd.DEN_FADE.OUT + Rd.DEN_FADE.BLACK then return end
+    if not st.made or r.t - st.t0 < Rd.DEN_FADE.OUT + Rd.DEN_FADE.BLACK then return end
     r.starting = nil
     begin(st.members)
     r.fadeIn = Rd.DEN_FADE.IN
@@ -797,6 +823,7 @@ return function(mod, deps)
       end
     end
     if r and r.phase == "throw" and Rd.stepThrow then Rd.stepThrow() end
+    if r and r.cardPrep and Rd.stepCardPrep then Rd.stepCardPrep() end
     if r and Rd.stepMove then Rd.stepMove() end
     if r and Fx then Fx.update(r.t) end
     if not r then return end
@@ -1226,12 +1253,16 @@ return function(mod, deps)
   Rd.DMAX = { CHARGE_S = 0.9, GROW_S = 0.8 }
 
   -- a battler's place in the den (src/fx.lua's anchor): its middle, height and ground, in metres
-  local function placeOf(b)
+  -- (into: a table of the caller's to fill - reused each frame by Rd.teamState -, else a new one,
+  -- which an effect may keep)
+  local function placeOf(b, into)
     if not (Scene and Scene.PAD) then return nil end
     if b.boss then
       local P = Scene.PAD
       local h = Scene.MEMBER_H * (Rd.sizeOf(r.key) or 3.5)
-      return { X = P.x, Y = P.h + h * 0.5, Z = P.z, h = h, foot = P.h, boss = true }
+      local A = into or {}
+      A.X, A.Y, A.Z, A.h, A.foot, A.boss, A.i = P.x, P.h + h * 0.5, P.z, h, P.h, true, nil
+      return A
     end
     local i = memberIndex(b)
     local m = i and Scene.MEMBERS[i] and (Scene.memberPos and Scene.memberPos(i) or Scene.MEMBERS[i])
@@ -1239,7 +1270,9 @@ return function(mod, deps)
     -- (a Dynamaxed member is that much taller)
     local g = r.members[i] and r.members[i].giant or 0
     local h = Scene.MEMBER_H * (1 + ((Scene.GIANT or 1) - 1) * g)
-    return { X = m.x, Y = h * 0.5, Z = m.z, h = h, foot = 0, i = i }
+    local A = into or {}
+    A.X, A.Y, A.Z, A.h, A.foot, A.boss, A.i = m.x, h * 0.5, m.z, h, 0, nil, i
+    return A
   end
   Rd.placeOf = placeOf
 
@@ -1248,6 +1281,13 @@ return function(mod, deps)
   -- the catch and the rewards
   local teamState = { team = {}, sides = nil, turn = {}, protect = {}, wishes = {} }
   local turnRows = {}
+  -- (the places and rows filled each frame, reused: a table each was garbage every frame)
+  local teamPlaces, bossPlace, protectRows, wishRows = {}, {}, {}, {}
+  local function pooled(pool, k)
+    local t = pool[k]
+    if not t then t = {}; pool[k] = t end
+    return t
+  end
   function Rd.teamState()
     if not r or r.phase == "rewards" or r.phase == "catch" or r.phase == "throw" or r.phase == "after" or r.throw then return nil end
     local T = teamState
@@ -1256,11 +1296,11 @@ return function(mod, deps)
     for k = #T.wishes, 1, -1 do T.wishes[k] = nil end
     for i, m in ipairs(r.members or {}) do
       if m.b and not (m.faintT and not m.backT) then
-        local A = placeOf(m.b)
+        local A = placeOf(m.b, pooled(teamPlaces, i))
         if A then T.team[#T.team + 1] = A end
       end
     end
-    T.boss = r.boss and not r.bossGone and placeOf(r.boss) or nil
+    T.boss = r.boss and not r.bossGone and placeOf(r.boss, bossPlace) or nil
     r.sideFx = r.sideFx or { team = {}, boss = {}, field = {} }
     r.sideFx.field = r.sideFx.field or {}
     T.sides = r.sideFx
@@ -1271,19 +1311,25 @@ return function(mod, deps)
       local row = turnRows[k] or {}
       turnRows[k] = row
       row.what, row.side, row.t0 = g.what, g.side, g.t0
-      row.A = g.who and placeOf(g.who) or nil
+      row.A = g.who and placeOf(g.who, pooled(row, "place")) or nil
       T.turn[#T.turn + 1] = row
     end
     for who, p in pairs(r.protectFx or {}) do
-      local A = placeOf(who)
+      local row = pooled(protectRows, #T.protect + 1)
+      local A = placeOf(who, pooled(row, "place"))
       if A and (who.boss or memberIndex(who)) then
-        T.protect[#T.protect + 1] = { A = A, t0 = p.t0, max = p.max, hitT = p.hitT }
+        row.A, row.t0, row.max, row.hitT = A, p.t0, p.max, p.hitT
+        T.protect[#T.protect + 1] = row
       end
     end
     for i, t0 in pairs(r.wishFx or {}) do
       local m = r.members[i]
-      local A = m and m.b and placeOf(m.b)
-      if A then T.wishes[#T.wishes + 1] = { A = A, t0 = t0 } end
+      local row = pooled(wishRows, #T.wishes + 1)
+      local A = m and m.b and placeOf(m.b, pooled(row, "place"))
+      if A then
+        row.A, row.t0 = A, t0
+        T.wishes[#T.wishes + 1] = row
+      end
     end
     return T
   end
@@ -1310,8 +1356,10 @@ return function(mod, deps)
   -- Keeping one is a job on the same warm-up, its copy made a piece a frame (the engine's 2 ms
   -- budget): made at once it took 5-22 ms of a frame with the JIT off.
   -- EXTRA_S: the warm-up's time a frame added to the engine's own (Warm.BUDGET, 2 ms) in those
-  -- phases, so the list is through by the first turn.
-  Rd.WARM = { PHASES = { den = true, intro = true, command = true }, EXTRA_S = 0.004 }
+  -- phases, so the list is through by the first turn; none in a frame after one over SLOW_FRAME_S,
+  -- nor for REST_S after an extra that ran over twice its time (a piece of a bake took longer).
+  Rd.WARM = { PHASES = { den = true, intro = true, command = true }, EXTRA_S = 0.004,
+    SLOW_FRAME_S = 1 / 50, REST_S = 0.5, DROP_FRAMES = 22050 }
   local kept = {}   -- the SE's number -> { src, mono }
   local ModAudio = engine("src.core.game3.mod_audio")
 
@@ -1320,6 +1368,26 @@ return function(mod, deps)
     local e = kept[num]
     if e and e.mono == (Audio._mono and true or false) then return e.src end
     return nil
+  end
+
+  -- a kept sound's samples let go from the engine's cache (Lua number arrays, ~0.7 MB a second of
+  -- sound, which every collection walks; the cache holds 34 s and a raid fills it): only one of
+  -- DROP_FRAMES or more - a menu's tick stays, so the field does not bake it again -, and the
+  -- engine's own cached Sources made from them with it (theirs hold the arrays too). The engine
+  -- bakes it again if it plays it itself.
+  local function dropRaw(num, hit)
+    if not (hit and (hit.frames or 0) >= Rd.WARM.DROP_FRAMES and Audio._seRaw and Audio._seRaw[num] == hit) then return end
+    Audio._seRaw[num] = nil
+    Audio._seRawFrames = max(0, (Audio._seRawFrames or 0) - (hit.frames or 0))
+    local cache = Audio._seSrcCache
+    if cache then
+      for k, e in pairs(cache) do
+        if e.rawL == hit.rawL then
+          cache[k] = nil
+          if Audio._seSrcCount then Audio._seSrcCount = max(0, Audio._seSrcCount - 1) end
+        end
+      end
+    end
   end
 
   -- the sound kept for an SE's number, made from the engine's bake while it still holds it (run as
@@ -1335,6 +1403,7 @@ return function(mod, deps)
     local okS, src = pcall(love.audio.newSource, sd, "static")
     if not (okS and src) then return nil end
     kept[num] = { src = src, mono = mono }
+    dropRaw(num, hit)
     return src
   end
 
@@ -1461,7 +1530,7 @@ return function(mod, deps)
       for _, mv in ipairs(m.b and m.b.maxMoves or {}) do moveSounds(mv) end
     end
     local C = Sounds.CATCH
-    for _, k in ipairs({ "throw", "open", "suck", "close", "land", "wobble", "click", "burst" }) do add(C[k]) end
+    for _, k in ipairs({ "throw", "open", "suck", "close", "land", "bounce", "wobble", "click", "burst", "gone" }) do add(C[k]) end
     -- (the caught fanfare, where the version plays it as a sound: Emerald's; a fanfare proper is
     -- baked on the engine's own thread)
     add((caughtSongs()))
@@ -1488,7 +1557,21 @@ return function(mod, deps)
       w.done = nil
     end
     if w.done then return end
-    if Warm.step and Rd.WARM.EXTRA_S > 0 then Warm.step(Rd.WARM.EXTRA_S) end
+    -- (the extra: more while the screen is black between the den screen and the raid; none while
+    -- frames already run long or the last extra ran far over - a slow device's frames kept short)
+    local extra = Rd.WARM.EXTRA_S
+    if r.starting and r.starting.t0 and r.t - r.starting.t0 >= Rd.DEN_FADE.OUT then
+      extra = Rd.DEN_FADE.WARM_SE_S
+    elseif (love.timer.getDelta() or 0) > Rd.WARM.SLOW_FRAME_S or (w.overUntil and r.t < w.overUntil)
+      or (r.fadeIn or 0) > 0 then
+      -- (nor while the raid fades in: its first frames are the heaviest)
+      extra = 0
+    end
+    if Warm.step and extra > 0 then
+      local t0 = love.timer.getTime()
+      Warm.step(extra)
+      if love.timer.getTime() - t0 > extra * 2 then w.overUntil = r.t + Rd.WARM.REST_S end
+    end
     if w.busy then
       if Warm.pending(w.busy.key) then return end
       local num, keeping = w.busy.num, w.busy.keeping
@@ -2038,6 +2121,11 @@ return function(mod, deps)
       bl.rgb = BALL_RGB[bl.key]
     end
     r.cmd = { menu = "catchq", cursor = 1, balls = balls, ball = 1, chosen = {}, moveList = {} }
+    -- (the rewards given now - they hang on nothing in the catch - so the card's fonts and the
+    -- items' pictures are made during it, a step a frame: made as the card came up they took ~90 ms
+    -- of its first frame on a slow device)
+    local okG, given = pcall(Rewards.give, r, r.rng)
+    if okG then r.given, r.cardPrep = given, 0 else mod.log:warn("raid rewards failed: %s", tostring(given)) end
     if Scene then Scene.shot("field", 0.8) end
     Rd.music("capture")
     if #balls == 0 then r.cmd.cursor = 2 end
@@ -2057,6 +2145,14 @@ return function(mod, deps)
       return true
     end
     return Rd.startRewards()
+  end
+  -- the catch's words ("You don't have any Poke Balls...") put away: back to the choice, on Don't
+  -- Catch - by A, B or a tap anywhere, on either screen (the choice is hidden under them)
+  function Rd.catchSayDone()
+    if not (r and r.phase == "catch" and r.say) then return false end
+    r.say = nil
+    if r.cmd and r.cmd.menu == "catchq" then r.cmd.cursor = 2 end
+    return true
   end
   function Rd.catchBack()
     if r and r.phase == "catch" and r.cmd.menu == "ballbox" then r.cmd.menu = "catchq"; return true end
@@ -2191,6 +2287,10 @@ return function(mod, deps)
   function Rd.catchPointer(ev)
     local c = r and r.cmd
     if not (c and r.phase == "catch") then return false end
+    if r.say then
+      if ev.phase == "released" then Rd.catchSayDone() end
+      return true
+    end
     local W = catchWhere
     local function hit(t) return t.w and ev.x >= t.x and ev.x <= t.x + t.w and ev.y >= t.y and ev.y <= t.y + t.h end
     if c.menu == "catchq" then
@@ -2519,8 +2619,10 @@ return function(mod, deps)
     r.phase = "rewards"
     r.say = nil
     r.shrink = r.throw and r.throw.caught and 0 or r.shrink
-    local ok, out = pcall(Rewards.give, r, r.rng)
+    local ok, out = true, r.given
+    if not out then ok, out = pcall(Rewards.give, r, r.rng) end
     if not ok then mod.log:warn("raid rewards failed: %s", tostring(out)); out = { items = {}, team = {} } end
+    r.given, r.cardPrep = nil, nil
     r.rewards = out
     r.rewardsT = r.t
     return true
@@ -2723,6 +2825,8 @@ return function(mod, deps)
       elseif moves and (input:wasPressed("select") or input:wasPressed("r")) then Rd.choose("dynamax")
       elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
       elseif input:wasPressed("b") then Rd.back() end
+    elseif r.phase == "catch" and r.say then
+      if input:wasPressed("a") or input:wasPressed("b") then Rd.catchSayDone() end
     elseif r.phase == "catch" then
       if deps.padOnSecond() and (input:wasPressed("up") or input:wasPressed("down") or input:wasPressed("left")
         or input:wasPressed("right")) then r.padHi = true end
@@ -2812,7 +2916,8 @@ return function(mod, deps)
       return true
     end
     if r and r.phase == "catch" then
-      if deps.padOnSecond() then return false end
+      -- (the pad on the second screen: the main screen's taps only put the catch's words away)
+      if deps.padOnSecond() and not r.say then return false end
       return Rd.catchPointer(ev)
     end
     if not (r and Pad) or deps.padOnSecond() or r.phase ~= "command" or r.say or r.summary then return false end
@@ -2845,6 +2950,8 @@ return function(mod, deps)
     elseif (r.phase == "after" or r.phase == "leaveq") and r.ask and r.ask.kind == "yesno" and slot then
       r.cmd.cursor = slot
       if released then Rd.answer(slot == 1) end
+    elseif r.phase == "catch" and r.say then
+      if released then Rd.catchSayDone() end
     elseif r.phase == "catch" and r.cmd and not r.say then
       -- the catch on the second screen: Catch / Don't Catch, then the ball box
       if r.cmd.menu == "catchq" then
@@ -3125,7 +3232,7 @@ return function(mod, deps)
     end
     -- (the UI in its landscape box: the top's at the top, the foot's at the foot - Rd.uiBox)
     local uh, band, ch, card = Rd.uiBox(w, h)
-    r.uiBand, r.uiCard = band, card
+    r.uiBand, r.uiCard, r.cardH = band, card, ch
     drawHud(G, w, uh, "top")
     shifted(G, band, function() drawHud(G, w, uh, "say") end)
     -- the commands: the order down the top left, the one choosing in the lower left, the pad (only
@@ -3227,6 +3334,7 @@ return function(mod, deps)
 
   Rd.CARD = { ROWS = 6, ROW_H = 0.081, LIST_X = 0.53, LIST_W = 0.4, LIST_Y = 0.3, IN_S = 0.35, STAR_S = 0.12 }
   local cardWhere = { rows = {}, next = {} }
+  local cardRowBoxes = {}
   Rd.cardWhere = cardWhere
 
   -- an item's bag icon (24 px), size px across: the FireRed bag's pictures, else Emerald's, else a dot
@@ -3252,6 +3360,40 @@ return function(mod, deps)
     G.circle("fill", x + size / 2, y + size / 2, size * 0.38, 16)
   end
   Rd.itemIcon = itemIcon
+
+  -- the bag pictures the raid's menus show, loaded ahead (in the black before the raid): the balls
+  -- the catch offers and the pouch's items (the first draw of the catch's choice loaded them, 37 ms
+  -- on the desktop with the JIT off)
+  function Rd.prepIcons()
+    local BC = engine("src.ui.game3.bag_chrome")
+    if not (BC and BC.iconImage) then return end
+    for _, bl in ipairs(Rewards and Rewards.balls and Rewards.balls() or {}) do pcall(BC.iconImage, bl.item) end
+    for _, id in ipairs(Rd.POUCH_ORDER or {}) do
+      local item = pouchItemId(id)
+      if item then pcall(BC.iconImage, item) end
+    end
+  end
+
+  -- the rewards card made ahead during the catch (r.given, r.cardPrep a step): its two fonts, then
+  -- each item's bag picture, one a frame
+  function Rd.stepCardPrep()
+    local i = r.cardPrep
+    if i == 0 then
+      local h = r.cardH or love.graphics.getHeight()
+      font(h * 0.042)
+      font(h * 0.03)
+    else
+      local it = r.given and r.given.items and r.given.items[i]
+      if not it then r.cardPrep = nil; return end
+      if not it.money then
+        local BC = engine("src.ui.game3.bag_chrome")
+        if BC and BC.iconImage then pcall(BC.iconImage, it.id) end
+        local RB = engine("src.ui.game3.rse.bag_chrome")
+        if RB and RB.manifest then pcall(RB.manifest) end
+      end
+    end
+    r.cardPrep = i + 1
+  end
   if Pad then Pad.itemIcon, Pad.drawPixel = itemIcon, drawPixel end
 
   local function chevron(G, x, y, s)
@@ -3362,7 +3504,11 @@ return function(mod, deps)
       if not it.money then G.print("\195\151", lx + lw * 0.78, cy - fR:getHeight() / 2) end
       G.printf(tostring(it.n or 1), lx + lw * (it.money and 0.6 or 0.8), cy - fR:getHeight() / 2,
         lw * (it.money and 0.36 or 0.16), "right")
-      cardWhere.rows[j + 1] = { x = lx, y = ry, w = lw, h = rh, i = i }
+      -- (each row's hit box reused: a table each a frame was garbage)
+      local hb = cardRowBoxes[j + 1]
+      if not hb then hb = {}; cardRowBoxes[j + 1] = hb end
+      hb.x, hb.y, hb.w, hb.h, hb.i = lx, ry, lw, rh, i
+      cardWhere.rows[j + 1] = hb
     end
     -- the scroll bar
     if n > rows then

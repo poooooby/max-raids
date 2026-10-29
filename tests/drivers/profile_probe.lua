@@ -111,6 +111,16 @@ local function body(game, log)
   end
   for _, k in ipairs({ "newSoundData", "newDecoder" }) do zone(love.sound, k, "love.sound." .. k) end
   zone(love.audio, "newSource", "love.audio.newSource")
+  zone(R, "moveList", "Rd.moveList")
+  zone(R, "mayDynamax", "Rd.mayDynamax")
+  local okP, PokemonM = pcall(require, "src.core.game3.pokemon")
+  if okP and type(PokemonM) == "table" then
+    for _, k in ipairs({ "monBackPic", "monIcon", "frontPic", "displayName" }) do zone(PokemonM, k, "Pokemon." .. k) end
+  end
+  local okS, SD = pcall(require, "src.core.game3.summary_data")
+  if okS and type(SD) == "table" then
+    for _, k in ipairs({ "gender", "expProgress" }) do zone(SD, k, "SummaryData." .. k) end
+  end
   local okA, Audio = pcall(require, "src.core.game3.audio")
   if okA and type(Audio) == "table" then
     for _, k in ipairs({ "playSe", "playCry", "prewarmSe", "_buildSeSoundData", "fadeOutBgm", "fadeOutAndPlay", "playBgm", "waitSe" }) do
@@ -198,6 +208,13 @@ local function body(game, log)
         local miss = {}
         for _, name in ipairs(w.list or {}) do if not R.keptSound(name) then miss[#miss + 1] = tostring(name) end end
         log("not kept:", table.concat(miss, " "))
+      end
+      do
+        local okA2, AudioM = pcall(require, "src.core.game3.audio")
+        local n, big = 0, 0
+        for _, e in pairs(okA2 and AudioM._seRaw or {}) do n = n + 1; if (e.frames or 0) >= 22050 then big = big + 1 end end
+        log(("sound samples cached: %d sounds (%d of 0.5 s or more), %.1f s of sound; heap %.1f MB"):format(n, big,
+          (okA2 and AudioM._seRawFrames or 0) / 44100, collectgarbage("count") / 1024))
       end
       log("turn", turn, w and ("sounds warmed %d of %d, kept %d%s"):format(w.i or 0, #(w.list or {}), w.kept or 0, w.done and ", done" or "") or "")
     elseif cur.phase ~= "command" then

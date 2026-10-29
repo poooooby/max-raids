@@ -204,6 +204,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     return shaders[name]
   end
   Fx.shader = shader
+  -- the shaders and textures made ahead (the raid calls it while the screen is black: made at the
+  -- first effect they took 120 ms of a frame on a slow device)
+  function Fx.warm() shader("fire"); return true end
 
   -- real fire in a rect (x, y top-left, w, h); false when the shader is out
   local function fireRect(G2, x, y, w, h, now, seed, alpha, blaze)

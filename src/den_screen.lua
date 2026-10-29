@@ -16,9 +16,16 @@ return function(mod, deps)
   local floor, max, min = math.floor, math.max, math.min
   local Den = {}
 
+  -- an engine module (found ones kept: a mod's require makes garbage each call)
+  local engineMods = {}
   local function engine(name)
-    local ok, m = pcall(require, name)
-    return ok and type(m) == "table" and m or nil
+    local m = engineMods[name]
+    if m then return m end
+    local ok
+    ok, m = pcall(require, name)
+    m = ok and type(m) == "table" and m or nil
+    engineMods[name] = m
+    return m
   end
   local Pokemon = engine("src.core.game3.pokemon")
   local Runtime = engine("src.core.game3.runtime")

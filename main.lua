@@ -253,6 +253,9 @@ return function(mod)
   if not (okFP and type(FP) == "table" and FP.push and FP.pop) then FP = nil end
   local perfOn = false
   local slowText, slowAt = "", -1
+  -- (the Lua heap at the raid's draw, this frame and the last: a fall between them is a collection
+  -- finished in the frame, "gc" on its label)
+  local heapNow, heapBefore = 0, 0
   if FP then
     local function timed(tbl, key, name)
       local f = type(tbl) == "table" and tbl[key]
@@ -280,6 +283,7 @@ return function(mod)
     FP.context = function()
       local base = engineLabel and engineLabel() or nil
       local raid = Raid.active() and Raid.perfLabel and Raid.perfLabel() or nil
+      if raid and heapNow < heapBefore - 512 then raid = raid .. " gc" end
       if raid then return base and (base .. " " .. raid) or raid end
       return base
     end
@@ -349,6 +353,7 @@ return function(mod)
       if not ok then mod.log:warn("raid draw failed: %s", tostring(err)) end
     end
     if FP and FP.enabled then
+      heapBefore, heapNow = heapNow, collectgarbage("count")
       local G = love.graphics
       local w = type(viewport) == "table" and viewport.width or G.getWidth()
       local h = type(viewport) == "table" and viewport.height or G.getHeight()

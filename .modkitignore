@@ -53,3 +53,4 @@ tests/lib/AppleCake/thread.lua
 tests/lib/AppleCake/threadConfig.lua
 tests/lib/AppleCake/LICENSE
 tests/drivers/perf_overlay_probe.lua
+tests/drivers/no_balls_probe.lua

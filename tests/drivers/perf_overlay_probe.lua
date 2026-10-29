@@ -71,7 +71,18 @@ local function body(game, log)
     U.wait(2)
   end
   waitFor(function() local c = R.current(); return not c or (c.phase == "command" and not c.say) end, 30000)
+  -- (a slow frame made for certain: one raid update held 25 ms - the raid itself may make none now)
+  local realUpdate, held = R.update, false
+  R.update = function(...)
+    if not held then
+      held = true
+      local t0 = love.timer.getTime()
+      while love.timer.getTime() - t0 < 0.025 do end
+    end
+    return realUpdate(...)
+  end
   U.wait(40)
+  R.update = realUpdate
   local spikes = FP.spikeList()
   local raidSpike = false
   for i, sp in ipairs(spikes) do

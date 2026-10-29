@@ -11,9 +11,16 @@
 --   Pick.isOpen() ; Pick.state() (drivers) ; Pick.press(key) (drivers: a key through the filter)
 
 return function(mod)
+  -- an engine module (found ones kept: a mod's require makes garbage each call)
+  local engineMods = {}
   local function engine(name)
-    local ok, m = pcall(require, name)
-    return ok and type(m) == "table" and m or nil
+    local m = engineMods[name]
+    if m then return m end
+    local ok
+    ok, m = pcall(require, name)
+    m = ok and type(m) == "table" and m or nil
+    engineMods[name] = m
+    return m
   end
   local Box = engine("src.ui.game3.box_storage_ui")
   local Storage = engine("src.core.game3.storage")

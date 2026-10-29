@@ -18,9 +18,16 @@ return function(mod, deps)
   local Dy = {}
   Dy.PREFIX = "DYNA:"
 
+  -- an engine module (found ones kept: a mod's require makes garbage each call)
+  local engineMods = {}
   local function engine(name)
-    local ok, m = pcall(require, name)
-    return ok and type(m) == "table" and m or nil
+    local m = engineMods[name]
+    if m then return m end
+    local ok
+    ok, m = pcall(require, name)
+    m = ok and type(m) == "table" and m or nil
+    engineMods[name] = m
+    return m
   end
 
   -- "BULBASAUR" / "Mr. Mime" -> "Bulbasaur" / "Mr. Mime"
