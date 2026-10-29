@@ -184,6 +184,9 @@ you won: Exp. Candies, TMs, berries and more.*
   battle theme in the raid (a legendary raid its own, Eternatus its own), the capture theme while you
   catch. Each loops seamlessly and follows the game's music volume.
 - 🔊 **The game's own sounds:** moves, hits, barriers and the catch use Gen 3's sound effects.
+- 🐢 **Smooth on slower devices:** the battlefield, the move effects, the sounds and the catch's
+  pictures are loaded while the screen is black after Start, so a raid plays without stutters on
+  older phones and handhelds.
 
 ## ⚙️ Options
 
