@@ -44,3 +44,12 @@ assets/gdenintro.gif
 assets/gdenui.png
 assets/gdenatflow.gif
 assets/grewards.png
+tests/drivers/woh_probe.lua
+tests/drivers/profile_probe.lua
+tests/lib/AppleCake/AppleCake.lua
+tests/lib/AppleCake/init.lua
+tests/lib/AppleCake/outputStream.lua
+tests/lib/AppleCake/thread.lua
+tests/lib/AppleCake/threadConfig.lua
+tests/lib/AppleCake/LICENSE
+tests/drivers/perf_overlay_probe.lua

@@ -192,6 +192,7 @@ you won: Exp. Candies, TMs, berries and more.*
 | KANTO GEAR | ON (default): the battle menu follows Kanto Gear's Display Mode (Separate Screens puts it on the second screen; without Kanto Gear, a second screen is used when there is one). OFF: BATTLE PAD decides. |
 | BATTLE PAD | Shown with KANTO GEAR off. MAIN SCREEN: the battle menu over the den. SECOND SCREEN: the menu on your device's second display. |
 | RAID DENS | ON (default): dens appear on the routes. OFF: none appear. |
+| PERFORMANCE | OFF (default). ON: while you're in a den, frame times show on screen, with the raid's parts and its slowest moments at the top right. For reporting slowdowns: a screenshot during a raid shows what was slow. |
 
 ## 🎮 Controls
 

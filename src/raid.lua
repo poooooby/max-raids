@@ -521,8 +521,7 @@ return function(mod, deps)
     r.phase, r.t, r.members, r.cues, r.hud = "intro", 0, members, {}, 0
     r.say = nil
     setupBattle(members)
-    -- (the sounds to bake again from the four who went in; those already baked are passed over)
-    r.warm = nil
+    -- (the sounds to bake ahead: the list grows by the four who went in, Rd.stepWarm)
     if Scene then
       Scene.setTime(0)
       Scene.shot("close", 0)
@@ -1304,16 +1303,27 @@ return function(mod, deps)
   -- (~1 MB of Lua heap a second of sound) often set off the engine's full collection - 50-110 ms lost
   -- at the blow it lands with. The engine keeps those samples (to rebuild a sound at another pan or
   -- volume) in a cache of 34 s, least recently used out, which one raid's sounds overrun. So the
-  -- raid's sounds are baked ahead, one a frame through the engine's warm-up (Audio.prewarmSe), the
-  -- likeliest first, while little moves - the den screen and the command menus (the intro only when
-  -- there was no den screen) - and each is kept here as a sound of its own (16-bit, outside the Lua
-  -- heap), played through the engine's book-keeping as its fanfares are (its player slot, stopSe,
-  -- isSePlaying, waitSe, suspension).
-  Rd.WARM = { PHASES = { den = true, command = true } }
+  -- raid's sounds are baked ahead, one at a time through the engine's warm-up (Audio.prewarmSe), the
+  -- likeliest first, while little moves - the den screen, the intro and the command menus - and each
+  -- is kept here as a sound of its own (16-bit, outside the Lua heap), played through the engine's
+  -- book-keeping as its fanfares are (its player slot, stopSe, isSePlaying, waitSe, suspension).
+  -- Keeping one is a job on the same warm-up, its copy made a piece a frame (the engine's 2 ms
+  -- budget): made at once it took 5-22 ms of a frame with the JIT off.
+  -- EXTRA_S: the warm-up's time a frame added to the engine's own (Warm.BUDGET, 2 ms) in those
+  -- phases, so the list is through by the first turn.
+  Rd.WARM = { PHASES = { den = true, intro = true, command = true }, EXTRA_S = 0.004 }
   local kept = {}   -- the SE's number -> { src, mono }
   local ModAudio = engine("src.core.game3.mod_audio")
 
-  -- the sound kept for an SE's number, made from the engine's bake while it still holds it
+  -- the sound kept for an SE's number, if it is
+  local function keptNow(num)
+    local e = kept[num]
+    if e and e.mono == (Audio._mono and true or false) then return e.src end
+    return nil
+  end
+
+  -- the sound kept for an SE's number, made from the engine's bake while it still holds it (run as
+  -- a warm-up job: _buildSeSoundData yields every 4096 samples)
   local function keptSource(num)
     local mono = Audio._mono and true or false
     local e = kept[num]
@@ -1328,12 +1338,20 @@ return function(mod, deps)
     return src
   end
 
+  -- a sound's keeping queued on the warm-up; its job's key (nil: kept already, or no warm-up)
+  local function keepLater(num)
+    if keptNow(num) or not (Warm and Warm.add) then return nil end
+    local key = "max_raids:keep:" .. tostring(num)
+    Warm.add(key, function() keptSource(num) end, 1)
+    return key
+  end
+
   -- a kept sound played as the engine plays an SE: the one on its player stopped, tracked, at the
   -- game's effects volume
   local function playKept(num)
     -- (a sound pack's own effect for it: the engine's player plays that)
     if ModAudio and ModAudio.sfxKey and ModAudio.sfxKey(num) then return false end
-    local src = keptSource(num)
+    local src = keptNow(num)
     if not src then return false end
     local info = Audio.songInfo and Audio.songInfo(num) or {}
     local mplay = tonumber(info.player) or 1
@@ -1369,18 +1387,32 @@ return function(mod, deps)
   function Rd.se(id)
     id = seName(id)
     if not (id and Audio and Audio.playSe) then return false end
+    if r then r.lastSe = id end
     local num = SeIds and SeIds.resolve and SeIds.resolve(id)
     if num and playKept(num) then return true end
     local ok, played = pcall(Audio.playSe, id)
-    if num then keptSource(num) end
+    if num then keepLater(num) end
     return ok and played
   end
 
-  -- the raid's sounds, the likeliest first: the boss's moves (and how they land), how a blow lands,
-  -- the battle's events, the four's moves, the catch
-  local function warmList()
-    if not Sounds then return {} end
-    local out, seen = {}, {}
+  -- the version's caught songs (the engine's battle profile, as its catch plays them): intro, song
+  local function caughtSongs()
+    local Profile = engine("src.core.game3.battle.profile")
+    local ok, prof = pcall(function() return Profile.get(nil) end)
+    local snd = ok and prof and prof.sounds
+    if not (snd and Audio and Audio.resolveSong) then return nil, nil end
+    return Audio.resolveSong(snd.caughtIntro), Audio.resolveSong(snd.caught)
+  end
+
+  -- the raid's sounds, the likeliest first - the turn's: the four's moves (on the den screen those in
+  -- its slots, then the rest of the party: the four can still change), the boss's moves (and how
+  -- they land), how a blow lands, the battle's events (statuses, G-Max fields); then the four's Max Moves, the catch (its
+  -- fanfare too), Run's gust. Into `w` (its list and seen) when given: the list grown once the four
+  -- fight (their Max Moves).
+  local function warmList(w)
+    w = w or { list = {}, seen = {} }
+    if not Sounds then return w end
+    local out, seen = w.list, w.seen
     local function add(id)
       id = seName(id)
       if id and not seen[id] then seen[id] = true; out[#out + 1] = id end
@@ -1390,6 +1422,26 @@ return function(mod, deps)
       local spec = Rd.specOf(mv)
       add(Sounds.moveSe(spec, mv.typeName))
       add(Sounds.LAND[spec.shape or ""] or Sounds.LAND[spec[1] or ""])
+    end
+    local mons = {}
+    if r.members then
+      for _, m in ipairs(r.members) do mons[#mons + 1] = m end
+    else
+      for i = 1, 4 do if r.slots and r.slots[i] then mons[#mons + 1] = r.slots[i] end end
+      for _, p in ipairs(r.party or {}) do mons[#mons + 1] = p end
+    end
+    for _, m in ipairs(mons) do
+      if m.b and m.b.moves then
+        for _, mv in ipairs(m.b.moves) do moveSounds(mv) end
+      elseif m.mon and Battle and Battle.move then
+        for i = 1, 4 do
+          local ref = m.mon.moves and m.mon.moves[i]
+          if ref and ref ~= 0 then
+            local ok, mv = pcall(Battle.move, ref)
+            if ok then moveSounds(mv) end
+          end
+        end
+      end
     end
     local boss = r.boss or (Battle and Battle.boss and r.key and select(2, pcall(Battle.boss, r.key)))
     if type(boss) == "table" then
@@ -1401,69 +1453,84 @@ return function(mod, deps)
     for _, k in ipairs({ "shieldUp", "shieldHit", "shieldBreak", "faint", "back", "up", "down", "cheer",
       "dmaxOn", "dmaxGrow", "dmaxEnd", "guard" }) do add(E[k]) end
     for _, se in pairs(Sounds.SIDE or {}) do add(se) end
-    -- (Run's gust out of the den)
-    add(Sounds.SHAPE.wind)
-    -- the four: the battlers' moves once they fight; on the den screen the whole party's (the four
-    -- can still change)
-    local mons = {}
-    if r.members then
-      for _, m in ipairs(r.members) do mons[#mons + 1] = m end
-    elseif r.party then
-      for _, p in ipairs(r.party) do mons[#mons + 1] = p end
-      -- (and any taken from the PC)
-      for i = 1, 4 do if r.slots and r.slots[i] then mons[#mons + 1] = r.slots[i] end end
-    end
+    -- (a status taking hold, a G-Max field's turn)
+    for _, se in pairs(Sounds.STATUS or {}) do add(se) end
+    for _, se in pairs(Sounds.FIELD or {}) do add(se) end
+    -- (the four's Max forms, for a Dynamax)
     for _, m in ipairs(mons) do
-      if m.b and m.b.moves then
-        for _, mv in ipairs(m.b.moves) do moveSounds(mv) end
-        -- (and their Max forms, for a Dynamax)
-        for _, mv in ipairs(m.b.maxMoves or {}) do moveSounds(mv) end
-      elseif m.mon and Battle and Battle.move then
-        for i = 1, 4 do
-          local ref = m.mon.moves and m.mon.moves[i]
-          if ref and ref ~= 0 then
-            local ok, mv = pcall(Battle.move, ref)
-            if ok then moveSounds(mv) end
-          end
-        end
-      end
+      for _, mv in ipairs(m.b and m.b.maxMoves or {}) do moveSounds(mv) end
     end
     local C = Sounds.CATCH
     for _, k in ipairs({ "throw", "open", "suck", "close", "land", "wobble", "click", "burst" }) do add(C[k]) end
-    return out
+    -- (the caught fanfare, where the version plays it as a sound: Emerald's; a fanfare proper is
+    -- baked on the engine's own thread)
+    add((caughtSongs()))
+    -- (Run's gust out of the den)
+    add(Sounds.SHAPE.wind)
+    w.members = r.members ~= nil
+    return w
   end
 
-  -- each frame: the next sound baked (the engine's warm-up runs it in its next step) or the last one
-  -- kept - one a frame, the bake being a frame's worth of time
+  -- each frame: the next sound baked (the engine's warm-up runs it, a piece a frame), then kept (a
+  -- job on the same warm-up), one at a time
   function Rd.stepWarm()
     if not (r and Audio and Audio.prewarmSe and Warm and SeIds and SeIds.resolve) then return end
-    if not (Rd.WARM.PHASES[r.phase or ""] or (r.phase == "intro" and not r.den)) then return end
+    if not Rd.WARM.PHASES[r.phase or ""] then return end
     local w = r.warm
     if not w then
-      w = { list = warmList(), i = 0, kept = 0 }
+      w = warmList()
+      w.i, w.kept = 0, 0
       r.warm = w
+    elseif not w.members and r.members then
+      -- (the four fight now: their Max Moves added, and anything their battlers have that the den
+      -- screen's party did not)
+      warmList(w)
+      w.done = nil
     end
+    if w.done then return end
+    if Warm.step and Rd.WARM.EXTRA_S > 0 then Warm.step(Rd.WARM.EXTRA_S) end
     if w.busy then
       if Warm.pending(w.busy.key) then return end
-      if keptSource(w.busy.num) then w.kept = w.kept + 1 end
+      local num, keeping = w.busy.num, w.busy.keeping
       w.busy = nil
+      if keptNow(num) then w.kept = w.kept + 1; return end
+      -- (baked: its keeping next; a keeping that made nothing - a looped sound - is let go)
+      local key = not keeping and keepLater(num)
+      if key then w.busy = { key = key, num = num, keeping = true } end
       return
     end
     while w.i < #w.list do
       w.i = w.i + 1
       local num = SeIds.resolve(w.list[w.i])
-      if num and not kept[num] then
-        -- (still in the engine's cache: kept from it at once)
-        if keptSource(num) then w.kept = w.kept + 1; return end
+      if num and not keptNow(num) then
+        -- (still in the engine's cache: kept from it)
+        if Audio._seRaw and Audio._seRaw[num] then
+          local key = keepLater(num)
+          if key then w.busy = { key = key, num = num, keeping = true }; return end
+        end
         local ok, queued = pcall(Audio.prewarmSe, num, 1)
-        if ok and queued then
-          w.busy = { key = "se:" .. tostring(num), num = num }
+        -- (queued now, or still queued from before - a list begun again for a Dynamax Crystal)
+        local key = "se:" .. tostring(num)
+        if ok and (queued or Warm.pending(key)) then
+          w.busy = { key = key, num = num }
           return
         end
       end
     end
     w.done = true
   end
+  -- what the raid is doing, for the engine's slow-frame log (its F3 overlay): the phase, the event
+  -- playing and its move, the last sound
+  function Rd.perfLabel()
+    if not r then return nil end
+    local e = r.events and r.evI and r.events[r.evI]
+    local mv = e and e.move
+    return ("raid %s%s%s%s"):format(tostring(r.phase),
+      e and (" " .. tostring(e.kind)) or "",
+      type(mv) == "table" and mv.name and (" " .. tostring(mv.name)) or "",
+      r.lastSe and (" se " .. tostring(r.lastSe)) or "")
+  end
+
   -- (drivers) the sounds baked ahead: { list, i, kept, done }; Rd.keptSound(name) whether one is kept
   function Rd.warmState() return r and r.warm end
   function Rd.keptSound(name)
@@ -2150,12 +2217,10 @@ return function(mod, deps)
   -- caught: the version's own fanfare (the engine's battle profile, as its catch plays it), then its
   -- caught song under the words and the card
   function Rd.caughtFanfare()
-    local Profile = engine("src.core.game3.battle.profile")
-    local ok, prof = pcall(function() return Profile.get(nil) end)
-    local snd = ok and prof and prof.sounds
-    if not (snd and Audio and Audio.resolveSong) then return end
-    local intro, song = Audio.resolveSong(snd.caughtIntro), Audio.resolveSong(snd.caught)
-    if intro then pcall(Audio.playSe, intro) end
+    local intro, song = caughtSongs()
+    if not (intro or song) then return end
+    -- (kept ahead when the version plays it as a sound; else the engine's player)
+    if intro then Rd.se(intro) end
     -- the caught song once the fanfare has played (as the engine's catch: battle/catch_seq.lua); the
     -- battle's music has already faded out (at the click), so nothing comes back under either
     local raid = r

@@ -45,6 +45,9 @@ return function(mod)
       visible_if = { key = "kanto_gear", equals = false } },
     -- dens on the routes (off: none spawn; those already chosen stay saved)
     { key = "dens", label = "RAID DENS", type = "toggle", default = true },
+    -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
+    -- raid was doing, shown while a den is open: for reporting slowdowns
+    { key = "perf_overlay", label = "PERFORMANCE", type = "toggle", default = false },
   })
 
   local N = loadSibling(mod, "data/raid_rules.lua")
@@ -243,10 +246,90 @@ return function(mod)
     end
   end
 
+  -- ------- PERFORMANCE: the engine's frame profiler (its F3 overlay) shown, the raid's parts timed
+  -- as its sections (a push / pop that returns at once while it is off), the raid's doings added to
+  -- its slow-frame label, and the slowest frames listed at the top right
+  local okFP, FP = pcall(require, "src.core.FrameProfiler")
+  if not (okFP and type(FP) == "table" and FP.push and FP.pop) then FP = nil end
+  local perfOn = false
+  local slowText, slowAt = "", -1
+  if FP then
+    local function timed(tbl, key, name)
+      local f = type(tbl) == "table" and tbl[key]
+      if type(f) ~= "function" then return end
+      local push, pop = FP.push, FP.pop
+      local function out(...) pop(name); return ... end
+      tbl[key] = function(...) push(name); return out(f(...)) end
+    end
+    timed(Raid, "update", "raid update")
+    timed(Raid, "draw", "raid draw")
+    timed(Raid, "stepWarm", "raid sounds")
+    timed(Scene, "prepare", "raid 3d")
+    timed(Scene, "draw", "raid scene")
+    local Fx = Raid.Fx
+    timed(Fx, "update", "raid fx")
+    timed(Fx, "draw", "raid fx")
+    timed(Fx, "drawLayer", "raid fx")
+    timed(BattlerHud, "drawOrder", "raid hud")
+    timed(BattlerHud, "drawPanel", "raid hud")
+    timed(BattlerHud, "drawRows", "raid hud")
+    timed(Pad, "draw", "raid pad")
+    timed(Pad, "drawSecond", "raid pad")
+    timed(Screen2, "update", "raid 2nd screen")
+    local engineLabel = FP.context
+    FP.context = function()
+      local base = engineLabel and engineLabel() or nil
+      local raid = Raid.active() and Raid.perfLabel and Raid.perfLabel() or nil
+      if raid then return base and (base .. " " .. raid) or raid end
+      return base
+    end
+  end
+  -- the slowest frames (the engine's spike list), a line each and its largest sections
+  local function drawSlowFrames(G, w, h)
+    local now = love.timer.getTime()
+    if now - slowAt >= 0.5 then
+      slowAt = now
+      local lines = { "slowest frames" }
+      for i, sp in ipairs(FP.spikeList and FP.spikeList() or {}) do
+        if i > 6 then break end
+        lines[#lines + 1] = ("%5.1f ms  %s"):format(sp.total or 0, tostring(sp.ctx))
+        local secs = {}
+        for _, e in ipairs(sp.secs or {}) do secs[#secs + 1] = e end
+        table.sort(secs, function(a, b) return a[2] > b[2] end)
+        local parts = {}
+        for k = 1, math.min(4, #secs) do parts[#parts + 1] = ("%s %.1f"):format(secs[k][1], secs[k][2]) end
+        lines[#lines + 1] = "    " .. table.concat(parts, ", ")
+      end
+      slowText = table.concat(lines, "\n")
+    end
+    local k = math.max(1, math.floor(h / 540))
+    local font = G.getFont()
+    local bw = math.floor(w / k * 0.5)
+    local _, wrapped = font:getWrap(slowText, bw - 8)
+    G.push("all")
+    G.origin()
+    G.scale(k)
+    local x = w / k - bw - 4
+    G.setColor(0, 0, 0, 0.6)
+    G.rectangle("fill", x, 4, bw, font:getHeight() * #wrapped + 8)
+    G.setColor(1, 1, 1, 1)
+    G.printf(slowText, x + 4, 8, bw - 8, "left")
+    G.pop()
+  end
+
   -- the raid over the whole window, after the engine's own HUD
   mod.hooks:wrap("render.hud", function(next, game, viewport)
     lastGame = game or lastGame
     local res = next(game, viewport)
+    -- (PERFORMANCE: the engine's overlay up while a den is open - the den screen through the
+    -- rewards -, put away when it closes; each den's numbers and slowest frames begin afresh)
+    if FP then
+      local want = mod.options:get("perf_overlay") == true and Raid.active() == true
+      if want ~= perfOn then
+        perfOn = want
+        pcall(FP.setEnabled, want)
+      end
+    end
     -- (the raid's music: fed and faded every frame, a raid up or not - a fade out runs past its close)
     if Raid and Raid.music_ then pcall(Raid.music_.update, love.timer and love.timer.getDelta() or 1 / 60) end
     -- (the game's summary over the raid: it draws itself, with the engine's touch pad)
@@ -264,6 +347,12 @@ return function(mod)
       local ok, err = pcall(Raid.draw, G, w, h)
       G.pop()
       if not ok then mod.log:warn("raid draw failed: %s", tostring(err)) end
+    end
+    if FP and FP.enabled then
+      local G = love.graphics
+      local w = type(viewport) == "table" and viewport.width or G.getWidth()
+      local h = type(viewport) == "table" and viewport.height or G.getHeight()
+      pcall(drawSlowFrames, G, w, h)
     end
     return res
   end)
