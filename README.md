@@ -8,7 +8,7 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon on Sword an
 battlefield in 3D, then try to catch it.
 
 > [!NOTE]
-> **Requires [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3) 1.4.0 or newer**
+> **Requires [WoobleDex](https://github.com/poooooby/national_dex_gen3) 1.4.0 or newer**
 > (the raid bosses' and your Pokémon's modern moves, the Fairy type, abilities, the Exp. Candies the
 > raids reward, Dynamax Levels, the Gigantamax Factor and the Dynamax items) **and
 > [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3)** (your Pokémon's
@@ -207,7 +207,7 @@ you won: Exp. Candies, TMs, berries and more.*
 
 ## 📦 Install
 
-1. Install [National Dex Gen 3](https://github.com/poooooby/national_dex_gen3) and
+1. Install [WoobleDex](https://github.com/poooooby/national_dex_gen3) and
    [G9 Battle Sprites (Gen 3)](https://github.com/poooooby/g9-battle-sprites-gen3) first.
 2. Download `max_raids-X.Y.Z.zip` from the latest release and add it in Gen1Recomp's mod manager.
 3. Turn on Galar Rising for a Gen 3 game.
