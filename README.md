@@ -63,8 +63,8 @@ you won: Exp. Candies, TMs, berries and more.*
 - 🗺️ **Dens on the routes:** one or two on each route, always in the same places on your save.
   A den with a Pokémon in it shines a beam into the sky.
 - 🔴 **Red beams:** a Pokémon of that route, Dynamaxed: any Pokémon you could meet there in the
-  grass, on the water, fishing or with Rock Smash. With **Modern Spawns**, it's the route's
-  Pokémon as Modern Spawns has them, every one a slot can roll. The more stars, the more
+  grass, on the water, fishing or with Rock Smash. With **WoobleSpawns**, it's the route's
+  Pokémon as WoobleSpawns has them, every one a slot can roll. The more stars, the more
   evolved: as you'd find it at 1★ and 2★, one evolution on at 3★, fully evolved at 4★ and 5★.
 - 🟣 **Purple beams:** the rare beam, about one den in ten: a Gigantamax Pokémon.
 - 📅 **A new raid every day:** each den holds a new Pokémon each day, or sits quiet. A den you've
