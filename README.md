@@ -18,7 +18,7 @@ battlefield in 3D, then try to catch it.
 
 ### 1. A pillar of light on the route
 
-<p align="center"><img src="assets/gpillars.png" width="760" alt="A red pillar of light rising from a Pokémon Den on Route 104"></p>
+<p align="center"><img src="assets/gpillars.png" width="760" alt="Red pillars of light rising from two Pokémon Dens in the tall grass of a route"></p>
 
 *After your first Gym Badge, dens appear along the routes. A beam of light means a Pokémon is waiting
 inside: red for one of the route's own Pokémon, Dynamaxed, and purple for a rare Gigantamax one.
