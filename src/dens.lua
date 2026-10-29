@@ -17,9 +17,10 @@ return function(mod, deps)
   local Dn = {}
   -- the den's sprites: active / spent (assets/den/), drawn over grass (no grass in front of it yet)
   Dn.SPRITE = { active = "MAX_RAIDS_DEN", spent = "MAX_RAIDS_DEN_SPENT" }
-  -- the sprite's anchor: Gen 3 draws its bottom row on the tile's middle, clear of the engine's grass
-  -- cover (the tile's bottom 8 rows); 23 would put it on the tile's foot
-  Dn.ANCHOR_Y = 31
+  -- the sprites are 16 x 16, one tile. Gen 3 draws the anchor's row 12 px down the tile, so row 12
+  -- puts the den on its own tile exactly
+  Dn.SIZE = 16
+  Dn.ANCHOR_Y = 12
   -- the placement rules' version: a map's dens saved under an older one are placed again
   Dn.PLACE_V = 5
 
@@ -574,7 +575,7 @@ return function(mod, deps)
     local base = (mod.path or "mods/max_raids") .. "/assets/den/"
     local function one(id, file)
       local ok, err = pcall(reg.register, reg, id, { image = base .. file, frames = 1,
-        frameWidth = 32, frameHeight = 32, anchorX = 16, anchorY = Dn.ANCHOR_Y })
+        frameWidth = Dn.SIZE, frameHeight = Dn.SIZE, anchorX = Dn.SIZE / 2, anchorY = Dn.ANCHOR_Y })
       if not ok then mod.log:warn("den sprite %s not registered: %s", id, tostring(err)) end
     end
     for kind, id in pairs(Dn.SPRITE) do one(id, "den_" .. kind .. ".png") end
@@ -584,6 +585,30 @@ return function(mod, deps)
   -- ------- the beam over an active den: a field actor (drawn in the field's own pass, world px)
 
   local beams = {}
+  -- the beam's columns: a unit-square strip fading in over its foot's FOOT px (out of the pit), whole
+  -- up to FADE of its height and fading out to its top (vertex colours; the draw's colour tints
+  -- it). Made once, at the first draw
+  Dn.BEAM = { H = 160, FADE = 0.45, FOOT = 7 }
+  local beamMesh
+  local function beamColumn(G, x, y, w, h)
+    if beamMesh == nil then
+      local f = 1 - Dn.BEAM.FADE
+      local g = 1 - Dn.BEAM.FOOT / Dn.BEAM.H
+      local ok, m = pcall(G.newMesh, {
+        { 0, 0, 0, 0, 1, 1, 1, 0 }, { 1, 0, 1, 0, 1, 1, 1, 0 },
+        { 0, f * 0.5, 0, 0, 1, 1, 1, 0.35 }, { 1, f * 0.5, 1, 0, 1, 1, 1, 0.35 },
+        { 0, f, 0, 0, 1, 1, 1, 1 }, { 1, f, 1, 0, 1, 1, 1, 1 },
+        { 0, g, 0, 1, 1, 1, 1, 1 }, { 1, g, 1, 1, 1, 1, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 0 }, { 1, 1, 1, 1, 1, 1, 1, 0 },
+      }, "strip", "static")
+      beamMesh = ok and m or false
+    end
+    if beamMesh then
+      G.draw(beamMesh, x, y, 0, w, h)
+    else
+      G.rectangle("fill", x, y, w, h)
+    end
+  end
   local function beamActor(mapId, den, i)
     local key = mapId .. ":" .. i
     local a = beams[key]
@@ -595,22 +620,23 @@ return function(mod, deps)
         Dn.beamDraws = (Dn.beamDraws or 0) + 1
         local t = love.timer and love.timer.getTime() or 0
         local x = floor(self.x + 8 - camX)
-        -- from the pit, 11 px above the den's foot (the tile's middle)
-        local y = floor(self.y - 3 - camY)
+        -- from inside the pit, the tile's middle
+        local y = floor(self.y + 8 - camY)
         -- (red: a Dynamax Pokemon; purple: the rare beam, a Gigantamax one)
         local hot = not self.rare
         local cr, cg, cb = hot and 1 or 0.8, hot and 0.2 or 0.35, hot and 0.35 or 1
         local pr, pg, pb, pa = G.getColor()
-        local hgt = 160
-        -- a soft glow round the column, then its body, then a white-hot core, flickering
+        local hgt = Dn.BEAM.H
+        -- a soft glow round the column, then its body, then a white-hot core, flickering; each
+        -- fades out toward its top
         local flick = 0.85 + 0.15 * math.sin(t * 9)
         for k = 0, 3 do
           local w = 9 - k * 2 + math.sin(t * 5 + k) * 0.5
           G.setColor(cr, cg, cb, (0.14 + 0.1 * k) * flick)
-          G.rectangle("fill", x - w, y - hgt, w * 2, hgt)
+          beamColumn(G, x - w, y - hgt, w * 2, hgt)
         end
         G.setColor(1, 0.92, 0.95, 0.85 * flick)
-        G.rectangle("fill", x - 1, y - hgt, 2, hgt)
+        beamColumn(G, x - 1, y - hgt, 2, hgt)
         -- sparks rising in it
         for k = 1, 10 do
           local u = (t * 0.35 + k * 0.137) % 1
@@ -651,9 +677,31 @@ return function(mod, deps)
         local M = engine("src.core.game3.map")
         local mapId = M and M.current
         local list = mapId and spawned[mapId] and saved()[mapId]
-        if list then
+        if list and type(actors) == "table" then
+          -- the engine's grass cover over an object's lower half: never over a den, whose
+          -- sprite fills its tile
+          local n = #actors
+          local j = 0
+          for k = 1, n do
+            local a = actors[k]
+            local keep = true
+            if type(a) == "table" and a.kind == "field_effect_npc_grass" and a.x and a.y then
+              local cx, cy = floor(a.x / 16), floor(a.y / 16)
+              for _, den in ipairs(list) do
+                if den.x == cx and den.y == cy then
+                  keep = false
+                  break
+                end
+              end
+            end
+            if keep then
+              j = j + 1
+              actors[j] = a
+            end
+          end
+          for k = j + 1, n do actors[k] = nil end
           for i, den in ipairs(list) do
-            if den.active and not den.done and type(actors) == "table" then
+            if den.active and not den.done then
               actors[#actors + 1] = beamActor(mapId, den, i)
             end
           end
