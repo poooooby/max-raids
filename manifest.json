@@ -18,7 +18,8 @@
     "g9-battle-sprites-gen3@>=1.5.4"
   ],
   "optional_dependencies": [
-    "kanto_gear"
+    "kanto_gear",
+    "recomp_achievements"
   ],
   "conflicts": [],
   "incompatible": [],

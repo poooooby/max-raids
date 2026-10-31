@@ -76,6 +76,8 @@ return function(mod)
   local makeDen = loadSibling(mod, "src/den_screen.lua")
   local makePick = loadSibling(mod, "src/pc_pick.lua")
   local makeDyna = loadSibling(mod, "src/dyna.lua")
+  local makeAchievements = loadSibling(mod, "src/achievements.lua")
+  local AchievementData = loadSibling(mod, "data/raid_achievements.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
     mod.log:error("Galar Rising is missing files; it stays off -- reinstall the mod")
     return
@@ -198,6 +200,19 @@ return function(mod)
     end
   end
 
+  -- Recomp Achievements (optional): the raids' achievements are registered with it and the moments
+  -- the raid notes are reported. Without it, nothing.
+  local Achievements = nil
+  if makeAchievements and AchievementData then
+    local ok, a = pcall(makeAchievements, mod, { data = AchievementData,
+      stars = function(key) local b = Bosses[key]; return b and b.stars or nil end })
+    if ok and type(a) == "table" then
+      if a.install() then Achievements = a end
+    else
+      mod.log:warn("achievements: the module failed to build (%s)", tostring(a))
+    end
+  end
+
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax, TeamMoves = TeamMoves,
     Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene }) or nil, MoveFx = MoveFx, Sounds = Sounds,
@@ -208,8 +223,10 @@ return function(mod)
       local ok, m = pcall(makeMusic, mod, { data = MusicData, Audio = okA and AudioM or nil })
       return ok and m or nil
     end)(),
+    note = function(what, ...) if Achievements then Achievements.note(what, ...) end end,
     -- a won raid: its den is done for the day
     onEnd = function(den, outcome, raid)
+      if outcome == "fled" and Achievements then Achievements.note("ran") end
       -- (won, or left by Run: spent for the day - not by a Dynamax Crystal's legendary raid, which
       -- leaves the den as it was)
       if raid and raid.legend then return end
@@ -426,6 +443,7 @@ return function(mod)
     return Screen2 ~= nil and Screen2.state.on == true and Raid ~= nil and Raid.active() == true
   end
   mod.exports.dens = Dens
+  mod.exports.achievements = Achievements
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,
     padSecond = function(on) padForced = on end,

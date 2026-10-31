@@ -40,6 +40,10 @@ return function(mod, deps)
     engineMods[name] = m
     return m
   end
+  -- a moment for the achievements (deps.note; nothing without them), never an error in the raid
+  local function note(what, ...)
+    if deps.note then pcall(deps.note, what, ...) end
+  end
   local Pokemon = engine("src.core.game3.pokemon")
   local Runtime = engine("src.core.game3.runtime")
   local Audio = engine("src.core.game3.audio")
@@ -599,6 +603,7 @@ return function(mod, deps)
     r.denKey = r.key
     if deps.onOpen then deps.onOpen(r) end
     Rd.music("den")
+    note("den")
     return true
   end
 
@@ -1967,6 +1972,7 @@ return function(mod, deps)
         m.giantFrom, m.giantTo, m.giantT = m.giant or (up and 0 or 1), up and 1 or 0, r.t
         m.giantDelay = up and Rd.DMAX.CHARGE_S or 0
         if up then
+          note("dynamax", e.gmax == true)
           m.gmaxLook = e.gmax or nil
           -- (its Gigantamax form's back sheet, loaded once a raid)
           if e.gmax and m.gmaxSheet == nil then m.gmaxSheet = Rd.gmaxBackFor(m) end
@@ -2125,7 +2131,12 @@ return function(mod, deps)
     -- items' pictures are made during it, a step a frame: made as the card came up they took ~90 ms
     -- of its first frame on a slow device)
     local okG, given = pcall(Rewards.give, r, r.rng)
-    if okG then r.given, r.cardPrep = given, 0 else mod.log:warn("raid rewards failed: %s", tostring(given)) end
+    if okG then
+      r.given, r.cardPrep = given, 0
+      note("won", r)
+    else
+      mod.log:warn("raid rewards failed: %s", tostring(given))
+    end
     if Scene then Scene.shot("field", 0.8) end
     Rd.music("capture")
     if #balls == 0 then r.cmd.cursor = 2 end
@@ -2620,8 +2631,12 @@ return function(mod, deps)
     r.say = nil
     r.shrink = r.throw and r.throw.caught and 0 or r.shrink
     local ok, out = true, r.given
-    if not out then ok, out = pcall(Rewards.give, r, r.rng) end
+    if not out then
+      ok, out = pcall(Rewards.give, r, r.rng)
+      if ok then note("won", r) end
+    end
     if not ok then mod.log:warn("raid rewards failed: %s", tostring(out)); out = { items = {}, team = {} } end
+    if r.throw and r.throw.caught then note("caught", r.shiny == true) end
     r.given, r.cardPrep = nil, nil
     r.rewards = out
     r.rewardsT = r.t

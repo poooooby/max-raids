@@ -169,6 +169,14 @@ you won: Exp. Candies, TMs, berries and more.*
   legendary or mythical Pokémon instead (a 5★ raid; the crystal is spent when you press Start, and the den itself
   is left as it was). Win, and it's caught for certain.
 
+### Achievements
+
+- 🏆 **Raid achievements:** with **Recomp Achievements** installed, Galar Rising adds 14 achievements
+  of its own, in a RAIDS group: looking into your first den, winning raids, Dynamaxing and
+  Gigantamaxing, catching and shiny catches, a legendary raid started with a Dynamax Crystal, and a
+  few challenges (two are hidden until you earn them). Raids you have already won count when you
+  load your save. Without Recomp Achievements nothing changes.
+
 ### Your Screen
 
 - 🎮 **On one screen or two:** the battle menu sits over the den, or goes to your device's second
@@ -211,6 +219,7 @@ you won: Exp. Candies, TMs, berries and more.*
    [WoobleSpritePack](https://github.com/poooooby/g9-battle-sprites-gen3) first.
 2. Download `max_raids-X.Y.Z.zip` from the latest release and add it in Gen1Recomp's mod manager.
 3. Turn on Galar Rising for a Gen 3 game.
+4. Optional: install Recomp Achievements to track Galar Rising's achievements.
 
 ## 👏 Credits
 
