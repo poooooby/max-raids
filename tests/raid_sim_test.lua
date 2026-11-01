@@ -38,7 +38,7 @@ end
 local function adapter(o)
   o = o or {}
   return {
-    damage = function(att, def, m) return m.power, { effectiveness = (o.eff and o.eff[def.name]) or 1 } end,
+    damage = function(att, def, m, spread, opt) return (opt and opt.power) or m.power, { effectiveness = (o.eff and o.eff[def.name]) or 1 } end,
     hits = function() return o.miss ~= true end,
     speed = function(b) return b.mon.speed end,
     effectiveness = function() return 1 end,
@@ -1064,6 +1064,740 @@ do
     return table.concat(out, "|")
   end
   check(run() == run(), "a seed plays the same")
+end
+
+
+-- ------------------------------------------------------------------ Gen 3's move effects
+
+-- one member (speed 90, 100 HP) against a quiet boss (1000 HP, 1 power), its move first
+local function duel(move, o)
+  o = o or {}
+  local boss = battler("Boss", o.bossHp or 1000, 10, { mv("Splash", { power = 0, status = true }) }, true)
+  local m = battler("M1", o.hp or 100, 90, { move })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(o.adapter), rng = o.rng or rngOf(7) }
+  return s, boss, m
+end
+local function count(ev, kind) local n = 0 for _, e in ipairs(ev) do if e.kind == kind then n = n + 1 end end return n end
+local function has(ev, text) for _, e in ipairs(ev) do if e.text and e.text:find(text, 1, true) then return true end end return false end
+
+-- Absorb: half the damage back (up to max HP)
+do
+  local s, boss, m = duel(mv("Absorb", { power = 40, side = { drain = 50 } }))
+  m.mon.hp = 50
+  local ev = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 960 and m.mon.hp == 70, "Absorb: 40 damage heals 20 (" .. m.mon.hp .. ")")
+  check(count(ev, "heal") == 1, "...with a heal event")
+  s, boss, m = duel(mv("Giga Drain", { power = 60, side = { drain = 50 } }))
+  s:turn({ { move = 1 } })
+  check(m.mon.hp <= 100, "a drain never past max HP")
+end
+
+-- a drain on the blow that knocks the boss out still heals
+do
+  local s, boss, m = duel(mv("Absorb", { power = 40, side = { drain = 50 } }), { bossHp = 30 })
+  m.mon.hp = 50
+  s:turn({ { move = 1 } })
+  check(s.over == "win" and m.mon.hp > 50, "a drain on the last blow still heals")
+end
+
+-- Dream Eater: only on a sleeper
+do
+  local s, boss, m = duel(mv("Dream Eater", { power = 100, side = { drain = 50, needSleep = true } }))
+  local ev = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 and has(ev, "doesn't affect"), "Dream Eater fails on an awake target")
+  s, boss, m = duel(mv("Dream Eater", { power = 100, side = { drain = 50, needSleep = true } }))
+  boss.status, boss.sleep = "SLP", 3
+  m.mon.hp = 20
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 900 and m.mon.hp == 70, "Dream Eater on a sleeper hits and heals")
+end
+
+-- recoil: a share of the damage dealt
+do
+  local s, boss, m = duel(mv("Double-Edge", { power = 120, side = { drain = -33 } }))
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 880 and m.mon.hp == 60, "Double-Edge: 120 dealt, 40 recoil (" .. m.mon.hp .. ")")
+  s, boss, m = duel(mv("Take Down", { power = 90, side = { drain = -25 } }))
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 77, "Take Down: a quarter (" .. m.mon.hp .. ")")
+  s, boss, m = duel(mv("Brave Bird", { power = 120, side = { drain = -33 } }), { hp = 30 })
+  local ev = s:turn({ { move = 1 } })
+  check(m.mon.hp == 0 and count(ev, "faint") == 1, "recoil can knock the user out")
+end
+
+-- Jump Kick: a miss costs half the max HP
+do
+  local s, boss, m = duel(mv("Jump Kick", { power = 85, side = { missRecoil = true } }), { adapter = { miss = true } })
+  local ev = s:turn({ { move = 1 } })
+  check(m.mon.hp == 50 and has(ev, "crashed"), "Jump Kick missing: half the max HP")
+end
+
+-- multi-hit: 2-5 blows, each its own damage
+do
+  local s, boss, m = duel(mv("Fury Attack", { power = 15, side = { hits = "multi" } }))
+  local ev = s:turn({ { move = 1 } })
+  local n = count(ev, "damage")
+  check(n >= 2 and n <= 5 and boss.mon.hp == 1000 - 15 * n, "multi-hit: " .. n .. " blows")
+  check(has(ev, "Hit " .. n .. " times"), "...counted")
+  local seen = {}
+  for seed = 1, 200 do
+    local s2, b2 = duel(mv("Fury Attack", { power = 10, side = { hits = "multi" } }), { rng = rngOf(seed) })
+    s2:turn({ { move = 1 } })
+    local k = (1000 - b2.mon.hp) / 10
+    seen[k] = (seen[k] or 0) + 1
+  end
+  check(seen[2] and seen[3] and seen[4] and seen[5] and not seen[1] and not seen[6], "2, 3, 4 and 5 all come up, nothing else")
+  check(seen[2] + seen[3] > seen[4] + seen[5], "...2 and 3 more often")
+  s, boss, m = duel(mv("Double Kick", { power = 30, side = { hits = 2 } }))
+  ev = s:turn({ { move = 1 } })
+  check(count(ev, "damage") == 2 and boss.mon.hp == 940, "a double hit: two blows")
+  s, boss, m = duel(mv("Triple Kick", { power = 10, side = { hits = "triple" } }))
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 - (10 + 20 + 30), "Triple Kick: 10, 20, 30 (" .. boss.mon.hp .. ")")
+  -- a blow that knocks the boss out ends the string
+  s, boss, m = duel(mv("Fury Attack", { power = 15, side = { hits = "multi" } }), { bossHp = 20 })
+  ev = s:turn({ { move = 1 } })
+  check(s.over == "win" and count(ev, "damage") == 2, "the boss falls on the second blow of a string")
+end
+
+-- Hyper Beam: recharge next turn; the member does not choose it
+do
+  local s, boss, m = duel(mv("Hyper Beam", { power = 150, side = { recharge = true } }))
+  s:turn({ { move = 1 } })
+  check(m.recharge == true and not s:canAct(1), "Hyper Beam: recharging, no choice next turn")
+  local ev = s:turn({})
+  check(has(ev, "must recharge") and boss.mon.hp == 850 and not m.recharge, "...the turn is lost")
+  check(s:canAct(1), "...and it chooses again after")
+  s, boss, m = duel(mv("Hyper Beam", { power = 150, side = { recharge = true } }), { adapter = { miss = true } })
+  s:turn({ { move = 1 } })
+  check(not m.recharge, "a miss needs no recharge")
+end
+
+-- a charge move: this turn gathers, the next releases on its own
+do
+  local s, boss, m = duel(mv("Solar Beam", { power = 120, side = { charge = true } }))
+  m.moves[1].key = "SOLARBEAM"
+  local ev = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 and has(ev, "absorbed light"), "Solar Beam: the first turn only charges")
+  check(not s:canAct(1) and m.lock, "...the second turn is not chosen")
+  ev = s:turn({})
+  check(boss.mon.hp == 880 and not m.lock, "...and releases: 120 damage")
+  check(m.moves[1].pp == 9, "...the PP spent once")
+  -- Fly: out of reach while up
+  s, boss, m = duel(mv("Fly", { power = 70, side = { charge = true, semi = true } }))
+  boss.moves = { mv("Hit", { power = 30 }) }
+  ev = s:turn({ { move = 1 } })
+  check(m.semi and m.mon.hp == 100 and has(ev, "avoided"), "Fly: the boss's blow misses while it is up")
+  ev = s:turn({})
+  check(not m.semi and boss.mon.hp == 930, "...it comes down and strikes: 70")
+  -- the boss does not charge
+  local boss2 = battler("Boss", 1000, 10, { mv("Solar Beam", { power = 120, side = { charge = true } }) }, true)
+  local m2 = battler("M1", 500, 90, { mv("Tackle", { power = 10 }) })
+  local s2 = Sim.new{ boss = boss2, members = { m2 }, adapter = adapter(), rng = rngOf(3) }
+  s2:turn({ { move = 1 } })
+  check(m2.mon.hp == 380, "a boss strikes with a charge move at once")
+end
+
+-- Outrage: two or three turns on one move, then confused
+do
+  local s, boss, m = duel(mv("Outrage", { power = 90, side = { rampage = true } }), { bossHp = 5000 })
+  local turns = 0
+  repeat
+    s:turn(turns == 0 and { { move = 1 } } or {})
+    turns = turns + 1
+  until not m.lock or turns > 6
+  check(turns == 2 or turns == 3, "Outrage lasts " .. turns .. " turns")
+  check(boss.mon.hp == 5000 - 90 * turns and m.confused, "...90 a turn, then confused")
+end
+
+-- trapping: held and hurt an eighth a turn for 4-5 turns
+do
+  local s, boss, m = duel(mv("Fire Spin", { power = 15, side = { trap = true } }))
+  s:turn({ { move = 1 } })
+  check((boss.trap or 0) >= 3 and boss.mon.hp == 1000 - 15 - 125, "Fire Spin traps: 1/8 of the max HP at the turn's end (" .. boss.mon.hp .. ")")
+end
+
+-- confusion on a hit, flinching
+do
+  local s, boss, m = duel(mv("Psybeam", { power = 65, side = { confuse = 100 } }))
+  s:turn({ { move = 1 } })
+  check(boss.confused ~= nil, "Psybeam confuses")
+  local bm = battler("Boss", 1000, 100, { mv("Bite", { power = 60, side = { flinch = 100 } }) }, true)
+  local mm = battler("M1", 100, 10, { mv("Tackle", { power = 10 }) })
+  local s2 = Sim.new{ boss = bm, members = { mm }, adapter = adapter(), rng = rngOf(2) }
+  local ev = s2:turn({ { move = 1 } })
+  check(has(ev, "flinched") and bm.mon.hp == 1000, "a flinch costs the slower member its move")
+  local s3, b3 = duel(mv("Bite", { power = 60, side = { flinch = 100 } }))
+  s3:turn({ { move = 1 } })
+  check(not b3.flinched, "the boss cannot be flinched")
+end
+
+-- one-hit KO moves fail on the Dynamaxed boss
+do
+  local s, boss, m = duel(mv("Fissure", { power = 1, side = { ohko = true } }))
+  local ev = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 and has(ev, "failed"), "Fissure fails on the boss")
+end
+
+-- Fake Out: the first turn out only
+do
+  local s, boss, m = duel(mv("Fake Out", { power = 40, priority = 3, side = { flinch = 100 } }))
+  m.moves[1].key = "FAKE_OUT"
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 960, "Fake Out lands on turn 1")
+  local ev = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 960 and has(ev, "failed"), "...and fails after")
+end
+
+-- Overheat: the user's Sp. Atk falls two stages; Superpower: Attack and Defense
+do
+  local s, boss, m = duel(mv("Overheat", { power = 140, side = { selfStages = { spAtk = -2 } } }))
+  s:turn({ { move = 1 } })
+  check(m.stages.spAtk == -2, "Overheat: Sp. Atk -2")
+  s, boss, m = duel(mv("Superpower", { power = 120, side = { selfStages = { attack = -1, defense = -1 } } }))
+  s:turn({ { move = 1 } })
+  check(m.stages.attack == -1 and m.stages.defense == -1, "Superpower: Attack and Defense -1")
+end
+
+-- Tri Attack, Leech Seed, Belly Drum, Haze, Rest, Pain Split, Memento, Swagger, Supersonic
+do
+  local s, boss, m = duel(mv("Tri Attack", { power = 80, side = { tri = 100 } }))
+  s:turn({ { move = 1 } })
+  check(boss.status == "BRN" or boss.status == "PAR" or boss.status == "FRZ", "Tri Attack: a status (" .. tostring(boss.status) .. ")")
+
+  s, boss, m = duel(mv("Leech Seed", { power = 0, status = true, side = { seed = true } }))
+  m.mon.hp = 50
+  s:turn({ { move = 1 } })
+  check(boss.seeded == m, "Leech Seed plants")
+  check(boss.mon.hp == 875, "...the boss loses 1/8 (" .. boss.mon.hp .. ")")
+  check(m.mon.hp == 100, "...and the seeder gains it, to its max (" .. m.mon.hp .. ")")
+  s, boss, m = duel(mv("Leech Seed", { power = 0, status = true, side = { seed = true } }))
+  boss.type1 = 12
+  local ev = s:turn({ { move = 1 } })
+  check(not boss.seeded and has(ev, "failed"), "Leech Seed fails on a Grass type")
+
+  s, boss, m = duel(mv("Belly Drum", { power = 0, status = true, side = { bellyDrum = true, self = true } }))
+  s:turn({ { move = 1 } })
+  check(m.stages.attack == 6 and m.mon.hp == 50, "Belly Drum: half the HP, Attack +6")
+  s, boss, m = duel(mv("Belly Drum", { power = 0, status = true, side = { bellyDrum = true, self = true } }), { hp = 40 })
+  m.mon.maxHp = 100
+  local ev2 = s:turn({ { move = 1 } })
+  check(m.stages.attack == 0 and has(ev2, "failed"), "Belly Drum fails at half HP or less")
+
+  s, boss, m = duel(mv("Haze", { power = 0, status = true, side = { haze = true, self = true } }))
+  boss.stages.attack, m.stages.defense = 2, -3
+  s:turn({ { move = 1 } })
+  check(boss.stages.attack == 0 and m.stages.defense == 0, "Haze clears every stage")
+
+  s, boss, m = duel(mv("Rest", { power = 0, status = true, side = { rest = true, self = true } }))
+  m.mon.hp, m.status = 10, "PSN"
+  s:turn({ { move = 1 } })
+  check(m.mon.hp >= 90 and m.status == "SLP", "Rest: full HP, asleep, the poison gone")
+
+  s, boss, m = duel(mv("Pain Split", { power = 0, status = true, side = { painSplit = true } }))
+  m.mon.hp = 20
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 100 and boss.mon.hp == 510, "Pain Split shares HP out (the user capped at its max)")
+
+  s, boss, m = duel(mv("Memento", { power = 0, status = true, side = { stages = { attack = -2, spAtk = -2 }, userFaints = true } }))
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 0 and boss.stages.attack == -2 and boss.stages.spAtk == -2, "Memento: the boss drops, the user faints")
+
+  s, boss, m = duel(mv("Swagger", { power = 0, status = true, side = { stages = { attack = 2 }, confuse = 100 } }))
+  s:turn({ { move = 1 } })
+  check(boss.stages.attack == 2 and boss.confused, "Swagger: Attack +2 and confused")
+  s, boss, m = duel(mv("Supersonic", { power = 0, status = true, side = { confuse = 100 } }))
+  s:turn({ { move = 1 } })
+  check(boss.confused, "a confusing status move confuses")
+end
+
+
+-- weather, Future Sight, Curse, Nightmare, Lock-On, Ingrain, Refresh, Attract
+do
+  local s, boss, m = duel(mv("Rain Dance", { power = 0, status = true, side = { weather = "RAIN" } }))
+  local ev = s:turn({ { move = 1 } })
+  check(s.weather == "RAIN" and has(ev, "started to rain"), "Rain Dance: rain")
+  for _ = 1, 4 do s:turn({ { move = 1 } }) end
+  check(s.weather == nil, "...for five turns")
+
+  s, boss, m = duel(mv("Sandstorm", { power = 0, status = true, side = { weather = "SAND" } }))
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 - 62 and m.mon.hp == 100 - 6, "a sandstorm chips 1/16 (" .. boss.mon.hp .. ", " .. m.mon.hp .. ")")
+  boss.type1 = 5
+  m.type1 = 8
+  local b0, m0 = boss.mon.hp, m.mon.hp
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == b0 and m.mon.hp == m0, "...Rock, Ground and Steel are spared")
+
+  s, boss, m = duel(mv("Moonlight", { power = 0, status = true, side = { heal = 0.5, self = true, weatherHeal = true } }))
+  m.mon.hp = 10
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 60, "Moonlight in clear weather: half")
+  s, boss, m = duel(mv("Moonlight", { power = 0, status = true, side = { heal = 0.5, self = true, weatherHeal = true } }))
+  s.weather, s.weatherTurns = "SUN", 5
+  m.mon.hp = 10
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 76, "...in the sun two thirds (" .. m.mon.hp .. ")")
+  s, boss, m = duel(mv("Moonlight", { power = 0, status = true, side = { heal = 0.5, self = true, weatherHeal = true } }))
+  s.weather, s.weatherTurns = "RAIN", 5
+  m.mon.hp = 10
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 35, "...in the rain a quarter")
+
+  s, boss, m = duel(mv("Future Sight", { power = 80, side = { future = true } }))
+  local f1 = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 and has(f1, "foresaw"), "Future Sight: nothing yet")
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000, "...nor the next turn")
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 920, "...it lands two turns on: 80 (" .. boss.mon.hp .. ")")
+
+  s, boss, m = duel(mv("Curse", { power = 0, status = true, side = { curse = true } }))
+  s:turn({ { move = 1 } })
+  check(m.stages.speed == -1 and m.stages.attack == 1 and m.stages.defense == 1, "Curse, not a Ghost: Speed down, Attack and Defense up")
+  s, boss, m = duel(mv("Curse", { power = 0, status = true, side = { curse = true } }))
+  m.type1 = 7
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 50 and boss.cursed and boss.mon.hp == 750, "Curse, a Ghost: half its HP, the foe loses a quarter (" .. boss.mon.hp .. ")")
+
+  s, boss, m = duel(mv("Nightmare", { power = 0, status = true, side = { nightmare = true } }))
+  local ev3 = s:turn({ { move = 1 } })
+  check(not boss.nightmare and has(ev3, "failed"), "Nightmare fails on one awake")
+  s, boss, m = duel(mv("Nightmare", { power = 0, status = true, side = { nightmare = true } }))
+  boss.status, boss.sleep = "SLP", 5
+  s:turn({ { move = 1 } })
+  check(boss.nightmare and boss.mon.hp == 750, "Nightmare: a quarter a turn asleep")
+
+  s, boss, m = duel(mv("Lock-On", { power = 0, status = true, side = { lockOn = true } }))
+  s:turn({ { move = 1 } })
+  check(m.lockOn == boss, "Lock-On takes aim")
+
+  s, boss, m = duel(mv("Ingrain", { power = 0, status = true, side = { ingrain = true, self = true } }))
+  m.mon.hp = 50
+  s:turn({ { move = 1 } })
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 50 + 6 + 6, "Ingrain: 1/16 a turn (" .. m.mon.hp .. ")")
+
+  s, boss, m = duel(mv("Refresh", { power = 0, status = true, side = { refresh = true, self = true } }))
+  m.status = "BRN"
+  s:turn({ { move = 1 } })
+  check(m.status == nil, "Refresh cures a burn")
+end
+
+
+-- ------------------------------------------------------------------ the National Dex's rules
+
+local function ruled(name, rule, o)
+  o = o or {}
+  local side = { rule = rule }
+  for k, v in pairs(o.side or {}) do side[k] = v end
+  return mv(name, { power = o.power or 0, status = (o.power or 0) == 0, priority = o.priority, side = side, type = o.type })
+end
+
+-- hazards: Stealth Rock on the boss's side does nothing; on the team's, a member coming back takes it
+do
+  local boss = battler("Boss", 1000, 10, { ruled("Stealth Rock", "STEALTH_ROCK", { side = { self = true } }) }, true)
+  local m = battler("M1", 100, 90, { mv("Tackle", { power = 10 }) })
+  local m2 = battler("M2", 100, 80, { mv("Tackle", { power = 10 }) })
+  local s = Sim.new{ boss = boss, members = { m, m2 }, adapter = adapter(), rng = rngOf(5) }
+  local ev = s:turn({ { move = 1 }, { move = 1 } })
+  check(s.sides.team.hazards.stealthRock and has(ev, "Pointed stones"), "the boss's Stealth Rock on the team's side")
+  m.mon.hp = 0
+  s:fainted({}, m)
+  s:turn({ nil, { move = 1 } })
+  local ev2 = s:turn({ nil, { move = 1 } })
+  check(m.mon.hp == 100 - 12 and has(ev2, "dug into"), "...a member coming back takes 1/8 (" .. m.mon.hp .. ")")
+end
+
+-- Trick Room: the slower first
+do
+  local boss = battler("Boss", 1000, 200, { mv("Hit", { power = 1 }) }, true)
+  local m = battler("M1", 100, 10, { ruled("Trick Room", "TRICK_ROOM", { side = { self = true } }), mv("Tackle", { power = 10 }) })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(), rng = rngOf(5) }
+  s:turn({ { move = 1 } })
+  check((s.ndx.trickRoom or 0) > 0, "Trick Room is up")
+  local ev = s:turn({ { move = 2 } })
+  local order = {}
+  for _, e in ipairs(ev) do if e.kind == "use" then order[#order + 1] = e.who.name end end
+  check(order[1] == "M1", "...the slow member moves first (" .. table.concat(order, " ") .. ")")
+  for _ = 1, 4 do s:turn({ { move = 2 } }) end
+  check(not s.ndx.trickRoom, "...for five turns")
+end
+
+-- terrains: Psychic blocks priority on the grounded, Misty statuses, Electric sleep, Grassy heals
+do
+  local s, boss, m = duel(ruled("Psychic Terrain", "PSYCHIC_TERRAIN", { side = { self = true } }))
+  s:turn({ { move = 1 } })
+  check(s:terrain() == "PSYCHIC", "Psychic Terrain is up")
+  m.moves[1] = mv("Quick Attack", { power = 40, priority = 1 })
+  local ev = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 and has(ev, "Psychic Terrain"), "...a priority move on the grounded boss fails")
+
+  s, boss, m = duel(ruled("Misty Terrain", "MISTY_TERRAIN", { side = { self = true } }))
+  s:turn({ { move = 1 } })
+  check(not s:status({}, boss, "PSN", true, m) and not s:confuse({}, boss, m), "Misty Terrain: no status, no confusion")
+  boss.type1 = 2
+  check(s:status({}, boss, "PSN", true, m), "...but a Flying type is off the ground")
+
+  s, boss, m = duel(ruled("Electric Terrain", "ELECTRIC_TERRAIN", { side = { self = true } }))
+  s:turn({ { move = 1 } })
+  check(not s:status({}, boss, "SLP", true, m) and s:status({}, boss, "PAR", true, m), "Electric Terrain: no sleep (paralysis still)")
+
+  s, boss, m = duel(ruled("Grassy Terrain", "GRASSY_TERRAIN", { side = { self = true } }))
+  m.mon.hp = 50
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 56, "Grassy Terrain heals 1/16 (" .. m.mon.hp .. ")")
+  for _ = 1, 4 do s:turn({ { move = 1 } }) end
+  check(s:terrain() == nil, "...five turns")
+end
+
+-- the user: Aqua Ring, Clangorous Soul, Power Trick, Geomancy, No Retreat
+do
+  local s, boss, m = duel(ruled("Aqua Ring", "AQUA_RING", { side = { self = true } }))
+  m.mon.hp = 50
+  s:turn({ { move = 1 } })
+  check(m.__ndxAquaRing and m.mon.hp == 56, "Aqua Ring: 1/16 a turn")
+  s, boss, m = duel(ruled("Clangorous Soul", "CLANGOROUS_SOUL", { side = { self = true } }))
+  s:turn({ { move = 1 } })
+  check(m.mon.hp == 67 and m.stages.attack == 1 and m.stages.speed == 1, "Clangorous Soul: a third of the HP, all +1")
+  s, boss, m = duel(ruled("Power Trick", "POWER_TRICK", { side = { self = true } }))
+  m.mon.attack, m.mon.defense = 120, 80
+  s:turn({ { move = 1 } })
+  check(m.__ndxStat.attack == 80 and m.__ndxStat.defense == 120, "Power Trick swaps Attack and Defense")
+  s, boss, m = duel(ruled("Geomancy", "GEOMANCY", { side = { self = true } }))
+  s:turn({ { move = 1 } })
+  check(m.stages.spAtk == 0 and m.lock and not s:canAct(1), "Geomancy: a turn absorbing power")
+  s:turn({})
+  check(m.stages.spAtk == 2 and m.stages.spDef == 2 and m.stages.speed == 2 and not m.lock, "...then Sp. Atk, Sp. Def, Speed +2")
+end
+
+-- the target: Soak, Trick-or-Treat, Tar Shot, Topsy-Turvy, Simple Beam, Worry Seed, Heal Block
+do
+  local s, boss, m = duel(ruled("Soak", "SOAK"))
+  boss.type1, boss.type2 = 1, 5
+  s:turn({ { move = 1 } })
+  check(boss.type1 == 11 and boss.type2 == nil, "Soak: pure Water")
+  s, boss, m = duel(ruled("Trick-or-Treat", "TRICK_OR_TREAT"))
+  s:turn({ { move = 1 } })
+  check(boss.__ndxType3 == 7, "Trick-or-Treat adds Ghost")
+  s, boss, m = duel(ruled("Tar Shot", "TAR_SHOT"))
+  s:turn({ { move = 1 } })
+  check(boss.__ndxTarShot and boss.stages.speed == -1, "Tar Shot: weaker to fire, Speed -1")
+  s, boss, m = duel(ruled("Topsy-Turvy", "TOPSY_TURVY"))
+  boss.stages.attack, boss.stages.defense = 2, -1
+  s:turn({ { move = 1 } })
+  check(boss.stages.attack == -2 and boss.stages.defense == 1, "Topsy-Turvy reverses the stages")
+  s, boss, m = duel(ruled("Simple Beam", "SIMPLE_BEAM"))
+  s:turn({ { move = 1 } })
+  s:stage({}, boss, "defense", -1, m)
+  check(boss.raidAbility == "SIMPLE" and boss.stages.defense == -2, "Simple Beam: changes doubled")
+  s, boss, m = duel(ruled("Worry Seed", "WORRY_SEED"))
+  s:turn({ { move = 1 } })
+  check(not s:status({}, boss, "SLP", true, m), "Worry Seed: Insomnia, no sleep")
+  s, boss, m = duel(ruled("Heal Block", "HEAL_BLOCK"))
+  s:turn({ { move = 1 } })
+  boss.mon.hp = 500
+  check(not s:healFor({}, boss, 100), "Heal Block: no healing")
+end
+
+-- hits: Sucker Punch, Feint through Protect, Phantom Force, Throat Chop, Clear Smog, Wake-Up Slap, Burn Up
+do
+  local boss = battler("Boss", 1000, 10, { mv("Growl", { power = 0, status = true }) }, true)
+  local m = battler("M1", 100, 90, { ruled("Sucker Punch", "SUCKER_PUNCH", { power = 70, priority = 1 }) })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(), rng = rngOf(5) }
+  local ev = s:turn({ { move = 1 } })
+  check(boss.mon.hp == 1000 and has(ev, "failed"), "Sucker Punch fails on a status move")
+  boss.moves = { mv("Hit", { power = 5 }) }
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 930, "...and strikes one about to attack")
+
+  local s2, b2, m2 = duel(ruled("Feint", "FEINT", { power = 30 }))
+  b2.guard = "protect"
+  s2:use({}, m2, m2.moves[1], { b2 })
+  check(b2.mon.hp == 970 and b2.guard == nil, "Feint goes through Protect and lifts it")
+
+  local s3, b3, m3 = duel(ruled("Phantom Force", "PHANTOM_FORCE", { power = 90, side = { charge = true, semi = true, vanish = true } }))
+  s3:turn({ { move = 1 } })
+  check(m3.semi and b3.mon.hp == 1000, "Phantom Force vanishes first")
+  b3.guard = "protect"
+  s3:turn({})
+  check(b3.mon.hp == 910, "...then strikes through Protect")
+
+  local s4, b4, m4 = duel(ruled("Throat Chop", "THROAT_CHOP", { power = 80 }))
+  s4:turn({ { move = 1 } })
+  b4.moves = { mv("Hyper Voice", { power = 90 }) }
+  b4.moves[1].key = "HYPER_VOICE"
+  local ev4 = s4:turn({ { move = 1 } })
+  check(has(ev4, "Throat Chop prevent"), "Throat Chop silences the boss's sound move")
+
+  local s5, b5 = duel(ruled("Clear Smog", "CLEAR_SMOG", { power = 50 }))
+  b5.stages.attack = 2
+  s5:turn({ { move = 1 } })
+  check(b5.stages.attack == 0, "Clear Smog clears the stages")
+
+  local s6, b6 = duel(ruled("Wake-Up Slap", "WAKE_UP_SLAP", { power = 70 }))
+  b6.status, b6.sleep = "SLP", 4
+  s6:turn({ { move = 1 } })
+  check(b6.status == nil, "Wake-Up Slap wakes it")
+
+  local s7, b7, m7 = duel(ruled("Burn Up", "BURN_UP", { power = 130, type = 10 }))
+  m7.type1 = 10
+  s7:turn({ { move = 1 } })
+  check(m7.type1 == 9 and b7.mon.hp == 870, "Burn Up: the Fire type gone")
+  local ev7 = s7:turn({ { move = 1 } })
+  check(has(ev7, "failed"), "...and it fails without it")
+
+  local s8, b8, m8 = duel(ruled("Final Gambit", "FINAL_GAMBIT", { power = 1 }))
+  s8:turn({ { move = 1 } })
+  check(m8.mon.hp == 0, "Final Gambit: the user faints after")
+end
+
+-- Defog clears hazards; Court Change swaps the sides; Revival Blessing
+do
+  local s, boss, m = duel(ruled("Defog", "DEFOG"))
+  s.sides.team.hazards.stealthRock, s.sides.boss.hazards.spikes = true, 2
+  s:turn({ { move = 1 } })
+  check(not s.sides.team.hazards.stealthRock and not s.sides.boss.hazards.spikes, "Defog clears both sides")
+  s, boss, m = duel(ruled("Court Change", "COURT_CHANGE", { side = { self = true } }))
+  s.sides.team.hazards.stealthRock = true
+  s.sides.boss.reflect = 3
+  s:turn({ { move = 1 } })
+  check(s.sides.boss.hazards.stealthRock and s.sides.team.reflect > 0, "Court Change swaps the sides' effects")
+  local boss2 = battler("Boss", 1000, 10, { mv("Splash", { power = 0, status = true }) }, true)
+  local a = battler("M1", 100, 90, { ruled("Revival Blessing", "REVIVAL_BLESSING", { side = { self = true } }) })
+  local b = battler("M2", 100, 80, { mv("Tackle", { power = 10 }) })
+  local s2 = Sim.new{ boss = boss2, members = { a, b }, adapter = adapter(), rng = rngOf(5) }
+  b.mon.hp = 0
+  s2:fainted({}, b)
+  s2:turn({ { move = 1 } })
+  check(b.down == 0 and b.mon.hp == 50, "Revival Blessing brings a fallen member back at half")
+end
+
+
+-- ------------------------------------------------------------------ the rest of Gen 3's moves
+
+local function g3(name, g, o)
+  o = o or {}
+  local side = { g3 = g }
+  for k, v in pairs(o.side or {}) do side[k] = v end
+  local m = mv(name, { power = o.power or 0, status = (o.power or 0) == 0, priority = o.priority, side = side, type = o.type })
+  m.key = o.key or name:upper():gsub("[^%w]", "_")
+  return m
+end
+
+-- Stockpile, Swallow, Spit Up
+do
+  local s, boss, m = duel(g3("Stockpile", "STOCKPILE", { side = { self = true } }))
+  s:turn({ { move = 1 } }); s:turn({ { move = 1 } }); s:turn({ { move = 1 } })
+  local ev = s:turn({ { move = 1 } })
+  check(m.stockpile == 3 and has(ev, "can't stockpile"), "Stockpile: three at most")
+  m.moves[2] = g3("Swallow", "SWALLOW", { side = { self = true } })
+  m.mon.hp = 10
+  s:turn({ { move = 2 } })
+  check(m.mon.hp == 100 and m.stockpile == 0, "Swallow at three: all the HP back")
+  m.moves[3] = g3("Spit Up", "SPIT_UP", { power = 100 })
+  local ev2 = s:turn({ { move = 3 } })
+  check(has(ev2, "failed to spit up") and boss.mon.hp == 1000, "Spit Up with nothing stockpiled fails")
+  m.stockpile = 2
+  s:turn({ { move = 3 } })
+  check(boss.mon.hp == 800 and m.stockpile == 0, "Spit Up at two: 200 power (" .. boss.mon.hp .. ")")
+end
+
+-- Substitute
+do
+  local boss = battler("Boss", 1000, 10, { mv("Hit", { power = 30 }) }, true)
+  local m = battler("M1", 100, 90, { g3("Substitute", "SUBSTITUTE", { side = { self = true } }) })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(), rng = rngOf(5) }
+  local ev = s:turn({ { move = 1 } })
+  check(m.mon.hp == 75 and has(ev, "substitute took damage"), "Substitute: a quarter of the HP, and it takes the boss's hit")
+  check(m.substituteHP == nil and has(ev, "faded"), "...a 25-HP substitute fades to a 30-power blow")
+end
+
+-- Rollout and Fury Cutter grow; Present; Beat Up
+do
+  local s, boss, m = duel(g3("Rollout", "ROLLOUT", { power = 30 }), { bossHp = 5000 })
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 4970 and m.lock and not s:canAct(1), "Rollout: 30, then locked")
+  for _ = 1, 4 do s:turn({}) end
+  check(boss.mon.hp == 5000 - (30 + 60 + 120 + 240 + 480) and not m.lock, "...30, 60, 120, 240, 480 over five turns (" .. boss.mon.hp .. ")")
+  s, boss, m = duel(g3("Fury Cutter", "FURY_CUTTER", { power = 10 }), { bossHp = 5000 })
+  for _ = 1, 6 do s:turn({ { move = 1 } }) end
+  check(boss.mon.hp == 5000 - (10 + 20 + 40 + 80 + 160 + 160), "Fury Cutter doubles to 160 (" .. boss.mon.hp .. ")")
+  local seen = {}
+  for seed = 1, 120 do
+    local s2, b2 = duel(g3("Present", "PRESENT", { power = 1 }), { rng = rngOf(seed) })
+    b2.mon.hp = 900
+    s2:turn({ { move = 1 } })
+    seen[900 - b2.mon.hp] = true
+  end
+  check(seen[40] and seen[80] and seen[120] and seen[-100], "Present: 40, 80, 120 or a heal")
+  local boss3 = battler("Boss", 1000, 10, { mv("Splash", { power = 0, status = true }) }, true)
+  local a = battler("M1", 100, 90, { g3("Beat Up", "BEAT_UP", { power = 10 }) })
+  local b = battler("M2", 100, 80, { mv("Tackle", { power = 10 }) })
+  local c = battler("M3", 100, 70, { mv("Tackle", { power = 10 }) })
+  c.status = "PSN"
+  local s3 = Sim.new{ boss = boss3, members = { a, b, c }, adapter = adapter(), rng = rngOf(5) }
+  s3:turn({ { move = 1 }, { move = 1 }, { move = 1 } })
+  check(boss3.mon.hp == 1000 - 20 - 10 - 10, "Beat Up: a blow from each without a status (" .. boss3.mon.hp .. ")")
+end
+
+-- callers: Metronome, Assist, Sleep Talk, Mirror Move
+do
+  local s, boss, m = duel(g3("Metronome", "METRONOME", { side = { self = true } }))
+  s.A.randomMove = function() return mv("Ember", { power = 40 }) end
+  local ev = s:turn({ { move = 1 } })
+  check(has(ev, "used Ember") and boss.mon.hp == 960, "Metronome calls a move")
+  check(m.moves[1].pp == 9, "...only Metronome's PP spent")
+  s, boss, m = duel(g3("Sleep Talk", "SLEEP_TALK", { side = { self = true } }))
+  m.moves[2] = mv("Tackle", { power = 25 })
+  local ev2 = s:turn({ { move = 1 } })
+  check(has(ev2, "failed") and boss.mon.hp == 1000, "Sleep Talk awake fails")
+  m.status, m.sleep = "SLP", 5
+  local ev3 = s:turn({ { move = 1 } })
+  check(has(ev3, "fast asleep") and boss.mon.hp == 975, "Sleep Talk asleep uses another move")
+  local boss2 = battler("Boss", 1000, 100, { mv("Ember", { power = 40 }) }, true)
+  local mm = battler("M1", 100, 10, { g3("Mirror Move", "MIRROR_MOVE", { side = { self = true } }) })
+  local s2 = Sim.new{ boss = boss2, members = { mm }, adapter = adapter(), rng = rngOf(5) }
+  s2:turn({ { move = 1 } })
+  check(boss2.mon.hp == 960, "Mirror Move turns the boss's Ember back on it")
+  local boss4 = battler("Boss", 1000, 10, { mv("Splash", { power = 0, status = true }) }, true)
+  local x = battler("M1", 100, 90, { g3("Assist", "ASSIST", { side = { self = true } }) })
+  local y = battler("M2", 100, 80, { mv("Slam", { power = 33 }) })
+  local s4 = Sim.new{ boss = boss4, members = { x, y }, adapter = adapter(), rng = rngOf(5) }
+  s4:turn({ { move = 1 }, {} })
+  check(boss4.mon.hp == 1000 - 33, "Assist calls an ally's move")
+end
+
+-- Disable, Taunt, Encore on a member; the menu's reasons
+do
+  local boss = battler("Boss", 1000, 10, { g3("Disable", "DISABLE") }, true)
+  local m = battler("M1", 100, 90, { mv("Tackle", { power = 10 }), mv("Growl", { power = 0, status = true }) })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(), rng = rngOf(5) }
+  s:turn({ { move = 1 } })
+  check(m.disabled and s:barredWhy(m, m.moves[1]) == "Disable", "Disable bars the member's last move")
+  boss.moves = { g3("Taunt", "TAUNT") }
+  m.disabled = nil
+  s:turn({ { move = 1 } })
+  check(s:barredWhy(m, m.moves[2]) == "Taunt" and not s:barredWhy(m, m.moves[1]), "Taunt bars its status moves")
+  boss.moves = { g3("Encore", "ENCORE") }
+  m.taunt = nil
+  boss.mon.speed = 1
+  s:turn({ { move = 1 } })
+  check(m.lock and m.lock.encore and not s:canAct(1), "Encore locks the member into its last move")
+  local s2, b2, m2 = duel(g3("Disable", "DISABLE"))
+  b2.lastMove = b2.moves[1]
+  local ev = s2:turn({ { move = 1 } })
+  check(not b2.disabled and has(ev, "failed"), "Disable fails on the Dynamaxed boss")
+end
+
+-- Perish Song spares the Dynamaxed boss; Destiny Bond does nothing to it; Yawn; Charge; Spite
+do
+  local s, boss, m = duel(g3("Perish Song", "PERISH_SONG", { side = { self = true } }))
+  s:turn({ { move = 1 } })
+  check(m.perish and not boss.perish, "Perish Song: the member counts down, the boss is spared")
+  for _ = 1, 3 do s:turn({ { move = 1 } }) end
+  check(m.mon.hp == 0 or (m.down or 0) > 0, "...and faints after three turns")
+
+  s, boss, m = duel(g3("Yawn", "YAWN"))
+  s:turn({ { move = 1 } })
+  check(boss.yawn and not boss.status, "Yawn: drowsy")
+  s:turn({ { move = 1 } })
+  check(boss.status == "SLP", "...asleep at the end of the next turn")
+
+  s, boss, m = duel(g3("Charge", "CHARGE", { side = { self = true } }))
+  s:turn({ { move = 1 } })
+  check(m.expCharged ~= nil, "Charge: charged for the next turn")
+  s:turn({})
+  check(m.expCharged == nil, "...gone after it")
+
+  s, boss, m = duel(g3("Spite", "SPITE"))
+  boss.moves[1].pp = 10
+  boss.lastMove = boss.moves[1]
+  s:turn({ { move = 1 } })
+  check(boss.moves[1].pp < 10 and boss.moves[1].pp >= 4, "Spite cuts the last move's PP (" .. boss.moves[1].pp .. ")")
+end
+
+-- Mimic, Transform, Psych Up, Trick, Foresight, Conversion
+do
+  local s, boss, m = duel(g3("Mimic", "MIMIC"))
+  boss.lastMove = mv("Ember", { power = 40 })
+  boss.lastMove.key = "EMBER"
+  s:turn({ { move = 1 } })
+  check(m.moves[1].name == "Ember" and m.moves[1].pp == 5, "Mimic: the boss's last move, 5 PP")
+  s, boss, m = duel(g3("Transform", "TRANSFORM"))
+  boss.mon.attack, boss.type1 = 200, 10
+  s:turn({ { move = 1 } })
+  check(m.transformed and m.type1 == 10 and m.__ndxStat.attack == 200 and m.moves[1].name == "Splash", "Transform: types, stats, moves")
+  s, boss, m = duel(g3("Psych Up", "PSYCH_UP"))
+  boss.stages.attack = 3
+  s:turn({ { move = 1 } })
+  check(m.stages.attack == 3, "Psych Up copies the stages")
+  s, boss, m = duel(g3("Trick", "TRICK"))
+  m.item = 44
+  s:turn({ { move = 1 } })
+  check(m.item == 0 and boss.item == 44, "Trick hands the item over")
+  s, boss, m = duel(g3("Foresight", "FORESIGHT"))
+  s:turn({ { move = 1 } })
+  check(boss.expIdentified, "Foresight identifies")
+  s, boss, m = duel(g3("Conversion", "CONVERSION", { side = { self = true } }))
+  m.moves[2] = mv("Ember", { power = 40, type = 10 })
+  s:turn({ { move = 1 } })
+  check(m.type1 == 10 or m.type1 == 0, "Conversion takes a move's type (" .. tostring(m.type1) .. ")")
+end
+
+-- Knock Off, Thief, Rapid Spin, Pay Day, Focus Punch, Rage, Bide
+do
+  local s, boss, m = duel(g3("Knock Off", "KNOCK_OFF", { power = 20 }))
+  boss.item = 5
+  s:turn({ { move = 1 } })
+  check(boss.item == 0, "Knock Off knocks the item away")
+  s, boss, m = duel(g3("Rapid Spin", "RAPID_SPIN", { power = 20 }))
+  s.sides.team.hazards.stealthRock, m.trap = true, 3
+  s:turn({ { move = 1 } })
+  check(not s.sides.team.hazards.stealthRock and not m.trap, "Rapid Spin clears its side and frees it")
+  s, boss, m = duel(g3("Pay Day", "PAY_DAY", { power = 40 }))
+  m.mon.level = 50
+  s:turn({ { move = 1 } })
+  check(s.money == 250, "Pay Day: five coins a level (" .. tostring(s.money) .. ")")
+  local boss2 = battler("Boss", 1000, 100, { mv("Hit", { power = 10 }) }, true)
+  local mm = battler("M1", 100, 10, { g3("Focus Punch", "FOCUS_PUNCH", { power = 150 }) })
+  local s2 = Sim.new{ boss = boss2, members = { mm }, adapter = adapter(), rng = rngOf(5) }
+  local ev = s2:turn({ { move = 1 } })
+  check(has(ev, "lost its focus") and boss2.mon.hp == 1000, "Focus Punch fails after a hit")
+  local boss3 = battler("Boss", 1000, 5, { mv("Hit", { power = 10 }) }, true)
+  local rm = battler("M1", 100, 90, { g3("Rage", "RAGE", { power = 20 }) })
+  local s3 = Sim.new{ boss = boss3, members = { rm }, adapter = adapter(), rng = rngOf(5) }
+  s3:turn({ { move = 1 } })
+  check(rm.stages.attack == 1, "Rage builds when it is hit")
+  local boss4 = battler("Boss", 5000, 100, { mv("Hit", { power = 30 }) }, true)
+  local bm = battler("M1", 500, 10, { g3("Bide", "BIDE", { side = { self = true } }) })
+  local s4 = Sim.new{ boss = boss4, members = { bm }, adapter = adapter(), rng = rngOf(5) }
+  s4:turn({ { move = 1 } })
+  s4:turn({})
+  s4:turn({})
+  check(boss4.mon.hp == 5000 - 2 * 90 or boss4.mon.hp == 5000 - 2 * 60, "Bide: twice what it took (" .. boss4.mon.hp .. ")")
+end
+
+
+-- reaching the hidden, Brick Break, Smelling Salt
+do
+  local boss = battler("Boss", 1000, 10, { mv("Earthquake", { power = 50 }) }, true)
+  boss.moves[1].key = "EARTHQUAKE"
+  local m = battler("M1", 300, 90, { g3("Dig", "DIG", { power = 80, key = "DIG", side = { charge = true, semi = true } }) })
+  m.moves[1].key = "DIG"
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(), rng = rngOf(5) }
+  s:turn({ { move = 1 } })
+  check(m.semi == "ground" and m.mon.hp == 200, "Earthquake reaches one underground, twice as hard (" .. m.mon.hp .. ")")
+
+  local s2, b2, m2 = duel(g3("Brick Break", "BRICK_BREAK", { power = 75 }))
+  s2.sides.boss.reflect = 4
+  local ev = s2:turn({ { move = 1 } })
+  check(s2.sides.boss.reflect == 0 and has(ev, "shattered"), "Brick Break shatters the boss's Reflect")
+
+  local s3, b3 = duel(g3("Smelling Salt", "SMELLINGSALT", { power = 60 }))
+  b3.status = "PAR"
+  s3:turn({ { move = 1 } })
+  check(b3.status == nil, "Smelling Salt cures the paralysis it struck")
 end
 
 print(("%d/%d checks passed  (max_raids sim)"):format(passed, passed + failed))

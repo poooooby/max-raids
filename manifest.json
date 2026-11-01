@@ -1,7 +1,7 @@
 {
   "id": "max_raids",
   "name": "Galar Rising",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -14,7 +14,7 @@
     "engine_internals"
   ],
   "dependencies": [
-    "national_dex_gen3@>=1.4.0",
+    "national_dex_gen3@>=1.6.3",
     "g9-battle-sprites-gen3@>=1.5.4"
   ],
   "optional_dependencies": [

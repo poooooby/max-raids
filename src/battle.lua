@@ -37,6 +37,7 @@ return function(mod, deps)
   local Pokemon = engine("src.core.game3.pokemon")
   local Progression = engine("src.core.game3.progression")
   local HeldItems = engine("src.core.game3.battle.held_items")
+  local ItemsData = engine("src.core.game3.items_data")
 
   -- ------- types
 
@@ -74,6 +75,10 @@ return function(mod, deps)
   -- the effect ids by name (the engine's table) and back
   local EFFECT_NAME = {}
   for name, id in pairs(EffectIds or {}) do if type(id) == "number" then EFFECT_NAME[id] = name end end
+  -- (the engine's older names for the same effects: one name each)
+  for name, id in pairs({ RESTORE_HP = 32, RAMPAGE = 27, RECOIL = 48, SEMI_INVULNERABLE = 155 }) do
+    if EffectIds and EffectIds[name] == id then EFFECT_NAME[id] = name end
+  end
   local STAT_KEY = { ATTACK = "attack", DEFENSE = "defense", SPEED = "speed", SPECIAL_ATTACK = "spAtk",
     SPECIAL_DEFENSE = "spDef", ACCURACY = "accuracy", EVASION = "evasion" }
   local MAJOR = { SLEEP = "SLP", TOXIC = "TOX", POISON = "PSN", PARALYZE = "PAR", WILL_O_WISP = "BRN" }
@@ -82,6 +87,62 @@ return function(mod, deps)
     BULK_UP = { attack = 1, defense = 1 }, CALM_MIND = { spAtk = 1, spDef = 1 },
     DRAGON_DANCE = { attack = 1, speed = 1 }, COSMIC_POWER = { defense = 1, spDef = 1 },
   }
+
+  -- the Gen 3 effects beyond a stat change or a status, as the sim carries them out (Sword / Shield's
+  -- numbers): drain / recoil = % of the damage dealt (negative: recoil); missRecoil = half the user's max HP
+  -- when the move misses; needSleep = the target must be asleep; hits = a count, "multi" (2-5) or
+  -- "triple" (3, power 10 / 20 / 30); trap; confuse / flinch = % chance; charge = a turn to charge first
+  -- semi = out of reach meanwhile; recharge = no move next turn; rampage = 2-3 turns, then confused;
+  -- ohko; focus = the user's crit stage up; tri = Tri Attack's burn / paralysis / freeze
+  local ALL_UP = { attack = 1, defense = 1, spAtk = 1, spDef = 1, speed = 1 }
+  local EFFECT_SIDE = {
+    ABSORB = { drain = 50 }, DREAM_EATER = { drain = 50, needSleep = true },
+    RECOIL = { drain = -25 }, DOUBLE_EDGE = { drain = -33 }, RECOIL_IF_MISS = { missRecoil = true },
+    OVERHEAT = { selfStages = { spAtk = -2 } }, SUPERPOWER = { selfStages = { attack = -1, defense = -1 } },
+    ALL_STATS_UP_HIT = { selfStages = ALL_UP, chance = true },
+    MULTI_HIT = { hits = "multi" }, DOUBLE_HIT = { hits = 2 }, TRIPLE_KICK = { hits = "triple" },
+    TWINEEDLE = { hits = 2, status = "PSN", statusChance = 20 },
+    TRAP = { trap = true },
+    CONFUSE_HIT = { confuse = 10 }, CONFUSE = { confuse = 100 },
+    FLINCH_HIT = { flinch = 30 }, FLINCH_MINIMIZE_HIT = { flinch = 30 },
+    TRI_ATTACK = { tri = 20 },
+    THAW_HIT = { status = "BRN", statusChance = 10 }, BLAZE_KICK = { status = "BRN", statusChance = 10 },
+    POISON_FANG = { status = "TOX", statusChance = 30 }, POISON_TAIL = { status = "PSN", statusChance = 10 },
+    RECHARGE = { recharge = true }, RAMPAGE = { rampage = true }, OHKO = { ohko = true },
+    FOCUS_ENERGY = { focus = true, self = true },
+    SOLAR_BEAM = { charge = true }, RAZOR_WIND = { charge = true },
+    SKULL_BASH = { charge = true, chargeStages = { defense = 1 } },
+    SKY_ATTACK = { charge = true, flinch = 30 },
+    SEMI_INVULNERABLE = { charge = true, semi = true },
+    BELLY_DRUM = { bellyDrum = true, self = true }, HAZE = { haze = true, self = true },
+    LEECH_SEED = { seed = true },
+    SWAGGER = { stages = { attack = 2 }, confuse = 100 }, FLATTER = { stages = { spAtk = 1 }, confuse = 100 },
+    TICKLE = { stages = { attack = -1, defense = -1 } },
+    MEMENTO = { stages = { attack = -2, spAtk = -2 }, userFaints = true },
+    REST = { rest = true, self = true },
+    PAIN_SPLIT = { painSplit = true },
+    SPIKES = { rule = "SPIKES", self = true },
+    SECRET_POWER = { status = "PAR", statusChance = 30 }, SNORE = { g3 = "SNORE", flinch = 30 },
+    FAKE_OUT = { flinch = 100 }, TEETER_DANCE = { confuse = 100 }, ATTRACT = { attract = true },
+    DEFENSE_CURL = { stages = { defense = 1 }, self = true, curl = true }, MINIMIZE = { stages = { evasion = 2 }, self = true },
+    CURSE = { curse = true }, NIGHTMARE = { nightmare = true }, LOCK_ON = { lockOn = true },
+    FUTURE_SIGHT = { future = true }, INGRAIN = { ingrain = true, self = true }, REFRESH = { refresh = true, self = true },
+    RAIN_DANCE = { weather = "RAIN" }, SUNNY_DAY = { weather = "SUN" }, SANDSTORM = { weather = "SAND" },
+    HAIL = { weather = "HAIL" },
+  }
+
+  -- the rest of Gen 3's effects, carried out by the sim's Gen 3 section (`g3`; `self`: no target)
+  for _, k in ipairs({ "STOCKPILE", "SWALLOW", "CHARGE", "CONVERSION", "CONVERSION_2", "CAMOUFLAGE", "DESTINY_BOND",
+    "GRUDGE", "IMPRISON", "MAGIC_COAT", "SNATCH", "MUD_SPORT", "WATER_SPORT", "SUBSTITUTE", "PERISH_SONG", "RECYCLE",
+    "BIDE", "BATON_PASS", "TELEPORT", "METRONOME", "ASSIST", "SLEEP_TALK", "NATURE_POWER", "MIRROR_MOVE" }) do
+    EFFECT_SIDE[k] = EFFECT_SIDE[k] or { g3 = k, self = true }
+  end
+  for _, k in ipairs({ "DISABLE", "ENCORE", "TAUNT", "TORMENT", "SPITE", "MIMIC", "SKETCH", "TRANSFORM", "PSYCH_UP",
+    "ROLE_PLAY", "SKILL_SWAP", "TRICK", "MEAN_LOOK", "FORESIGHT", "YAWN", "ROAR", "ROLLOUT", "FURY_CUTTER", "PRESENT",
+    "SPIT_UP", "BEAT_UP", "RAGE", "FOCUS_PUNCH", "KNOCK_OFF", "THIEF", "RAPID_SPIN", "PAY_DAY", "UPROAR",
+    "SMELLINGSALT", "BRICK_BREAK" }) do
+    EFFECT_SIDE[k] = EFFECT_SIDE[k] or { g3 = k }
+  end
 
   -- what a move does besides its damage, from its Gen 3 effect:
   --   { stages = { [stat] = n }, self = true (stages on the user), status = "PAR", chance = 0..100,
@@ -92,7 +153,23 @@ return function(mod, deps)
     if MULTI_UP[name] then return { stages = MULTI_UP[name], self = true } end
     if MAJOR[name] then return { status = MAJOR[name] } end
     if MAJOR_HIT[name] then return { status = MAJOR_HIT[name], chance = chance } end
-    if name == "RESTORE_HP" then return { heal = 0.5, self = true } end
+    if name == "RESTORE_HP" or name == "SOFTBOILED" then return { heal = 0.5, self = true } end
+    -- (the sun's help: two thirds in sun, a quarter in other weather)
+    if name == "MORNING_SUN" or name == "SYNTHESIS" or name == "MOONLIGHT" then
+      return { heal = 0.5, self = true, weatherHeal = true }
+    end
+    local other = EFFECT_SIDE[name]
+    if other then
+      local s = {}
+      for k, v in pairs(other) do s[k] = v end
+      -- (a secondary effect rolls the move's own chance, else the one the table gives)
+      local roll = chance and chance > 0 and chance or nil
+      if s.status then s.statusChance = roll or s.statusChance end
+      if s.confuse then s.confuse = roll or s.confuse end
+      if s.flinch then s.flinch = roll or s.flinch end
+      if s.chance == true then s.chance = roll end
+      return s
+    end
     -- a stat raised or lowered: NAME_UP / _DOWN (one stage), _UP_2 / _DOWN_2 (two), and
     -- NAME_UP_HIT / _DOWN_HIT (an attack's chance of one stage)
     local function cut(suffix)
@@ -123,6 +200,8 @@ return function(mod, deps)
     if tonumber(e.chance) and tonumber(e.chance) < 100 then s.chance = tonumber(e.chance) end
     if tonumber(e.heal) and (e.healTarget or "self") == "self" then s.heal = tonumber(e.heal) / 100; s.self = true end
     if tonumber(e.drain) then s.drain = tonumber(e.drain) end
+    if tonumber(e.sandHeal) then s.sandHeal = tonumber(e.sandHeal) / 100 end
+    if tonumber(e.flinch) then s.flinch = tonumber(e.flinch) end
     -- (a status move touching only its user goes on the user)
     if e.kind == "status" and s.selfStages and not s.foeStages and not s.status then s.self = true end
     if not next(s) then return nil end
@@ -136,6 +215,24 @@ return function(mod, deps)
     if not (ok and e) then ok, e = pcall(dex.moveExtra, m.id) end
     return ok and e or nil
   end
+  -- the National Dex's rule for a newer move (its exports.moveRule: "HEX", "STEALTH_ROCK" ...) and
+  -- its hit count; an older National Dex without it: none
+  local function dexRule(m)
+    local dex = deps.dex and deps.dex()
+    if not (dex and dex.moveRule) then return nil, nil end
+    local ok, rule, hits = pcall(dex.moveRule, m.numId or m.id)
+    if not (ok and (rule or hits)) then ok, rule, hits = pcall(dex.moveRule, m.id) end
+    if not ok then return nil, nil end
+    return rule, hits
+  end
+  -- the rules (status moves) that act on the user, its side or the whole field: no target, no
+  -- accuracy check
+  Bt.SELF_RULES = {}
+  for _, k in ipairs({ "STEALTH_ROCK", "TOXIC_SPIKES", "STICKY_WEB", "SPIKES", "TRICK_ROOM", "GRAVITY", "WONDER_ROOM",
+    "MAGIC_ROOM", "FAIRY_LOCK", "COURT_CHANGE", "MISTY_TERRAIN", "GRASSY_TERRAIN", "ELECTRIC_TERRAIN",
+    "PSYCHIC_TERRAIN", "AQUA_RING", "MAGNET_RISE", "GEOMANCY", "LASER_FOCUS", "TAKE_HEART", "POWER_TRICK",
+    "CLANGOROUS_SOUL", "FILLET_AWAY", "NO_RETREAT", "STUFF_CHEEKS", "ACUPRESSURE", "ROTOTILLER", "ION_DELUGE",
+    "REVIVAL_BLESSING", "SHED_TAIL", "CHILLY_RECEPTION", "LUCKY_CHANT" }) do Bt.SELF_RULES[k] = true end
 
   Bt.ALIAS = { HIGH_JUMP_KICK = "HI_JUMP_KICK" }
 
@@ -146,6 +243,21 @@ return function(mod, deps)
     local ok, b = pcall(require, "bit")
     bitlib = ok and b or nil
   end
+  -- the move's side with the National Dex's rule and hit count on it (rule = the rule's name,
+  -- self = it needs no target); a Gen 3 move keeps its side
+  function Bt.withRule(side, m, power)
+    local rule, hits = dexRule(m)
+    if not (rule or hits) then return side end
+    local s = {}
+    for k, v in pairs(side or {}) do s[k] = v end
+    s.rule = rule
+    if hits ~= nil and not s.hits then s.hits = hits == true and "multi" or tonumber(hits) end
+    -- (Phantom Force, Shadow Force: a turn vanished, then a strike through Protect)
+    if rule == "PHANTOM_FORCE" or rule == "SHADOW_FORCE" then s.charge, s.semi, s.vanish = true, true, true end
+    if rule and power == 0 and Bt.SELF_RULES[rule] then s.self = true end
+    return s
+  end
+
   function Bt.move(ref, pp, maxPp)
     if not Moves then return nil end
     -- (later names for Gen 3 moves)
@@ -174,7 +286,7 @@ return function(mod, deps)
       -- user's allies too)
       friendly = (bitlib and bitlib.band(tonumber(m.target) or 0, 32) ~= 0)
         or (key ~= nil and TeamMoves.FRIENDLY ~= nil and TeamMoves.FRIENDLY[Bt.squash(key)] == true) or false,
-      side = extraSide(dexExtra(m)) or sideOf(m.effect, tonumber(m.secondaryChance) or 0),
+      side = Bt.withRule(extraSide(dexExtra(m)) or sideOf(m.effect, tonumber(m.secondaryChance) or 0), m, power),
       pp = pp or tonumber(m.pp) or 10, maxPp = maxPp or tonumber(m.pp) or 10,
     }
   end
@@ -458,13 +570,15 @@ return function(mod, deps)
 
   function Bt.adapter(rng)
     rng = rng or function(lo, hi) return love.math.random(lo, hi) end
-    local st = { wild = true, badges = {}, kinds = {}, rng = rng }
+    -- (a turn number: the National Dex's Electrify / Ion Deluge marks compare against it)
+    local st = { wild = true, badges = {}, kinds = {}, rng = rng, turn = 0 }
     local engineAdapter = nil
     if AdapterMod and AdapterMod.new then
       local ok, ad = pcall(AdapterMod.new, st)
       if ok then engineAdapter = ad end
     end
-    local A = { rng = rng }
+    -- (the battle state the National Dex's rules read: the sim keeps its turn, field and marks here)
+    local A = { rng = rng, st = st }
 
     local function abilityName(b)
       if not engineAdapter or b.boss then return nil end
@@ -473,13 +587,32 @@ return function(mod, deps)
     end
     A.abilityName = abilityName
 
-    -- the type multiplier of a move on a battler (1, 2, 0.5, 0 ...)
-    function A.effectiveness(moveType, def)
+    -- the type multiplier of a move on a battler (1, 2, 0.5, 0 ...): its two types, a third added
+    -- (Trick-or-Treat, Forest's Curse: `__ndxType3`), a Dark type's Psychic immunity gone under
+    -- Miracle Eye; rule FLYING_PRESS adds the Flying type's
+    local function chart(moveType, t1, t2)
       if Types and Types.effectiveness then
-        local ok, m = pcall(Types.effectiveness, moveType, def.type1, def.type2 or def.type1)
+        local ok, m = pcall(Types.effectiveness, moveType, t1, t2 or t1)
         if ok and tonumber(m) then return tonumber(m) end
       end
       return 1
+    end
+    local PSYCHIC, DARK, MYSTERY = 14, 17, 9
+    function A.effectiveness(moveType, def, rule)
+      local t1, t2 = def.type1, def.type2
+      -- (Foresight, Odor Sleuth: Normal and Fighting moves reach a Ghost)
+      if def.expIdentified and (moveType == 0 or moveType == 1) then
+        if t1 == 7 then t1 = MYSTERY end
+        if t2 == 7 then t2 = MYSTERY end
+      end
+      if def.__ndxMiracleEye and moveType == PSYCHIC then
+        if t1 == DARK then t1 = MYSTERY end
+        if t2 == DARK then t2 = MYSTERY end
+      end
+      local m = chart(moveType, t1, t2)
+      if def.__ndxType3 and def.__ndxType3 ~= t1 and def.__ndxType3 ~= t2 then m = m * chart(moveType, def.__ndxType3) end
+      if rule == "FLYING_PRESS" then m = m * chart(2, t1, t2) end
+      return m
     end
 
     -- the damage of att's move on def: dmg, info (effectiveness, critical); 0 for an immunity
@@ -492,8 +625,10 @@ return function(mod, deps)
         local t1, t2 = def.type1, def.type2
         if t1 == FLYING then def.type1 = (t2 ~= nil and t2 ~= FLYING) and t2 or 0 end
         if def.type2 == FLYING then def.type2 = nil end
-        local okD, dmg, info = pcall(A.damage, att, def, mv, spread, { reflect = o.reflect, lightScreen = o.lightScreen,
-          doubleScreens = o.doubleScreens, helped = o.helped, gravity = false })
+        local o2 = {}
+        for k, v in pairs(o) do o2[k] = v end
+        o2.gravity = false
+        local okD, dmg, info = pcall(A.damage, att, def, mv, spread, o2)
         def.type1, def.type2 = t1, t2
         if okD then return dmg, info end
         return 1, { effectiveness = 1 }
@@ -514,10 +649,20 @@ return function(mod, deps)
       -- (the target side's screens; Helping Hand: the engine's own x1.5)
       local helpedWas = att.expHelpingHand
       if o.helped then att.expHelpingHand = true end
+      -- (the raid's weather on the state too: the engine's and the National Dex's rules read it there;
+      -- the turn and the field - terrain, Wonder Room, Gravity - for the National Dex's rules)
+      st.weather = o.weather
+      if o.turn then st.turn = o.turn end
+      st.__ndxField = o.field
+      -- (Magic Room: held items do nothing)
+      local attItem, defItem = nil, nil
+      if o.magicRoom then attItem, defItem, att.item, def.item = att.item, def.item, 0, 0 end
       -- (a spread move's cut is the sim's: Sword / Shield's 3 / 4, not Gen 3's half)
       local ok, dmg, info = pcall(Damage.calc, att, def, mv.ref, { adapter = engineAdapter, st = st, rng = rng,
-        weather = st.weather, highCrit = (att.critUp or 0) > 0 or nil,
+        weather = st.weather, weatherKind = o.weather, power = o.power, highCrit = (att.critUp or 0) > 0 or nil,
+        forceCrit = o.noCrit and false or nil, mudSport = o.mudSport, waterSport = o.waterSport,
         reflect = o.reflect or nil, lightScreen = o.lightScreen or nil, doubleScreens = o.doubleScreens or nil })
+      if o.magicRoom then att.item, def.item = attItem, defItem end
       att.expHelpingHand = helpedWas
       if heldBack ~= nil then att.item = heldBack end
       if not ok then
@@ -528,7 +673,7 @@ return function(mod, deps)
       -- (the engine's own `effectiveness` is its chart's scaled product: the multiplier from the chart)
       local flags = info.typeFlags
       if (flags and flags.immune) or info.effectiveness == 0 then info.effectiveness = 0
-      else info.effectiveness = A.effectiveness(mv.type, def) end
+      else info.effectiveness = A.effectiveness(tonumber(info.moveType) or mv.type, def, mv.side and mv.side.rule) end
       return max(0, floor(tonumber(dmg) or 0)), info
     end
 
@@ -543,9 +688,16 @@ return function(mod, deps)
 
     -- Gen 3's accuracy check (the engine's formula: stages, the move's accuracy)
     local ACC = Rules and Rules.ACCURACY_STAGE
-    -- (gravity: x5/3, G-Max Gravitas)
-    function A.hits(att, def, mv, gravity)
-      if (mv.accuracy or 0) <= 0 then return true end
+    -- (gravity: x5/3, G-Max Gravitas; weather: Thunder and the storms never miss in rain, Thunder and
+    -- Hurricane hit half the time in sun; a target after Glaive Rush cannot dodge)
+    local RAIN_SURE = { THUNDER = true, HURRICANE = true, BLEAKWIND_STORM = true, WILDBOLT_STORM = true,
+      SANDSEAR_STORM = true }
+    local SUN_HALF = { THUNDER = true, HURRICANE = true }
+    function A.hits(att, def, mv, gravity, weather)
+      if (mv.accuracy or 0) <= 0 or def.__ndxGlaiveRush then return true end
+      local key = mv.key
+      if weather == "RAIN" and RAIN_SURE[key] then return true end
+      if weather == "SUN" and SUN_HALF[key] then return rng(1, 100) <= 50 end
       local buff = max(-6, min(6, (att.stages.accuracy or 0) - (def.stages.evasion or 0)))
       local r = ACC and ACC[buff] or { 1, 1 }
       local calc = floor(r[1] * mv.accuracy / r[2])
@@ -553,9 +705,42 @@ return function(mod, deps)
       return rng(1, 100) <= calc
     end
 
+    -- a move by its key (Nature Power), any of Gen 3's moves but those in `skip` (Metronome: by
+    -- squashed key), a move's Max form (a copied move)
+    function A.moveByKey(key) return Bt.move(key) end
+    function A.randomMove(skip, roll)
+      roll = roll or rng
+      for _ = 1, 200 do
+        local m = Bt.move(roll(1, 354))
+        if m and m.num and not (skip and skip[Bt.squash(m.key or "")]) then return m end
+      end
+      return nil
+    end
+    function A.maxOf(mv, gmaxId) return Bt.maxOf(mv, gmaxId) end
+
+    -- a held item that is a berry (Natural Gift, Stuff Cheeks, Bug Bite)
+    function A.isBerry(item)
+      item = tonumber(item) or 0
+      if item == 0 or not (ItemsData and ItemsData.isBerry) then return false end
+      local ok, r = pcall(ItemsData.isBerry, item)
+      return ok and r == true
+    end
+    -- whether a move of this type is physical (Gen 3 splits them by type)
+    function A.isPhysical(moveType)
+      if not (Types and Types.isPhysical) then return true end
+      local ok, r = pcall(Types.isPhysical, tonumber(moveType) or 0)
+      return ok and r == true
+    end
+    -- a stat at a stage (Strength Sap)
+    function A.applyStage(stat, stage)
+      if not (Damage and Damage.applyStage) then return stat end
+      local ok, v = pcall(Damage.applyStage, stat, stage)
+      return ok and tonumber(v) or stat
+    end
+
     -- speed with its stage, paralysis quartering it
     function A.speed(b)
-      local s = tonumber(b.mon.speed) or 1
+      local s = tonumber(b.__ndxStat and b.__ndxStat.speed) or tonumber(b.mon.speed) or 1
       if Damage and Damage.applyStage then
         local ok, v = pcall(Damage.applyStage, s, b.stages.speed or 0)
         if ok and tonumber(v) then s = tonumber(v) end

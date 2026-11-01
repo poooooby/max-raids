@@ -8,7 +8,7 @@ of your Pokémon, and take on a giant Dynamax or Gigantamax Pokémon on Sword an
 battlefield in 3D, then try to catch it.
 
 > [!NOTE]
-> **Requires [WoobleDex](https://github.com/poooooby/national_dex_gen3) 1.4.0 or newer**
+> **Requires [WoobleDex](https://github.com/poooooby/national_dex_gen3) 1.6.3 or newer**
 > (the raid bosses' and your Pokémon's modern moves, the Fairy type, abilities, the Exp. Candies the
 > raids reward, Dynamax Levels, the Gigantamax Factor and the Dynamax items) **and
 > [WoobleSpritePack](https://github.com/poooooby/g9-battle-sprites-gen3)** (your Pokémon's
@@ -134,12 +134,13 @@ you won: Exp. Candies, TMs, berries and more.*
   hit it twice as hard.
 - 🤝 **Moves for the team:** your four fight side by side, so the moves that help allies work as they
   do in Sword and Shield. Light Screen and Reflect raise a pane of glass in front of the whole team,
-  Aurora Veil a shimmering one (it needs hail, which a den doesn't have). Safeguard, Mist and Tailwind
-  cover all four. Wide Guard, Quick Guard, Crafty Shield and Mat Block guard the team for a turn, and
-  Protect, Detect, King's Shield, Spiky Shield, Baneful Bunker, Obstruct and Endure guard the one using
-  them. A Max Move still gets through a guard for a quarter of its damage. Follow Me and Rage Powder
+  Aurora Veil a shimmering one (once Hail or Snowscape is up). Safeguard, Mist, Tailwind and Lucky
+  Chant cover all four. Wide Guard, Quick Guard, Crafty Shield and Mat Block guard the team for a
+  turn, and Protect, Detect, King's Shield, Spiky Shield, Baneful Bunker, Obstruct, Silk Trap, Burning
+  Bulwark and Endure guard the one using them. A Max Move still gets through a guard for a quarter of its damage. Follow Me and Rage Powder
   draw the boss's attacks. Helping Hand, Heal Pulse, Floral Healing, Pollen Puff, Decorate and
-  Aromatic Mist ask which ally to use them on. Life Dew, Jungle Healing, Heal Bell, Aromatherapy, Wish,
+  Aromatic Mist ask which ally to use them on. Life Dew, Jungle Healing, Lunar Blessing, Heal Bell,
+  Aromatherapy, Wish,
   Howl, Coaching, Gear Up, Magnetic Flux and Flower Shield work on the team. A boss's own screens and
   Protect work against your team the same way.
 - 🌊 **Friendly fire:** moves that hit everyone around the user in Sword and Shield (Surf,
@@ -148,6 +149,13 @@ you won: Exp. Candies, TMs, berries and more.*
   user marked Immune); a move for the whole team, such as Light Screen or Wide Guard, shows the arrow
   on all four. Wide Guard and Protect shield your team from an ally's Surf too, and Explosion faints
   its user.
+- 🎯 **Every move does what it does in battle:** draining moves heal, recoil hurts, multi-hit moves
+  strike again and again, Hyper Beam needs a turn to recharge, Solar Beam and Fly take a turn first,
+  and the type chart works as always. Weather, terrains, Trick Room, Stealth Rock and the other
+  hazards (they hit your Pokémon as they come back after fainting), Substitute, Metronome, Encore,
+  Taunt, Transform and the rest all work, the newer moves from WoobleDex too. A Dynamax boss shrugs
+  off what Sword and Shield say it does: flinching, one-hit KO moves, Perish Song, Destiny Bond,
+  Encore and Disable.
 - 🔒 **Your Pokémon are safe:** your four fight as copies. Nothing in your party or boxes changes
   in a raid, win or lose.
 

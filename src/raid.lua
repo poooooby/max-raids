@@ -1182,8 +1182,9 @@ return function(mod, deps)
           local shown = maxForms and b.maxMoves and b.maxMoves[i] or mv
           row.name, row.typeName, row.pp, row.maxPp = shown.name, shown.typeName, mv.pp, mv.maxPp
           row.max = maxForms or nil
-          -- (tormented: the move it used last cannot be picked)
-          if not maxForms and r.sim and r.sim:tormented(b, mv) then row.live = false; row.right = "Torment" end
+          -- (barred: Torment's last move, a disabled one, a status move under Taunt, an imprisoned one)
+          local why = not maxForms and r.sim and r.sim.barredWhy and r.sim:barredWhy(b, mv)
+          if why then row.live = false; row.right = why end
           row.rgb = Battle and Battle.TYPE_RGB[shown.typeName] or nil
           if not shown.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(shown.type, r.boss)) end
         else
