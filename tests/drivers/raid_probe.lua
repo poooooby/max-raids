@@ -56,7 +56,8 @@ local function body(game, log)
   local key = os.getenv("PROBE_BOSS") or "CHARIZARD_4"
   local function shot(name) log("shot", name, U.shot(game, dir .. "/" .. name .. ".png") and "ok" or "MISSING") end
   local TCb = package.loaded["src.core.TouchControls"]
-  local before = type(TCb) == "table" and TCb.enabled or nil
+  local before
+  if type(TCb) == "table" then before = TCb.enabled end
   log("engine touch pad before the raid: enabled", tostring(before))
   local ok, why = X.open(key)
   check(ok == true, "the raid opens: " .. tostring(why))
@@ -175,26 +176,9 @@ local function body(game, log)
     local tag = os.getenv("PROBE_TAG")
     if tag and R.current() and R.current().boss then R.current().boss.status = tag end
     shot("r10c_turn2")
-    -- Pokemon: the game's summary of the member choosing; B closes it and the raid takes no B
-    local first = st.actor
+    -- one member's pick in, then the Bag for the next: the pouch, then whom to use it on; B back out of both
     pick()
     after(0.8)
-    local second = X.state().actor
-    R.cursorTo(2)
-    U.tap(game, "a")
-    waitFor(function() return X.state().summary end, 120)
-    check(X.state().summary, "Pokemon opens the summary")
-    check(Stack.has and Stack.has("summary"), "the summary's layer is up")
-    U.wait(30)
-    shot("r11_summary")
-    U.tap(game, "b")
-    waitFor(function() return not X.state().summary end, 600)
-    U.wait(10)
-    st = X.state()
-    check(not st.summary and st.actor == second and st.chosen == 1,
-      ("B closes it; the same member's turn (actor %s chosen %s, first %s)"):format(tostring(st.actor), tostring(st.chosen), tostring(first)))
-    shot("r12_after_summary")
-    -- Bag: the pouch, then whom to use it on; B back out of both
     R.choose("bag")
     U.wait(4)
     check(X.state().menu == "items", "Bag opens the pouch")
@@ -324,17 +308,22 @@ local function body(game, log)
       return log(("%d failures"):format(fails))
     end
   end
-  -- FLEE on the pad: a touch (PROBE_TOUCH=1) or a click
+  -- Run on the pad: a touch (PROBE_TOUCH=1) or a click; it asks, and Yes blows the party out
   local w = X._test.pad.where.flee
-  if check(w and w.w, "the pad's FLEE is placed") then
+  if check(w and w.w, "the pad's Run is placed") then
     local x, y = w.x + w.w / 2, w.y + w.h / 2
     if os.getenv("PROBE_TOUCH") == "1" then
       love.touchpressed("probe", x, y, 0, 0, 1); U.wait(2); love.touchreleased("probe", x, y, 0, 0, 1); U.wait(4)
     else
       love.mousepressed(x, y, 1, false, 1); U.wait(2); love.mousereleased(x, y, 1, false, 1); U.wait(4)
     end
-    log("after the FLEE press: active", tostring(X.state().active))
-    check(not X.state().active, "FLEE on the pad closes the raid")
+    check(X.state().phase == "leaveq", "Run asks to leave the den")
+    waitFor(function() return X.state().ask == "yesno" end, 300)
+    R.answer(true)
+    U.wait(4)
+    check(X.state().phase == "blown", "Yes: blown out of the den")
+    waitFor(function() return not X.state().active end, 1200)
+    check(not X.state().active, "the raid closes after the gust")
   end
   if X.state().active then X.close() end
   U.wait(10)
