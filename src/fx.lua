@@ -206,7 +206,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   Fx.shader = shader
   -- the shaders and textures made ahead (the raid calls it while the screen is black: made at the
   -- first effect they took 120 ms of a frame on a slow device)
-  function Fx.warm() shader("fire"); return true end
+  local warmSheets   -- (below: the pixel art sheets)
+  function Fx.warm() shader("fire"); warmSheets(); return true end
 
   -- real fire in a rect (x, y top-left, w, h); false when the shader is out
   local function fireRect(G2, x, y, w, h, now, seed, alpha, blaze)
@@ -843,6 +844,133 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
+  -- ------- pixel art effects (data/raid_pixelfx.lua: made with pixelfx, baked into a grey atlas):
+  -- one played on a target as a picture standing at its place in the den, drawn for a character
+  -- CHAR_PX tall and scaled to the target's height (on the boss BOSS_K of it, the body's effects on
+  -- its middle); its colour put back by a gradient map from a tint - the move's type for a typed
+  -- one, else its own: black -> the tint at KNEE of the grey's brightness -> white; a loop plays for
+  -- `secs`, fading over FADE_S
+
+  local SHEETS = deps.Sheets or {}
+  Fx.SHEET = { CHAR_PX = 38, BOSS_K = 0.5, FADE_S = 0.3, MAX = 24 }
+  local GRADMAP_GLSL = [[
+extern vec3 tint;
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  vec4 t = Texel(tex, tc);
+  float v = t.r;
+  const float KNEE = 0.8;
+  vec3 c = v < KNEE ? tint * (v / KNEE) : mix(tint, vec3(1.0), (v - KNEE) / (1.0 - KNEE));
+  return vec4(c, t.a) * color;
+}
+]]
+  local atlas = { tried = false, pages = {}, quads = {}, map = nil, sent = nil }
+  local sheets = {}
+  local function atlasLoad()
+    if atlas.tried then return atlas.ok end
+    atlas.tried = true
+    if not (G and deps.read) then return false end
+    for p = 1, SHEETS.PAGES or 0 do
+      local ok, img = pcall(function()
+        local name = "atlas_" .. p .. ".png"
+        local bytes = deps.read("assets/fx/pixelfx/" .. name)
+        if not bytes then return nil end
+        local im = G.newImage(love.image.newImageData(love.filesystem.newFileData(bytes, name)))
+        im:setFilter("nearest", "nearest")
+        return im
+      end)
+      if not (ok and img) then return false end
+      atlas.pages[p] = img
+    end
+    -- each effect's frames: a quad on its page and where it sits in the frame (false: an empty one)
+    for key, d in pairs(SHEETS) do
+      if type(d) == "table" and d.f then
+        local q, f = {}, d.f
+        for i = 1, d.n do
+          local j = (i - 1) * 7
+          local page = f[j + 1]
+          if page > 0 then
+            local img = atlas.pages[page]
+            q[i] = { img, G.newQuad(f[j + 2], f[j + 3], f[j + 4], f[j + 5], img:getDimensions()), f[j + 6], f[j + 7] }
+          else
+            q[i] = false
+          end
+        end
+        atlas.quads[key] = q
+      end
+    end
+    local okS, sh = pcall(G.newShader, GRADMAP_GLSL)
+    atlas.map = okS and sh or nil
+    atlas.ok = true
+    return true
+  end
+  warmSheets = function() atlasLoad() end
+
+  -- key's effect on anchor T from now (secs: a loop's length; k: its size; flip: mirrored; tint: a
+  -- typed one's colour, else its own)
+  function Fx.sheet(key, T, now, secs, k, flip, tint)
+    local d = SHEETS[key]
+    if not (type(d) == "table" and d.f and T and atlasLoad()) then return nil end
+    if #sheets >= Fx.SHEET.MAX then table.remove(sheets, 1) end
+    local h = T.h or 1
+    local s = (T.boss and h * Fx.SHEET.BOSS_K or h) * (k or 1)
+    local X, Y, Z = T.X, T.foot or 0, T.Z + (T.boss and min(1.4, h * 0.2) or 0.3)
+    if d.place == "impact" then X, Y, Z = hitPoint(T)
+    elseif d.place == "body" and T.boss then Y = Y + (h - s) * 0.5 end
+    local e = { key = key, X = X, Y = Y, Z = Z, s = s, t0 = now, flip = flip or false,
+      dur = d.loop and (secs or d.n / d.fps) or d.n / d.fps, loop = d.loop,
+      tint = (d.typed and tint) or d.tint }
+    e.layer = layerOf(Z)
+    sheets[#sheets + 1] = e
+    return e
+  end
+
+  local function drawSheets(G2, layer, now)
+    if #sheets == 0 then return end
+    local S, map = Fx.SHEET, atlas.map
+    local on = false
+    for _, e in ipairs(sheets) do
+      local u = now - e.t0
+      if e.layer == layer and u >= 0 and u < e.dur then
+        local d = SHEETS[e.key]
+        local f = floor(u * d.fps)
+        if e.loop then f = f % d.n end
+        local fr = atlas.quads[e.key] and atlas.quads[e.key][f + 1]
+        local x, y, ppm = P(e.X, e.Y, e.Z)
+        if x and fr then
+          local sc = ppm * e.s / S.CHAR_PX
+          local a = e.loop and min(1, (e.dur - u) / S.FADE_S) or 1
+          if map then
+            if not on then G2.setShader(map); on = true end
+            if atlas.sent ~= e.tint then map:send("tint", e.tint); atlas.sent = e.tint end
+            G2.setColor(1, 1, 1, a)
+          else
+            -- (no shader: the grey multiplied by the tint)
+            G2.setColor(e.tint[1], e.tint[2], e.tint[3], a)
+          end
+          G2.draw(fr[1], fr[2], x, y, 0, e.flip and -sc or sc, sc, d.ax - fr[3], d.ay - fr[4])
+        end
+      end
+    end
+    if on then G2.setShader() end
+    G2.setColor(1, 1, 1, 1)
+  end
+
+  -- the effects a blow lands with: its kind's (claw marks, slashes, a spark or a heavy blow) in the
+  -- move's type's colour (a Normal move's in their own), its type's (a zap, a splash, acid, spores)
+  local TYPE_SHEET = { ELECTRIC = "zap", WATER = "splash", POISON = "acid" }
+  local function landSheets(m, T, p, now, flip)
+    local kind, sh = m.kind, m.spec.shape
+    local key = nil
+    if kind == "slash" then key = "slash"
+    elseif (kind == "slam" or kind == "multi") and sh == "claw" then key = "claw"
+    elseif kind == "slam" or kind == "multi" or kind == "bite" then key = (m.big or p > 0.7) and "blunt" or "spark"
+    elseif kind == "powder" and (sh == "spore" or sh == nil) then key = "spores" end
+    local tint = m.type ~= "NORMAL" and m.tc or nil
+    if key then Fx.sheet(key, T, now, nil, nil, flip, tint) end
+    local tk = TYPE_SHEET[m.type]
+    if tk and tk ~= key then Fx.sheet(tk, T, now, nil, nil, flip) end
+  end
+
   -- ------- the screen's flash, the G-Max charge
 
   local flashes = {}
@@ -906,6 +1034,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     powder = { 1.1, 0.6 }, self = { 0.9, nil }, drain = { 1.3, 0.3 }, spikes = { 0.9, 0.42 }, multi = { 0.35, 0.18 },
   }
   Fx.GMAX_K = 1.35          -- a G-Max move plays this much longer
+  local SHOT_GAP = 0.09     -- between the shots of a volley
   local moves = {}
 
   function Fx.move(spec, typeName, from, targets, now, big)
@@ -927,11 +1056,32 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     return m.impact, m.len
   end
 
+  -- when a look's last blow lands (seconds after it starts): a multi strike's n-th, a volley's n-th
+  -- shot, else its impact
+  function Fx.lastHit(spec, big)
+    local kind = spec[1] or "slam"
+    local key = (kind == "drop" and spec.shape == "slab") and "slab" or kind
+    local K = Fx.KIND[key] or Fx.KIND.slam
+    local k = big and Fx.GMAX_K or 1
+    local n = spec.n or (kind == "multi" and 3 or 1)
+    if kind == "multi" then
+      local len = (K[1] * n + 0.2) * k
+      return (n - 1) / n * len * 0.85 + len * 0.05 + 0.1
+    elseif kind == "shot" and n > 1 then
+      local imp = K[2] * k
+      return (n - 1) * SHOT_GAP + max(0.15, imp - (n - 1) * SHOT_GAP)
+    end
+    return (K[2] or K[1]) * k
+  end
+
   -- a target takes the blow: its type's hit, a flash, the raid's impact
   local function land(m, T, share, now, quiet)
     local p = (T.frac and min(1, 0.3 + T.frac * 1.8) or 0.18) * (share or 1) + (m.gmax and 0.3 or (m.big and 0.12 or 0))
     p = min(1.3, p)
-    if not quiet then Fx.hit(m.type, T, p, now, m.big) end
+    if not quiet then
+      Fx.hit(m.type, T, p, now, m.big)
+      landSheets(m, T, p, now, rnd(m.seed, T.i or 7) > 0.5)
+    end
     -- (one flash a move, however many it falls on)
     if p > 0.4 and not quiet and not m.flashed then
       m.flashed = true
@@ -961,7 +1111,6 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local side = (rnd(m.seed, k) - 0.5) * d * 0.15 * sin(g * pi)
     return x1 + (x2 - x1) * g + side, y1 + (y2 - y1) * g + d * 0.12 * sin(g * pi), z1 + (z2 - z1) * g
   end
-  local SHOT_GAP = 0.09
 
   -- the wall's depth now (wave): the boss's from in front of it to past the party; a member's from
   -- behind the team, through it, to the boss and past it
@@ -1116,7 +1265,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       for ti, T in ipairs(m.targets) do
         for k = 1, n do
           local g = (t - (k - 1) * SHOT_GAP) / fly
-          if g >= 1 then landOnce(m, ti * 100 + k, T, 1 / sqrt(n), now)
+          if g >= 1 and not m.landed[ti * 100 + k] then
+            -- (each hit of a multi-hit move takes its own share of the bar)
+            if T.hps then T.hp = T.hps[k] or T.hp end
+            landOnce(m, ti * 100 + k, T, 1 / sqrt(n), now)
           elseif g > 0 and tick then
             local x, y, z = shotPos(m, T, g, k)
             local sh = spec.shape or "ball"
@@ -1199,7 +1351,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
             local X, Y, Z = aimAt(T)
             spot("lines", X, Y, Z, min(3, T.h), now, 0.16, tc, 0.5)
           end
-          if t >= at then landOnce(m, ti * 100 + k, T, n > 1 and 0.6 or 1, now) end
+          if t >= at and not m.landed[ti * 100 + k] then
+            if T.hps then T.hp = T.hps[k] or T.hp end
+            landOnce(m, ti * 100 + k, T, n > 1 and 0.6 or 1, now)
+          end
         end
       end
     elseif kind == "slash" or kind == "bite" or kind == "rings" or kind == "bolt" or kind == "powder" or kind == "spikes" then
@@ -2013,6 +2168,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     for i = #spots, 1, -1 do if now - spots[i].t0 > spots[i].dur then table.remove(spots, i) end end
     for i = #decals, 1, -1 do if now - decals[i].t0 > decals[i].life then table.remove(decals, i) end end
     for i = #flashes, 1, -1 do if now - flashes[i].t0 > flashes[i].dur then table.remove(flashes, i) end end
+    for i = #sheets, 1, -1 do if now - sheets[i].t0 > sheets[i].dur then table.remove(sheets, i) end end
   end
 
   function Fx.clear()
@@ -2021,6 +2177,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     for i = #spots, 1, -1 do spots[i] = nil end
     for i = #decals, 1, -1 do decals[i] = nil end
     for i = #flashes, 1, -1 do flashes[i] = nil end
+    for i = #sheets, 1, -1 do sheets[i] = nil end
     charge, last = nil, nil
     if Fx.setLasting then Fx.setLasting(nil, nil, false, nil, 0) end
   end
@@ -2052,6 +2209,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       if layerOf(e.Z) == layer then drawSpot(G2, e, now) end
     end
     drawParts(G2, layer)
+    drawSheets(G2, layer, now)
     G2.pop()
   end
 

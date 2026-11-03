@@ -580,7 +580,7 @@ function Sim:held(ev, b, mv)
   if b.status == "SLP" then
     b.sleep = (b.sleep or 1) - 1
     if b.sleep > 0 then
-      ev[#ev + 1] = { kind = "cant", who = b, text = ("%s is fast asleep."):format(b.name) }
+      ev[#ev + 1] = { kind = "cant", who = b, ail = "SLP", text = ("%s is fast asleep."):format(b.name) }
       -- (Snore and Sleep Talk are used asleep)
       local g = mv and mv.side and mv.side.g3
       if g == "SNORE" or g == "SLEEP_TALK" then return false end
@@ -590,7 +590,7 @@ function Sim:held(ev, b, mv)
     ev[#ev + 1] = { kind = "status", who = b, status = nil, text = ("%s woke up!"):format(b.name) }
   elseif b.status == "FRZ" then
     if self.rng(1, 5) ~= 1 then
-      ev[#ev + 1] = { kind = "cant", who = b, text = ("%s is frozen solid!"):format(b.name) }
+      ev[#ev + 1] = { kind = "cant", who = b, ail = "FRZ", text = ("%s is frozen solid!"):format(b.name) }
       return true
     end
     b.status = nil
@@ -630,7 +630,7 @@ function Sim:held(ev, b, mv)
     end
   end
   if b.status == "PAR" and self.rng(1, 4) == 1 then
-    ev[#ev + 1] = { kind = "cant", who = b, text = ("%s is paralyzed! It can't move!"):format(b.name) }
+    ev[#ev + 1] = { kind = "cant", who = b, ail = "PAR", text = ("%s is paralyzed! It can't move!"):format(b.name) }
     return true
   end
   return false
@@ -2283,7 +2283,8 @@ function Sim:use(ev, att, mv, targets, ally, locked)
   if sd0 and sd0.charge and not quick and not att.boss and not att.dmax and locked ~= true then
     att.lock = { mv = mv, release = true }
     if sd0.semi then att.semi = Sim.SEMI_KIND[key] or true end
-    ev[#ev + 1] = { kind = "status", who = att, text = (Sim.CHARGE_TEXT[key] or "%s is charging up!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, charge = true, semi = att.semi, move = mv,
+      text = (Sim.CHARGE_TEXT[key] or "%s is charging up!"):format(att.name) }
     if sd0.chargeStages then
       for stat, n in pairs(sd0.chargeStages) do self:stage(ev, att, stat, n) end
     end
@@ -2648,12 +2649,13 @@ function Sim:endTurn(ev)
   local b = self.boss
   local team = {}
   for i = 1, #self.members do if self:present(i) then team[#team + 1] = self.members[i] end end
-  local function hurt(who, cut, text)
+  -- (ail: the status that hurt it, for its look)
+  local function hurt(who, cut, text, ail)
     if self.over or not alive(who) then return end
     cut = self:capAtShield(who, min(hpOf(who), max(1, cut)))
     if cut <= 0 then return end
     who.mon.hp = hpOf(who) - cut
-    ev[#ev + 1] = { kind = "residual", who = who, amount = cut, hp = who.mon.hp, text = text }
+    ev[#ev + 1] = { kind = "residual", who = who, amount = cut, hp = who.mon.hp, text = text, ail = ail }
     if not alive(who) then self:fainted(ev, who)
     elseif who.boss then self:checkShield(ev) end
   end
@@ -2777,7 +2779,7 @@ function Sim:endTurn(ev)
       else
         cut = floor(maxHpOf(x) / 8)
       end
-      hurt(x, cut, st == "BRN" and ("%s was hurt by its burn!"):format(x.name) or ("%s was hurt by poison!"):format(x.name))
+      hurt(x, cut, st == "BRN" and ("%s was hurt by its burn!"):format(x.name) or ("%s was hurt by poison!"):format(x.name), st)
     end
   end
   if self.over then return end

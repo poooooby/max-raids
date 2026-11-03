@@ -23,7 +23,7 @@ return function(mod, deps)
   local floor, max, min = math.floor, math.max, math.min
   local sin, cos, pi, sqrt = math.sin, math.cos, math.pi, math.sqrt
 
-  local Rd = { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Fx = Fx }
+  local Rd = { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Fx = Fx, MoveFx = MoveFx }
   Rd.music_ = Music
   -- an animation frame lasts AnimationSpeed of these (the pack's metrics, Essentials' units)
   Rd.ANIM_UNIT_S = 1 / 20
@@ -898,6 +898,10 @@ return function(mod, deps)
     if r.sim and not r.sim.field then r.fieldShown = nil end
     -- (the turn's guards and protections are down: the turn is over)
     r.turnFx, r.protectFx = {}, {}
+    -- (a member off the field that is no longer: back, whatever kept it from striking)
+    for _, m in ipairs(r.members or {}) do
+      if m.away and not m.awayBack and not (m.b and m.b.semi) then m.awayBack = r.t end
+    end
     if r.boss then
       local sh = r.boss.shield
       r.boss.shieldShown = sh and sh.left > 0 and { left = sh.left, max = sh.max } or nil
@@ -1714,7 +1718,53 @@ return function(mod, deps)
       end
       return Rd.oneTarget(MoveFx.GMAX[mv.key or ""] or { "beam", big = true })
     end
-    return MoveFx.MOVES[mv.key or ""] or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "slam" }
+    return MoveFx.MOVES[mv.key or ""] or Rd.lookOf(mv) or MoveFx.DEFAULT[mv.typeName or "NORMAL"] or { "slam" }
+  end
+
+  -- a move with no look of its own takes one from what it does: a status move on its user (a stat
+  -- raised, a heal) an aura round it; one giving a status a cloud of spores or gas, a jolt, a
+  -- will-o'-wisp, or rings; one lowering the foe's stats rings; a drain its orbs coming back
+  Rd.STATUS_LOOK = { GRASS = { "powder", shape = "spore" }, BUG = { "powder", shape = "spore" },
+    POISON = { "powder", shape = "gas" }, ELECTRIC = { "bolt" }, FIRE = { "shot", shape = "ball" },
+    GHOST = { "rings", shape = "dark" }, DARK = { "rings", shape = "dark" }, NORMAL = { "rings", shape = "eye" } }
+  function Rd.lookOf(mv)
+    local s = mv.side
+    if not s then return nil end
+    if mv.status then
+      if s.self or s.selfStages or s.heal or s.boost then return { "self" } end
+      if s.status then return Rd.STATUS_LOOK[mv.typeName or ""] or { "rings", shape = "psychic" } end
+      if s.stages or s.foeStages then return { "rings", shape = "eye" } end
+      return { "rings", shape = "psychic" }
+    end
+    if (tonumber(s.drain) or 0) > 0 then return { "drain" } end
+    return nil
+  end
+
+  -- the pixel art an event plays on its battler (Fx.sheet): a status taking hold, a turn lost to it,
+  -- poison or a burn hurting, a heal, a critical hit
+  Rd.STATUS_SHEET = { SLP = "sleep", PSN = "acid", TOX = "acid", BRN = "burn", FRZ = "freeze", PAR = "stunned" }
+  Rd.SHEET_S = 1.8
+  function Rd.eventSheet(e)
+    if not (Fx and Fx.sheet) then return end
+    local key, who = nil, e.who
+    if e.kind == "status" then
+      key = Rd.STATUS_SHEET[e.status or ""] or (e.confused and "confused") or (e.attract and "charmed") or nil
+    elseif e.kind == "cant" then
+      key = Rd.STATUS_SHEET[e.ail or ""] or (e.confused and "confused") or (e.attract and "charmed") or nil
+    elseif e.kind == "residual" and e.ail then key = Rd.STATUS_SHEET[e.ail]
+    elseif e.kind == "heal" then key = "heal"
+    elseif e.kind == "crit" then key, who = "crit", e.target end
+    local A = key and who and placeOf(who)
+    if A then Fx.sheet(key, A, r.t, Rd.SHEET_S) end
+  end
+
+  -- a multi-hit move's look made to land each hit: a volley of n shots, or n strikes in a row
+  local STRIKES = { slam = true, slash = true, bite = true, multi = true, spikes = true }
+  function Rd.manyHits(spec, n)
+    if n <= 1 then return spec end
+    if spec[1] == "shot" then return { "shot", shape = spec.shape, n = n, big = spec.big } end
+    if STRIKES[spec[1]] then return { "multi", shape = spec.shape, n = n, big = spec.big } end
+    return { "shot", shape = (spec[1] == "drop" and spec.shape) or "ball", n = n, big = spec.big }
   end
 
   -- at a use: whom it falls on (the events up to the next move), when its look starts
@@ -1749,12 +1799,22 @@ return function(mod, deps)
         if x.kind == "damage" and spec[1] ~= "self" then x.looked = true end
         if who and x.kind == "damage" and x.amount then
           local most = max(1, tonumber(who.mon and who.mon.maxHp) or 1)
-          seen[who].frac = (seen[who].frac or 0) + x.amount / most
-          seen[who].hp = x.hp
+          local s = seen[who]
+          s.frac = (s.frac or 0) + x.amount / most
+          s.hp = x.hp
+          -- (each hit's HP after it, for a multi-hit move's bar to step down blow by blow)
+          s.hps = s.hps or {}
+          s.hps[#s.hps + 1] = x.hp
         end
         if who and x.kind == "effect" and x.eff then seen[who].eff = x.eff end
       end
     end
+    -- (a status move reaching no one - Splash, a move on the user or its field: an aura round it)
+    if mv and mv.status and #targets == 0 and spec[1] ~= "self" then spec = { "self" } end
+    -- (a multi-hit move: as many blows as landed)
+    local most = 0
+    for _, t in ipairs(targets) do most = max(most, t.hps and #t.hps or 0) end
+    spec = Rd.manyHits(spec, most)
     local words = #(e.text or "") / Rd.MSG.CPS + 0.25
     local gmax = mv and mv.isGmax and not mv.guard
     local at = r.t + words + (gmax and Rd.GMAX_CHARGE_S or 0)
@@ -1763,7 +1823,8 @@ return function(mod, deps)
     if spec[1] == "multi" then len = K[1] * (spec.n or 3) + 0.2 end
     r.anim = { at = at, spec = spec, user = e.who, targets = targets, type = mv and mv.typeName or "NORMAL",
       gmax = gmax, chargeAt = gmax and (r.t + words) or nil, len = len,
-      impact = K[2] and K[2] * (gmax and Fx.GMAX_K or 1) or len }
+      impact = K[2] and K[2] * (gmax and Fx.GMAX_K or 1) or len,
+      last = most > 1 and Fx.lastHit and Fx.lastHit(spec, gmax) or nil }
   end
 
   -- each frame: the G-Max charge, the look's start, the boss's lunge
@@ -1799,7 +1860,7 @@ return function(mod, deps)
       local tg = {}
       for _, t in ipairs(a.targets) do
         local p = placeOf(t.b)
-        if p then p.frac, p.hp, p.b, p.eff = t.frac, t.hp, t.b, t.eff; tg[#tg + 1] = p end
+        if p then p.frac, p.hp, p.b, p.eff, p.hps = t.frac, t.hp, t.b, t.eff, t.hps; tg[#tg + 1] = p end
       end
       if from then Fx.move(a.spec, a.type, from, tg, r.t, a.gmax) end
       if Sounds then Rd.se(Sounds.moveSe(a.spec, a.type)) end
@@ -1952,7 +2013,7 @@ return function(mod, deps)
       local i = memberIndex(e.who)
       local m = i and r.members[i]
       if m then
-        if e.kind == "faint" then m.faintT, m.backT = r.t, nil else m.backT = r.t end
+        if e.kind == "faint" then m.faintT, m.backT, m.away = r.t, nil, nil else m.backT = r.t end
         local A = placeOf(e.who)
         if Fx and A then
           if e.kind == "faint" then
@@ -2006,6 +2067,25 @@ return function(mod, deps)
         return
       end
     end
+    -- a charging turn: Fly, Bounce, Dig, Dive, Phantom Force take the member off the field (up out of
+    -- sight, into the ground or the water, gone) until it strikes, or held from striking; any other
+    -- (Solar Beam, Skull Bash) gathers its energy round it
+    if e.kind == "status" and e.charge and e.who and not e.who.boss then
+      local m = r.members[memberIndex(e.who) or 0]
+      local A = placeOf(e.who)
+      if m and e.semi then
+        m.away = e.semi == true and "vanish" or e.semi
+        m.awayT, m.awayBack = r.t, nil
+        if Fx and A then Fx.hit(Rd.AWAY_HIT[m.away] or "NORMAL", A, 0.4, r.t) end
+      elseif Fx and A then
+        Fx.move({ "self" }, e.move and e.move.typeName or "NORMAL", A, {}, r.t)
+      end
+    end
+    if (e.kind == "use" or e.kind == "cant") and e.who and not e.who.boss then
+      local m = r.members[memberIndex(e.who) or 0]
+      if m and m.away and not m.awayBack then m.awayBack = r.t end
+    end
+    Rd.eventSheet(e)
     if e.kind == "side" then Rd.sideEvent(e) end
     if e.kind == "heal" then Rd.healSparkle(e.who, e.wish) end
     if e.kind == "guard" and (e.protect or e.max) and not (e.blocked or e.pierced) then
@@ -2031,7 +2111,7 @@ return function(mod, deps)
     if e.kind == "use" then
       local i = memberIndex(e.who)
       if Scene then
-        if i then Scene.shot("member", E.CAM_S, i)
+        if i then Scene.shot("attack", E.CAM_S, i)
         else
           -- the boss's move: the camera on it and whom it falls on - one member, or all of them
           local hit = Rd.targetsAhead(r.evI)
@@ -2076,7 +2156,9 @@ return function(mod, deps)
       Rd.say(e.text)
       r.evDur = #e.text / Rd.MSG.CPS + E.HOLD_S
       -- (a move's use lasts until its look has landed)
-      if e.kind == "use" and r.anim then r.evDur = max(r.evDur, r.anim.at - r.t + (r.anim.impact or r.anim.len) + 0.15) end
+      if e.kind == "use" and r.anim then
+        r.evDur = max(r.evDur, r.anim.at - r.t + (r.anim.last or r.anim.impact or r.anim.len) + 0.15)
+      end
     else
       -- (a hit lands with no words: the band steps aside while the bar drains)
       r.say = nil
@@ -3159,6 +3241,20 @@ return function(mod, deps)
     return 1
   end
 
+  -- a member off the field for a charging turn (m.away "air" | "ground" | "water" | "vanish"): 0
+  -- standing .. 1 gone, over AWAY_S each way; the type of the hit it leaves with
+  Rd.AWAY_S = 0.45
+  Rd.AWAY_HIT = { air = "FLYING", ground = "GROUND", water = "WATER", vanish = "GHOST" }
+  function Rd.memberAway(m)
+    if not m.away then return 0, nil end
+    if m.awayBack then
+      local u = 1 - (r.t - m.awayBack) / Rd.AWAY_S
+      if u <= 0 then m.away, m.awayBack = nil, nil; return 0, nil end
+      return u, m.away
+    end
+    return min(1, (r.t - m.awayT) / Rd.AWAY_S), m.away
+  end
+
   -- ------- a portrait screen (a phone held upright): the UI is laid out for a landscape box, w wide
   -- and w / UI_ASPECT tall (square: the UI sized as large as the width allows) - the boss's block and
   -- the order at the screen's top, the words, the panel, the pad and the catch at its foot (translated
@@ -3220,7 +3316,10 @@ return function(mod, deps)
     end
     for i = 1, 4 do
       local m = r.members[i]
-      if m and m.draw then m.draw.shrink, m.draw.giant, m.draw.gmax = Rd.memberShrink(m), m.giant or 0, m.gmaxLook end
+      if m and m.draw then
+        m.draw.shrink, m.draw.giant, m.draw.gmax = Rd.memberShrink(m), m.giant or 0, m.gmaxLook
+        m.draw.away, m.draw.awayKind = Rd.memberAway(m)
+      end
       memberPicsShown[i] = m and Rd.memberPicNow(m, r.t) or nil
     end
     if Fx then

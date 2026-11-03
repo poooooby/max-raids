@@ -68,6 +68,7 @@ return function(mod)
   local makeRewards = loadSibling(mod, "src/rewards.lua")
   local makeFx = loadSibling(mod, "src/fx.lua")
   local MoveFx = loadSibling(mod, "data/raid_move_fx.lua")
+  local PixelFx = loadSibling(mod, "data/raid_pixelfx.lua")
   local Sounds = loadSibling(mod, "data/raid_sounds.lua")
   local makeRaid = loadSibling(mod, "src/raid.lua")
   local makePadHide = loadSibling(mod, "src/pad_hide.lua")
@@ -215,7 +216,8 @@ return function(mod)
 
   Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax, TeamMoves = TeamMoves,
-    Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene }) or nil, MoveFx = MoveFx, Sounds = Sounds,
+    Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene, Sheets = PixelFx,
+      read = function(path) return mod:read(path) end }) or nil, MoveFx = MoveFx, Sounds = Sounds,
     makeDen = makeDen, Pick = Pick, Dyna = Dyna, MusicData = MusicData,
     Music = (function()
       if not makeMusic then return nil end

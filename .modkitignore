@@ -23,6 +23,7 @@ tests/drivers/shield_probe.lua
 tests/drivers/showcase.lua
 tests/raid_sim_test.lua
 tools/raid_pack.py
+tools/pixelfx_pack.py
 .modkitignore
 .claude/skills/lua-developer/SKILL.md
 tests/drivers/battle_size_probe.lua
@@ -58,3 +59,5 @@ tests/achievements_test.lua
 tests/drivers/ach_probe.lua
 tests/drivers/move_audit.lua
 tests/drivers/move_effects_probe.lua
+tests/drivers/looks_probe.lua
+tests/drivers/looks_audit.lua

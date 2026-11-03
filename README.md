@@ -156,6 +156,12 @@ you won: Exp. Candies, TMs, berries and more.*
   Taunt, Transform and the rest all work, the newer moves from WoobleDex too. A Dynamax boss shrugs
   off what Sword and Shield say it does: flinching, one-hit KO moves, Perish Song, Destiny Bond,
   Encore and Disable.
+- 🎨 **And looks the part:** a multi-hit move lands every blow, the HP bar dropping with each; Fly and
+  Bounce take your Pokémon up out of sight, Dig and Dive into the ground or the water; draining
+  moves pull their light back. Pixel art slashes, sparks, splashes and critical hits burst on the
+  target in the move's colours, and sleep, burns, poison, paralysis, freezing, confusion and love
+  show on whoever they strike. The camera rises over your Pokémon's shoulder as it attacks, to take
+  in the whole blow.
 - 🔒 **Your Pokémon are safe:** your four fight as copies. Nothing in your party or boxes changes
   in a raid, win or lose.
 
@@ -242,6 +248,9 @@ you won: Exp. Candies, TMs, berries and more.*
 - **Raid music:** from Lucidious89's [DBK] Raid Battles (Pokémon Essentials Deluxe Battle Kit),
   Pokémon Sword and Shield's raid themes.
 - **3D:** [g3d](https://github.com/groverburger/g3d) by groverburger (MIT).
+- **Pixel art effects** (hits, slashes, splashes, status marks): made with
+  [pixelfx](https://github.com/patch-gg/pixelfx) by Patch, partly after Hugo Duprez's Sprite Fusion
+  effects (MIT).
 - **Type icons:** from [PokéSprite](https://github.com/msikma/pokesprite) by msikma and contributors.
 - **Max Move power:** after Pokémon Showdown's data (MIT).
 

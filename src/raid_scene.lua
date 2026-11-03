@@ -118,9 +118,12 @@ return function(mod, deps)
   -- almost directly behind the member, low, looking up past it at the boss: the member large in the
   -- foreground, the boss towering over it, the others mostly out past the sides
   -- TARGET while the boss attacks (the message band covers the screen's foot: aimed a little lower,
-  -- so the member stands clear of it); CHOOSE for the member's own turn (no band: the boss whole)
-  Sc.TARGET = { SIDE = 0.3, UP = 0.65, BACK = 3.6, LOOK_X = 0.7, LOOK_Y = 3.5, FOV = 56 }
+  -- so the member stands clear of it); CHOOSE for the member's own turn (no band: the boss whole);
+  -- ATTACK for its move. The two attacks' are raised and tilted down onto where the blows land, so
+  -- more of the move's effect is in frame
+  Sc.TARGET = { SIDE = 0.3, UP = 1.4, BACK = 3.9, LOOK_X = 0.7, LOOK_Y = 2.7, FOV = 56 }
   Sc.CHOOSE = { SIDE = 0.3, UP = 0.65, BACK = 3.4, LOOK_X = 0.7, LOOK_Y = 4.4, FOV = 54 }
+  Sc.ATTACK = { SIDE = 0.3, UP = 1.6, BACK = 3.8, LOOK_X = 0.7, LOOK_Y = 3.3, FOV = 56 }
   local targetPose = { eye = { 0, 0, 0 }, look = { 0, 0, 0 }, fov = 60 }
   -- a Dynamaxed member: drawn GIANT times its size (Sc.giant[i] 0..1, eased by the raid), and its
   -- shots pulled back and up by GIANT_SHOT x that so the giant stays in frame
@@ -205,6 +208,7 @@ return function(mod, deps)
   -- the camera to a shot (a name, "member" with i, or a pose) over dur seconds (0: a cut)
   function Sc.shot(name, dur, i)
     local pose = (name == "member" and Sc.memberShot(i)) or (name == "target" and Sc.targetShot(i))
+      or (name == "attack" and Sc.targetShot(i, Sc.ATTACK))
       or (type(name) == "table" and name) or Sc.SHOTS[name]
     if not pose then return false end
     copyPose(from, cur)
@@ -1362,10 +1366,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       G2.setColor(1, 1, 1, 1)
       return
     end
+    -- off the field for a charging turn (pic.away 0 -> 1): Fly / Bounce up out of sight, Dig / Dive
+    -- sinking into the ground or the water, Phantom Force fading out
+    local away, aw = pic.away or 0, pic.awayKind
+    if away >= 0.99 then return end
+    local sinks = aw == "ground" or aw == "water"
     -- Dynamaxed: giant (pic.giant 0..1), its red aura round it, G-Max clouds over a Gigantamax one
     local g = pic.giant or 0
     if g > 0 then k = k * (1 + (Sc.GIANT - 1) * g) end
-    G2.setColor(0, 0, 0, 0.5)
+    G2.setColor(0, 0, 0, 0.5 * (1 - away))
     G2.ellipse("fill", x, y, bw * k * 0.42, bw * k * 0.1, 24)
     if g > 0 then Sc.memberAura(G2, pic, x, y, k, fx, t, g) end
     -- a slow breath
@@ -1385,7 +1394,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       sx = sx + sin(qst * 47 + i * 1.9) * hpx * 0.05 * qa
       sy = sy - math.abs(sin(qst * 31 + i * 2.7)) * hpx * 0.04 * qa
     end
-    G2.setColor(1, 1, 1, 1)
+    if away > 0 then
+      if sinks then kb = kb * (1 - away)
+      elseif aw == "air" then sy = sy - hpx * 2.5 * away * away end
+    end
+    G2.setColor(1, 1, 1, sinks and 1 or (1 - away))
     local ox, oy = (box[1] + box[3]) / 2, box[4]
     if pic.quad then drawPixel(pic.image, pic.quad, sx, sy, 0, kx * fx, kb, ox, oy)
     else drawPixel(pic.image, sx, sy, 0, kx * fx, kb, ox, oy) end
