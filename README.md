@@ -116,6 +116,10 @@ you won: Exp. Candies, TMs, berries and more.*
   until enough blows break it. Breaking it sharply lowers the boss's Defense and Sp. Def.
 - 📣 **Cheers:** a Pokémon that fainted cheers the team on from the sidelines: healing, raised
   stats, or breaking the barrier.
+- 💪 **Built for a team of your own:** in Sword and Shield a solo player brings one Pokémon and gets
+  three helpers at 70% of its level. Here all four are yours, so on Solo difficulty (the default)
+  every boss has more HP and hits harder: a real fight at every star level, one a well-trained team
+  still has to work for. Sword / Shield difficulty keeps the games' own numbers.
 - ⏳ **Ten turns, four faints:** the raid is lost if your Pokémon faint four times or the battle
   runs past ten turns. A fainted Pokémon is back at full health the turn after next.
 - 🔴 **Dynamax your own:** any of your four can Dynamax while none of the others is giant, shown
@@ -156,6 +160,12 @@ you won: Exp. Candies, TMs, berries and more.*
   Taunt, Transform and the rest all work, the newer moves from WoobleDex too. A Dynamax boss shrugs
   off what Sword and Shield say it does: flinching, one-hit KO moves, Perish Song, Destiny Bond,
   Encore and Disable.
+- 🎒 **Held items work:** your Pokémon fight with what they hold. Charcoal, Mystic Water and the
+  other type boosters, Choice Band (which keeps its holder to one move until it Dynamaxes), Scope
+  Lens and the rest raise their damage; Leftovers heal at each turn's end; berries heal at half HP,
+  cure statuses and confusion, raise a stat in a pinch or restore PP; Focus Band, Quick Claw,
+  BrightPowder, King's Rock, Shell Bell, White Herb, Mental Herb and Macho Brace do what they do in
+  battle. A berry eaten in a raid is still in your Pokémon's hands afterward.
 - 🎨 **And looks the part:** a multi-hit move lands every blow, the HP bar dropping with each; Fly and
   Bounce take your Pokémon up out of sight, Dig and Dive into the ground or the water; draining
   moves pull their light back. Pixel art slashes, sparks, splashes and critical hits burst on the
@@ -168,8 +178,9 @@ you won: Exp. Candies, TMs, berries and more.*
 ### After the Win
 
 - 🔴 **One throw to catch it:** choose one of your Poké Balls. The Pokémon joins your party, or
-  your PC when the party is full. The higher its stars, the harder it is to catch, and the better
-  its IVs: one perfect IV at 1★, two at 2★, three at 3★, four at 4★ and 5★.
+  your PC when the party is full. On Solo difficulty the catch never fails; on Sword / Shield the
+  higher its stars, the harder it is to catch. The higher its stars, the better its IVs: one
+  perfect IV at 1★, two at 2★, three at 3★, four at 4★ and 5★.
 - ✨ **Shiny raid Pokémon:** a den's Pokémon is shiny 1 time in 4,096, as in Sword and Shield, and a
   Dynamax Crystal's legendary raid 1 in 300, as the Dynamax Adventures. A shiny one shows its shiny
   colours from the start and sparkles once its entrance clears; catch it and it's shiny in your party.
@@ -216,6 +227,7 @@ you won: Exp. Candies, TMs, berries and more.*
 |---|---|
 | KANTO GEAR | ON (default): the battle menu follows Kanto Gear's Display Mode (Separate Screens puts it on the second screen; without Kanto Gear, a second screen is used when there is one). OFF: BATTLE PAD decides. |
 | BATTLE PAD | Shown with KANTO GEAR off. MAIN SCREEN: the battle menu over the den. SECOND SCREEN: the menu on your device's second display. |
+| RAID DIFFICULTY | SOLO (default): the bosses are tougher and hit harder, since you bring four Pokémon of your own instead of getting three helpers, and every catch succeeds. SWORD / SHIELD: the games' own bosses and catch chances. |
 | RAID DENS | ON (default): dens appear on the routes. OFF: none appear. |
 | PERFORMANCE | OFF (default). ON: while you're in a den, frame times show on screen, with the raid's parts and its slowest moments at the top right. For reporting slowdowns: a screenshot during a raid shows what was slow. |
 

@@ -279,6 +279,7 @@ return function(mod, deps)
       ref = m, num = m.numId, name = titled(name), type = tonumber(m.type) or 0,
       key = key, team = key and TeamMoves.MOVES[Bt.squash(key)] or nil,
       contact = bitlib and bitlib.band(tonumber(m.flags) or 0, 1) ~= 0 or false,
+      kingsRock = bitlib and bitlib.band(tonumber(m.flags) or 0, 32) ~= 0 or false,
       typeName = Bt.typeName(m.type), power = power, accuracy = tonumber(m.accuracy) or 0,
       priority = tonumber(m.priority) or 0, status = power == 0,
       spread = bitlib and (bitlib.band(tonumber(m.target) or 0, SPREAD) ~= 0) or false,
@@ -407,8 +408,15 @@ return function(mod, deps)
     return ivs
   end
 
+  -- the RAID DIFFICULTY option's factors (RAID.SOLO) while it is Solo, else nil
+  function Bt.solo()
+    local d = deps.difficulty and deps.difficulty()
+    if d == "swsh" then return nil end
+    return R.SOLO
+  end
+
   -- the boss: its base stats (the pack's Giga ones; a Dynamax boss its species') at a level in its
-  -- tier's band, its IVs (Bt.rollIvs) and HP x hpMult
+  -- tier's band, its IVs (Bt.rollIvs) and HP x hpMult (and the difficulty's: Bt.solo)
   function Bt.boss(key, rng)
     local b, sp = Bosses[key], Sprites[key]
     if not (b and sp) then return nil end
@@ -416,13 +424,17 @@ return function(mod, deps)
     local level = rng and rng(T.lv[1], T.lv[2]) or T.lv[1]
     local base = sp.base or {}
     local ivs = Bt.rollIvs(T.perfect or 0, rng)
-    local hp = floor(stat(base.hp or 80, ivs.hp, level, true) * (T.hpMult or 1))
+    -- (RAID DIFFICULTY Solo: HP and attacks raised for a team of four of the player's own)
+    local solo = Bt.solo()
+    local hpK, atkK = 1, 1
+    if solo then hpK, atkK = solo.HP_K or 1, solo.ATK_K or 1 end
+    local hp = floor(stat(base.hp or 80, ivs.hp, level, true) * (T.hpMult or 1) * hpK)
     -- (a Dynamax boss carries its own species: a form is a species of its own)
     local species = b.slot or (Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national))) or nil
     local mon = {
       species = tonumber(species) or 0, speciesId = tonumber(species) or 0, level = level, hp = hp, maxHp = hp,
-      attack = stat(base.atk or 80, ivs.atk, level), defense = stat(base.def or 80, ivs.def, level),
-      spAtk = stat(base.spa or 80, ivs.spa, level), spDef = stat(base.spd or 80, ivs.spd, level),
+      attack = floor(stat(base.atk or 80, ivs.atk, level) * atkK), defense = stat(base.def or 80, ivs.def, level),
+      spAtk = floor(stat(base.spa or 80, ivs.spa, level) * atkK), spDef = stat(base.spd or 80, ivs.spd, level),
       speed = stat(base.spe or 80, ivs.spe, level),
       ivs = ivs,
       evs = { hp = 0, atk = 0, def = 0, spe = 0, spa = 0, spd = 0 },
@@ -437,7 +449,7 @@ return function(mod, deps)
     local boss = {
       mon = mon, species = mon.species, type1 = t1, type2 = (t2 ~= t1) and t2 or nil, side = "enemy", id = 1,
       ability = 0, stages = { attack = 0, defense = 0, spAtk = 0, spDef = 0, speed = 0, accuracy = 0, evasion = 0 },
-      name = b.name, boss = true, key = key, moves = {},
+      name = b.name, boss = true, key = key, moves = {}, solo = solo ~= nil,
     }
     boss.gender = Bt.genderOf(mon.species, gp)
     if b.moves then
@@ -724,6 +736,30 @@ return function(mod, deps)
       if item == 0 or not (ItemsData and ItemsData.isBerry) then return false end
       local ok, r = pcall(ItemsData.isBerry, item)
       return ok and r == true
+    end
+    -- a battler's held item as the battle reads it (the engine's HeldItems, its hold effect by name:
+    -- "LEFTOVERS", "RESTORE_HP" ...), its parameter and the item; nil without one
+    local HOLD_NAME = {}
+    for name, he in pairs(HeldItems and HeldItems.HOLD or {}) do HOLD_NAME[he] = name end
+    function A.held(b)
+      if not (HeldItems and HeldItems.of) or (tonumber(b.item) or 0) == 0 then return nil end
+      local ok, he, param, item = pcall(HeldItems.of, b, "residual", st)
+      if not ok or not HOLD_NAME[he] then return nil end
+      return HOLD_NAME[he], tonumber(param) or 0, item
+    end
+    -- an item's name in title case ("Sitrus Berry")
+    function A.itemName(item)
+      if ItemsData and ItemsData.displayName then
+        local ok, nm = pcall(ItemsData.displayName, item)
+        if ok and type(nm) == "string" and nm ~= "" then return titled(nm) end
+      end
+      return "item"
+    end
+    -- whether a battler's nature dislikes a flavour (0 spicy .. 4 sour: a confusing berry confuses it)
+    function A.dislikes(b, flavor)
+      if not (HeldItems and HeldItems.flavorRelation) then return false end
+      local ok, r = pcall(HeldItems.flavorRelation, b.mon and b.mon.personality, flavor)
+      return ok and r < 0
     end
     -- whether a move of this type is physical (Gen 3 splits them by type)
     function A.isPhysical(moveType)

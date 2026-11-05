@@ -178,6 +178,8 @@ function Sim:dynamax(ev, m, i)
   m.mon.maxHp = floor(base * mult)
   m.mon.hp = max(1, floor(hpOf(m) * mult))
   m.dmax = { turns = 3, mult = mult, baseMax = base }
+  -- (a Choice item's hold is let go)
+  m.choiced = nil
   self.dmaxUsed[i], self.dmaxActive = true, m
   ev[#ev + 1] = { kind = "dynamax", who = m, hp = m.mon.hp, maxHp = m.mon.maxHp, gmax = m.gmaxId ~= nil,
     text = ("%s %s!"):format(m.name, m.gmaxId and "Gigantamaxed" or "Dynamaxed") }
@@ -506,6 +508,7 @@ function Sim:fainted(ev, b)
   b.__ndxStat, b.__ndxGrounded, b.__ndxType3, b.__ndxTarShot, b.__ndxGlaiveRush = nil, nil, nil, nil, nil
   b.perish, b.yawn, b.destinyBond, b.grudge, b.substituteHP, b.taunt, b.disabled = nil, nil, nil, nil, nil, nil, nil
   b.raging, b.furyCutter, b.stockpile, b.expCharged, b.imprison, b.curled = nil, nil, nil, nil, nil, nil
+  b.choiced = nil
   if self.uproar == b then self.uproar = nil end
   -- (whoever loved it: it has left the field)
   if self.boss.attract == b then self.boss.attract = nil end
@@ -1744,6 +1747,7 @@ Sim.REACH = {
 -- why a battler cannot pick a move now (Torment, Disable, Taunt, Imprison): the word, or nil
 function Sim:barredWhy(b, mv)
   if self:tormented(b, mv) then return "Torment" end
+  if self:choiceLocked(b, mv) then return self:itemName(b.item) end
   local pm = mv.base or mv
   if b.disabled and b.disabled.mv == pm then return "Disable" end
   if (b.taunt or 0) > 0 and pm.status then return "Taunt" end
@@ -2204,6 +2208,10 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     text = ("%s used %s!"):format(att.name, mv.name) }
   -- (the move it last used: G-Max Depletion takes its PP, Torment bars it; a called move is not it)
   if locked ~= "called" then att.lastMove = mv.base or mv end
+  -- (Choice Band: the move it keeps to from now on)
+  if locked ~= "called" and not att.dmax and not att.choiced and self:heldOf(att) == "CHOICE_BAND" then
+    att.choiced = mv.base or mv
+  end
   -- under Gravity the moves that leave the ground fail
   if (self.gravity or 0) > 0 and Sim.NO_GRAVITY[squash(mv.key)] then
     ev[#ev + 1] = { kind = "fail", text = ("%s can't use %s because of gravity!"):format(att.name, mv.name) }
@@ -2306,7 +2314,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     return
   end
   local spread = #targets > 1
-  local hit = {}
+  local hit, dealtAll = {}, 0
   -- (Lock-On: this move cannot miss)
   local aimed = att.lockOn
   att.lockOn = nil
@@ -2332,7 +2340,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
         -- (stopped before the hit: Powder, Psychic Terrain)
       elseif def.semi and not att.semi and not (Sim.REACH[def.semi] and Sim.REACH[def.semi][key]) then
         ev[#ev + 1] = { kind = "miss", who = att, target = def, text = ("%s avoided the attack!"):format(def.name) }
-      elseif aimed ~= def and not self.A.hits(att, def, mv, (self.gravity or 0) > 0, self.weather) then
+      elseif aimed ~= def and (not self.A.hits(att, def, mv, (self.gravity or 0) > 0, self.weather) or self:itemDodge(def, mv)) then
         ev[#ev + 1] = { kind = "miss", who = att, target = def, text = ("%s avoided the attack!"):format(def.name) }
         -- Jump Kick and Hi Jump Kick: a miss costs the user half its max HP
         if mv.side and mv.side.missRecoil and alive(att) then
@@ -2423,9 +2431,14 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           end
           dmg = self:throughBoss(ev, def, max(1, dmg))
           dmg = self:capAtShield(def, min(hpOf(def), dmg))
-          local endured = false
+          local endured, banded = false, nil
           if def.endure and dmg >= hpOf(def) and hpOf(def) > 1 then dmg, endured = hpOf(def) - 1, true end
+          if not endured and not (mv.side and mv.side.ohko) then
+            banded = self:focusBand(def, dmg)
+            if banded then dmg = hpOf(def) - 1 end
+          end
           def.mon.hp = hpOf(def) - dmg
+          dealtAll = dealtAll + dmg
           self:noteHurt(def, att, mv, dmg)
           def.lastHitType = mv.type
           -- (Bide stores what it takes)
@@ -2434,9 +2447,9 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           landed, total = landed + 1, total + dmg
           ev[#ev + 1] = { kind = "damage", who = att, target = def, amount = dmg, hp = def.mon.hp, move = mv }
           if stop == "pierce" and n == 1 then ev[#ev + 1] = sev end
-          if endured then
+          if endured or banded then
             ev[#ev + 1] = { kind = "side", side = sideKey(def), what = "endured", up = true, who = def,
-              text = self:tword("endured", nil, def) or ("%s endured the hit!"):format(def.name) }
+              text = banded or self:tword("endured", nil, def) or ("%s endured the hit!"):format(def.name) }
           end
           if info.critical then ev[#ev + 1] = { kind = "crit", target = def, text = "A critical hit!" } end
           if n == 1 then
@@ -2480,6 +2493,8 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     end
   end
   if mv.gmaxEffect and #hit > 0 and not self.over then self:gmaxEffect(ev, att, mv, hit) end
+  -- King's Rock and Shell Bell
+  if #hit > 0 then self:itemAfterMove(ev, att, mv, hit, dealtAll) end
   -- Hyper Beam and kin: the user must recharge next turn; Outrage and kin: 2-3 turns on one move, then
   -- confused (a member's own, never a Dynamaxed one's)
   local sd1 = mv.side
@@ -2512,6 +2527,195 @@ function Sim:use(ev, att, mv, targets, ally, locked)
       if not alive(att) then self:fainted(ev, att) end
     end
   end
+end
+
+-- ------- held items (Gen 3's, as the engine's battle/held_items.lua; the damage items - type boosts,
+-- Choice Band, Scope Lens ... - are the engine's damage's own)
+
+Sim.PINCH_STAT = { ATTACK_UP = "attack", DEFENSE_UP = "defense", SPEED_UP = "speed", SP_ATTACK_UP = "spAtk",
+  SP_DEFENSE_UP = "spDef" }
+Sim.CONFUSE_FLAVOR = { CONFUSE_SPICY = 0, CONFUSE_DRY = 1, CONFUSE_SWEET = 2, CONFUSE_BITTER = 3, CONFUSE_SOUR = 4 }
+Sim.FLAVOR_WORD = { [0] = "spicy", "dry", "sweet", "bitter", "sour" }
+Sim.CURE_ITEM = { CURE_PAR = { PAR = true }, CURE_SLP = { SLP = true }, CURE_PSN = { PSN = true, TOX = true },
+  CURE_BRN = { BRN = true }, CURE_FRZ = { FRZ = true } }
+Sim.CURE_TEXT = { CURE_PAR = "%s's %s cured paralysis!", CURE_SLP = "%s's %s woke it from its sleep!",
+  CURE_PSN = "%s's %s cured poison!", CURE_BRN = "%s's %s healed its burn!", CURE_FRZ = "%s's %s defrosted it!" }
+local PROBLEM = { PSN = "poison", TOX = "poison", SLP = "sleep", PAR = "paralysis", BRN = "burn", FRZ = "ice" }
+local PINCH_ORDER = { "attack", "defense", "speed", "spAtk", "spDef" }
+
+-- a battler's held item: its hold effect's name, parameter and item (the adapter's held), nil without
+-- one or under Magic Room
+function Sim:heldOf(b)
+  if not self.A.held or (tonumber(b.item) or 0) == 0 or (self.ndx.magicRoom or 0) > 0 then return nil end
+  return self.A.held(b)
+end
+function Sim:itemName(item) return self.A.itemName and self.A.itemName(item) or "item" end
+
+-- an item's heal (`amt` HP): false when there is nothing to heal
+function Sim:itemHeal(ev, b, amt, text)
+  if not canHeal(b) or hpOf(b) >= maxHpOf(b) then return false end
+  b.mon.hp = min(maxHpOf(b), hpOf(b) + max(1, floor(amt)))
+  ev[#ev + 1] = { kind = "heal", who = b, hp = b.mon.hp, held = true, text = text }
+  return true
+end
+
+-- the curing items (a status berry, Persim, Lum, Mental Herb, White Herb): true when it worked, the
+-- item used up
+function Sim:itemCure(ev, b, he, item)
+  local name, s, text = self:itemName(item), b.status, nil
+  if Sim.CURE_ITEM[he] then
+    if not (s and Sim.CURE_ITEM[he][s]) then return false end
+    if s == "SLP" then b.nightmare = nil end
+    b.status, b.sleep, b.tox = nil, nil, nil
+    text = Sim.CURE_TEXT[he]:format(b.name, name)
+  elseif he == "CURE_CONFUSION" then
+    if not b.confused then return false end
+    b.confused = nil
+    text = ("%s's %s snapped it out of confusion!"):format(b.name, name)
+  elseif he == "CURE_ATTRACT" then
+    if not b.attract then return false end
+    b.attract = nil
+    text = ("%s's %s cured its love problem!"):format(b.name, name)
+  elseif he == "CURE_STATUS" then
+    if not s and not b.confused then return false end
+    local word = s and PROBLEM[s] or "confusion"
+    local both = s ~= nil and b.confused ~= nil
+    if s == "SLP" then b.nightmare = nil end
+    b.status, b.sleep, b.tox, b.confused = nil, nil, nil, nil
+    text = both and ("%s's %s normalized its status!"):format(b.name, name)
+      or ("%s's %s cured its %s problem!"):format(b.name, name, word)
+  elseif he == "RESTORE_STATS" then
+    local any = false
+    for k, v in pairs(b.stages) do if v < 0 then b.stages[k], any = 0, true end end
+    if not any then return false end
+    text = ("%s's %s returned its stats to normal!"):format(b.name, name)
+  else
+    return false
+  end
+  ev[#ev + 1] = { kind = "status", who = b, held = true, text = text }
+  loseItem(b)
+  return true
+end
+
+-- what a held item does on its own, after each action (moveTurn) and at the turn's end: the HP berries
+-- at half HP, the confusing berries, Leftovers (the turn's end only), the pinch berries, Leppa and the
+-- cures; true when one did something
+function Sim:itemNormal(ev, b, moveTurn)
+  if self.over or not alive(b) or (b.down or 0) > 0 then return false end
+  local he, p, item = self:heldOf(b)
+  if not he then return false end
+  local hp, top, name = hpOf(b), maxHpOf(b), self:itemName(item)
+  p = tonumber(p) or 0
+  if he == "RESTORE_HP" then
+    if hp <= floor(top / 2) and self:itemHeal(ev, b, p, ("%s's %s restored its health!"):format(b.name, name)) then
+      loseItem(b)
+      return true
+    end
+  elseif he == "LEFTOVERS" then
+    if not moveTurn then
+      return self:itemHeal(ev, b, top / 16, ("%s restored a little HP using its %s!"):format(b.name, name))
+    end
+  elseif Sim.CONFUSE_FLAVOR[he] then
+    if hp <= floor(top / 2) and self:itemHeal(ev, b, top / max(1, p), ("%s's %s restored its health!"):format(b.name, name)) then
+      local flavor = Sim.CONFUSE_FLAVOR[he]
+      if self.A.dislikes and self.A.dislikes(b, flavor) then
+        ev[#ev + 1] = { kind = "status", who = b, text = ("For %s, the %s was too %s!"):format(b.name, name, Sim.FLAVOR_WORD[flavor]) }
+        if not (self.A.abilityName and self.A.abilityName(b) == "OWN_TEMPO") then self:confuse(ev, b) end
+      end
+      loseItem(b)
+      return true
+    end
+  elseif Sim.PINCH_STAT[he] then
+    local stat = Sim.PINCH_STAT[he]
+    if hp <= floor(top / max(1, p)) and (b.stages[stat] or 0) < 6 then
+      local n0 = #ev
+      self:stage(ev, b, stat, 1)
+      if ev[n0 + 1] then ev[n0 + 1].text = ("Using its %s, %s's %s rose!"):format(name, b.name, STAT_WORD[stat]) end
+      loseItem(b)
+      return true
+    end
+  elseif he == "CRITICAL_UP" then
+    if hp <= floor(top / max(1, p)) and (b.critUp or 0) < 2 then
+      b.critUp = 2
+      ev[#ev + 1] = { kind = "status", who = b, held = true, text = ("%s used its %s to get pumped!"):format(b.name, name) }
+      loseItem(b)
+      return true
+    end
+  elseif he == "RANDOM_STAT_UP" then
+    if hp <= floor(top / max(1, p)) then
+      local open = {}
+      for _, s in ipairs(PINCH_ORDER) do if (b.stages[s] or 0) < 6 then open[#open + 1] = s end end
+      if #open > 0 then
+        local stat = open[self.rng(1, #open)]
+        local n0 = #ev
+        self:stage(ev, b, stat, 2)
+        if ev[n0 + 1] then ev[n0 + 1].text = ("Using its %s, %s's %s rose sharply!"):format(name, b.name, STAT_WORD[stat]) end
+        loseItem(b)
+        return true
+      end
+    end
+  elseif he == "RESTORE_PP" then
+    for _, mv in ipairs(b.moves or {}) do
+      if (mv.pp or 1) == 0 then
+        mv.pp = min(mv.maxPp or p, p)
+        ev[#ev + 1] = { kind = "status", who = b, held = true, text = ("%s's %s restored %s's PP!"):format(b.name, name, mv.name) }
+        loseItem(b)
+        return true
+      end
+    end
+  else
+    return self:itemCure(ev, b, he, item)
+  end
+  return false
+end
+
+-- every battler on the field, the boss first
+function Sim:itemsAll(ev, moveTurn)
+  for _, x in ipairs(self:everyone()) do
+    if self.over then return end
+    self:itemNormal(ev, x, moveTurn)
+  end
+end
+
+-- the hit that would knock `def` out: Focus Band's chance to hang on at 1 HP (its words, or nil)
+function Sim:focusBand(def, dmg)
+  if dmg < hpOf(def) then return nil end
+  local he, p, item = self:heldOf(def)
+  if he ~= "FOCUS_BAND" or self.rng(0, 99) >= (tonumber(p) or 0) then return nil end
+  return ("%s hung on using its %s!"):format(def.name, self:itemName(item))
+end
+
+-- a move's accuracy against BrightPowder / Lax Incense: true when the item makes it miss
+function Sim:itemDodge(def, mv)
+  if (mv.accuracy or 0) <= 0 then return false end
+  local he, p = self:heldOf(def)
+  return he == "EVASION_UP" and self.rng(1, 100) <= (tonumber(p) or 0)
+end
+
+-- after a move that dealt `dealt`: King's Rock's flinch on whom it hit (a move the flag allows), Shell
+-- Bell's heal of its share
+function Sim:itemAfterMove(ev, att, mv, hit, dealt)
+  if self.over or not alive(att) then return end
+  local he, p, item = self:heldOf(att)
+  if he == "FLINCH" and mv.kingsRock then
+    for _, def in ipairs(hit) do
+      if alive(def) and not isDmax(def) and def.actedTurn ~= self.turnNo and self.rng(0, 99) < (tonumber(p) or 0) then
+        def.flinched = true
+      end
+    end
+  elseif he == "SHELL_BELL" and dealt > 0 then
+    self:itemHeal(ev, att, dealt / max(1, tonumber(p) or 8), ("%s restored a little HP using its %s!"):format(att.name, self:itemName(item)))
+  end
+end
+
+-- Choice Band: the move it first used it keeps to while it holds the band (not while Dynamaxed)
+function Sim:choiceLocked(b, mv)
+  local c = b.choiced
+  -- (out of PP its other moves come back: the raid has no Struggle to fall back on)
+  if not c or b.dmax or (mv.base or mv) == c or (c.pp or 1) <= 0 then return false end
+  if self:heldOf(b) ~= "CHOICE_BAND" then return false end
+  for _, m in ipairs(b.moves or {}) do if m == c then return true end end
+  return false
 end
 
 -- ------- cheers and the pouch
@@ -2685,10 +2889,14 @@ function Sim:endTurn(ev)
   for _, m in ipairs(team) do trapped[#trapped + 1] = m end
   for _, m in ipairs(trapped) do
     if (m.trap or 0) > 0 then
-      hurt(m, floor(maxHpOf(m) / (m.trapFrac or 8)), fill(W.trapHurt or "{MON} is hurt by the trap!", b, m))
+      -- (counted down first: the hurt may knock it out, which lets the trap go)
       m.trap = m.trap - 1
+      hurt(m, floor(maxHpOf(m) / (m.trapFrac or 8)), fill(W.trapHurt or "{MON} is hurt by the trap!", b, m))
     end
   end
+  -- the held items (Leftovers, berries), before Leech Seed and poison as Gen 3's turn's end
+  self:itemsAll(ev, false)
+  if self.over then return end
   -- Leech Seed: 1/8 of the seeded one's HP to whoever planted it
   for _, x in ipairs(trapped) do
     local by = x.seeded
@@ -2782,6 +2990,9 @@ function Sim:endTurn(ev)
       hurt(x, cut, st == "BRN" and ("%s was hurt by its burn!"):format(x.name) or ("%s was hurt by poison!"):format(x.name), st)
     end
   end
+  if self.over then return end
+  -- the held items once more (a berry for what the turn's end took; Leftovers only the once)
+  self:itemsAll(ev, true)
   if self.over then return end
   -- a wish comes true at the end of the turn after it was made, on whoever stands in its place
   for _, key in ipairs({ "team", "boss" }) do
@@ -2914,10 +3125,22 @@ function Sim:turn(choices)
   local bmv = self:bossMove()
   if bmv then acts[#acts + 1] = { who = self.boss, mv = bmv, pri = bmv.priority or 0, tie = self.rng(1, 65536) } end
   -- (Tailwind doubles its side's Speed; under Trick Room the slower move first)
-  for _, a in ipairs(acts) do a.speed = self.A.speed(a.who) * (self:sideOf(a.who).tailwind > 0 and 2 or 1) end
+  -- (Macho Brace halves the holder's Speed; Quick Claw: one roll a turn, and those whose claw it
+  -- beats move first among their priority)
+  local claw = nil
+  for _, a in ipairs(acts) do
+    a.speed = self.A.speed(a.who) * (self:sideOf(a.who).tailwind > 0 and 2 or 1)
+    local he, p = self:heldOf(a.who)
+    if he == "MACHO_BRACE" then a.speed = floor(a.speed / 2)
+    elseif he == "QUICK_CLAW" then
+      claw = claw or self.rng(0, 0xFFFF)
+      a.quick = claw < floor(0xFFFF * (tonumber(p) or 0) / 100)
+    end
+  end
   local twisted = (self.ndx.trickRoom or 0) > 0
   table.sort(acts, function(a, b)
     if a.pri ~= b.pri then return a.pri > b.pri end
+    if (a.quick or false) ~= (b.quick or false) then return a.quick == true end
     if a.speed ~= b.speed then
       if twisted then return a.speed < b.speed end
       return a.speed > b.speed
@@ -2957,6 +3180,8 @@ function Sim:turn(choices)
         end
       end
     end
+    -- the held items after each action (a berry at half HP, a cure)
+    if not self.over then self:itemsAll(ev, true) end
   end
   if not self.over then self:endTurn(ev) end
   if not self.over then

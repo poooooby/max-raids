@@ -43,6 +43,10 @@ return function(mod)
     { key = "battle_pad", label = "BATTLE PAD", type = "choice", default = "main",
       choices = { { "MAIN SCREEN", "main" }, { "SECOND SCREEN", "second" } },
       visible_if = { key = "kanto_gear", equals = false } },
+    -- the bosses' strength: Solo raises their HP and attacks for a team of four of the player's own
+    -- (data/raid_rules.lua RAID.SOLO), Sword / Shield keeps the games' own numbers
+    { key = "difficulty", label = "RAID DIFFICULTY", type = "choice", default = "solo",
+      choices = { { "SOLO", "solo" }, { "SWORD / SHIELD", "swsh" } } },
     -- dens on the routes (off: none spawn; those already chosen stay saved)
     { key = "dens", label = "RAID DENS", type = "toggle", default = true },
     -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
@@ -97,6 +101,7 @@ return function(mod)
     if ok and type(rw) == "table" then Rewards = rw else mod.log:warn("the raid's rewards failed to build: %s", tostring(rw)) end
   end
   local Battle = nil
+  local difficultyForced = nil -- (drivers: _test.difficulty("solo" | "swsh"))
   if makeBattle then
     -- (the National Dex's exports: what its newer moves do besides their damage)
     local function dex()
@@ -104,7 +109,7 @@ return function(mod)
       return ok and type(d) == "table" and d.exports or nil
     end
     local ok, bt = pcall(makeBattle, mod, { N = N, Bosses = Bosses, Sprites = Sprites, Gmax = Gmax, MaxPower = MaxPower,
-      TeamMoves = TeamMoves, dex = dex })
+      TeamMoves = TeamMoves, dex = dex, difficulty = function() return difficultyForced or mod.options:get("difficulty") end })
     if ok and type(bt) == "table" then Battle = bt else mod.log:warn("the raid's battle failed to build: %s", tostring(bt)) end
     -- (the rewards read the TMs' moves through it)
     if Battle and Rewards then Rewards.battle = Battle end
@@ -448,7 +453,7 @@ return function(mod)
   mod.exports.achievements = Achievements
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,
-    padSecond = function(on) padForced = on end,
+    padSecond = function(on) padForced = on end, difficulty = function(v) difficultyForced = v end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }
   mod.log:info("Galar Rising ready (%d bosses)", #(Bosses.ORDER or {}))
 end

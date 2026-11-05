@@ -6,7 +6,7 @@
 -- Bottle Cap (RAID.REWARD); nothing straight to the four who fought.
 --   Rw = rewards(mod, { N, Bosses, Sprites }) ; Rw.battle = src/battle.lua's (for the TMs' moves)
 --   Rw.balls() -> { { item, name, n, mult }, ... } ; Rw.chance(stars, mult) (pure)
---   Rw.throw(key, level, ball, rng, ivs, gender, shiny) -> caught, { name, toPC } | why   (ivs,
+--   Rw.throw(key, level, ball, rng, ivs, gender, shiny, sure) -> caught, { name, toPC } | why   (ivs,
 --   gender, shiny: the boss's, kept)
 --   Rw.rollItems(key, rng) -> { { id, n }, ... } ; Rw.give(r, rng) -> { items, firstWin }
 
@@ -153,14 +153,15 @@ return function(mod, deps)
     return true
   end
 
-  function Rw.throw(key, level, ball, rng, ivs, gender, shiny)
+  function Rw.throw(key, level, ball, rng, ivs, gender, shiny, sure)
     local s = session()
     local b = Bosses[key]
     if not (s and b and ball) then return false, "no session" end
     if Bag and Bag.remove then pcall(Bag.remove, s.bag, ball.item, 1) end
     local roll = rng and rng(1, 100) or math.random(1, 100)
-    -- (a legendary Pokemon's raid, by a Dynamax Crystal: caught for sure, as the Max Lair's)
-    if not b.legend and roll > Rw.chance(b.stars, ball.mult) then return false, "broke free" end
+    -- (a legendary Pokemon's raid, by a Dynamax Crystal: caught for sure, as the Max Lair's; `sure`:
+    -- a raid on RAID DIFFICULTY Solo)
+    if not b.legend and not sure and roll > Rw.chance(b.stars, ball.mult) then return false, "broke free" end
     -- (a Dynamax boss carries its own species, its form among them)
     local species = b.slot or (Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national)))
     species = tonumber(species)

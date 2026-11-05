@@ -1800,5 +1800,171 @@ do
   check(b3.status == nil, "Smelling Salt cures the paralysis it struck")
 end
 
+-- a trap's hurt that knocks its Pokemon out at the turn's end (the faint lets the trap go)
+do
+  local boss = battler("Boss", 1000, 10, { mv("Splash", { power = 0, status = true }) }, true)
+  local m = battler("M1", 100, 90, { mv("Tackle", { power = 10 }) })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(), rng = rngOf(3) }
+  m.trap, m.mon.hp = 3, 5
+  local ok = pcall(s.turn, s, { { move = 1 } })
+  check(ok and m.mon.hp == 0 and m.trap == nil and s.faints == 1, "a trap's knock-out at the turn's end")
+end
+
+-- ------------------------------------------------------------------ held items
+
+-- the adapter's held(b): a battler's `hold` = { effect name, parameter }, its item a number
+local function heldAdapter()
+  local a = adapter()
+  a.held = function(b) if b.hold then return b.hold[1], b.hold[2], b.item end end
+  a.itemName = function(item) return "Item" .. tostring(item) end
+  a.dislikes = function(b) return b.dislike == true end
+  return a
+end
+local function holding(b, he, p, item) b.hold, b.item = { he, p or 0 }, item or 1; return b end
+local function itemDuel(bossMove, memberMove, o)
+  o = o or {}
+  local boss = battler("Boss", o.bossHp or 5000, o.bossSpeed or 10, { bossMove or mv("Splash", { power = 0, status = true }) }, true)
+  local m = battler("M1", o.hp or 160, o.speed or 90, { memberMove or mv("Tackle", { power = 10 }) })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = heldAdapter(), rng = o.rng or rngOf(11) }
+  return s, boss, m
+end
+local function said(ev, text) for _, e in ipairs(ev) do if e.text and e.text:find(text, 1, true) then return e end end return nil end
+
+do
+  -- Leftovers: a sixteenth at the turn's end, once, never used up
+  local s, _, m = itemDuel()
+  holding(m, "LEFTOVERS", 10, 200)
+  m.mon.hp = 100
+  local ev = s:turn({ { move = 1 } })
+  check(m.mon.hp == 110 and m.item == 200, "Leftovers: a sixteenth at the turn's end (" .. m.mon.hp .. ")")
+  check(said(ev, "restored a little HP using its Item200") ~= nil, "Leftovers: its words")
+  m.mon.hp = 160
+  ev = s:turn({ { move = 1 } })
+  check(not said(ev, "Leftovers") and m.mon.hp == 160, "Leftovers: nothing at full HP")
+
+  -- Sitrus Berry: at half HP or lower, right after the blow, then gone (kept for Recycle)
+  local s2, _, m2 = itemDuel(mv("Crush", { power = 90 }), nil, { bossSpeed = 200 })
+  holding(m2, "RESTORE_HP", 30, 139)
+  local ev2 = s2:turn({ { move = 1 } })
+  check(m2.mon.hp == 100 and m2.item == 0 and m2.consumed == 139, "Sitrus Berry: 30 HP at half HP, used up (" .. m2.mon.hp .. ")")
+  local iHeal, iUse = nil, nil
+  for k, e in ipairs(ev2) do
+    if e.kind == "heal" and e.held then iHeal = iHeal or k end
+    if e.kind == "use" and e.who == m2 then iUse = iUse or k end
+  end
+  check(iHeal and iUse and iHeal < iUse, "Sitrus Berry: eaten after the blow, before the member's move")
+
+  -- a confusing berry a nature dislikes: the heal, then confused
+  local s3, _, m3 = itemDuel(mv("Crush", { power = 90 }), nil, { bossSpeed = 200 })
+  holding(m3, "CONFUSE_SPICY", 8, 143)
+  m3.dislike = true
+  local ev3 = s3:turn({ {} })
+  check(m3.mon.hp == 90 and said(ev3, "was too spicy") and m3.confused, "Figy Berry: an eighth, and too spicy: confused")
+
+  -- Lum Berry: a status cured at once
+  local s4, _, m4 = itemDuel(mv("Stun", { power = 0, status = true, side = { status = "PAR" } }), nil, { bossSpeed = 200 })
+  holding(m4, "CURE_STATUS", 0, 141)
+  local ev4 = s4:turn({ { move = 1 } })
+  check(m4.status == nil and m4.item == 0 and said(ev4, "cured its paralysis problem"), "Lum Berry cures the paralysis")
+  -- Cheri Berry only paralysis; a Rawst Berry leaves paralysis
+  local s5, _, m5 = itemDuel(mv("Stun", { power = 0, status = true, side = { status = "PAR" } }), nil, { bossSpeed = 200 })
+  holding(m5, "CURE_BRN", 0, 136)
+  s5:turn({ { move = 1 } })
+  check(m5.status == "PAR" and m5.item == 136, "a Rawst Berry leaves paralysis alone")
+
+  -- Liechi Berry: Attack +1 at a quarter of the HP
+  local s6, _, m6 = itemDuel(mv("Crush", { power = 125 }), nil, { bossSpeed = 200 })
+  holding(m6, "ATTACK_UP", 4, 168)
+  local ev6 = s6:turn({ {} })
+  check(m6.stages.attack == 1 and m6.item == 0 and said(ev6, "Using its Item168, M1's Attack rose!"), "Liechi Berry: Attack +1 in a pinch")
+  -- Lansat Berry: pumped
+  local s7, _, m7 = itemDuel(mv("Crush", { power = 125 }), nil, { bossSpeed = 200 })
+  holding(m7, "CRITICAL_UP", 4, 173)
+  s7:turn({ {} })
+  check(m7.critUp == 2, "Lansat Berry: a critical hit more likely")
+
+  -- Focus Band: hangs on at 1 HP
+  local s8, _, m8 = itemDuel(mv("Crush", { power = 500 }), nil, { bossSpeed = 200 })
+  holding(m8, "FOCUS_BAND", 100, 196)
+  local ev8 = s8:turn({ { move = 1 } })
+  check(m8.mon.hp == 1 and said(ev8, "hung on using its Item196") and s8.faints == 0, "Focus Band: hung on at 1 HP")
+
+  -- BrightPowder: the boss's move misses
+  local s9, _, m9 = itemDuel(mv("Crush", { power = 50 }), nil, { bossSpeed = 200 })
+  holding(m9, "EVASION_UP", 100, 179)
+  local ev9 = s9:turn({ { move = 1 } })
+  check(m9.mon.hp == 160 and count(ev9, "miss") == 1, "BrightPowder: the boss's move misses")
+
+  -- Quick Claw: the slower member first
+  local s10, _, m10 = itemDuel(mv("Tap", { power = 1 }), nil, { bossSpeed = 200, speed = 5 })
+  holding(m10, "QUICK_CLAW", 100, 183)
+  local ev10 = s10:turn({ { move = 1 } })
+  local firstUse
+  for _, e in ipairs(ev10) do if e.kind == "use" then firstUse = firstUse or e.who end end
+  check(firstUse == m10, "Quick Claw: the slower member moves first")
+  -- Macho Brace: half the Speed (90 -> 45, behind the boss's 60)
+  local s11, b11, m11 = itemDuel(mv("Tap", { power = 1 }), nil, { bossSpeed = 60, speed = 90 })
+  holding(m11, "MACHO_BRACE", 0, 181)
+  local ev11 = s11:turn({ { move = 1 } })
+  firstUse = nil
+  for _, e in ipairs(ev11) do if e.kind == "use" then firstUse = firstUse or e.who end end
+  check(firstUse == b11, "Macho Brace: the holder slower than the boss")
+
+  -- Choice Band: kept to its first move; let go while Dynamaxed; gone with the item
+  local s12, _, m12 = itemDuel()
+  m12.moves[2] = mv("Ember", { power = 10 })
+  holding(m12, "CHOICE_BAND", 0, 186)
+  s12:turn({ { move = 1 } })
+  check(s12:barredWhy(m12, m12.moves[2]) == "Item186" and not s12:barredWhy(m12, m12.moves[1]), "Choice Band: the other moves barred")
+  m12.dmax = { turns = 1 }
+  check(not s12:barredWhy(m12, m12.moves[2]), "Choice Band: no hold while Dynamaxed")
+  m12.dmax = nil
+  m12.item = 0
+  check(not s12:barredWhy(m12, m12.moves[2]), "Choice Band: none once it is gone")
+
+  -- Shell Bell: an eighth of what it dealt
+  local s13, _, m13 = itemDuel(nil, mv("Strike", { power = 80 }))
+  holding(m13, "SHELL_BELL", 8, 219)
+  m13.mon.hp = 100
+  s13:turn({ { move = 1 } })
+  check(m13.mon.hp == 110, "Shell Bell: an eighth of 80 (" .. m13.mon.hp .. ")")
+
+  -- King's Rock: the boss (Dynamax) never flinches; a holder's flagged move flinches a member yet to move
+  local s14, b14 = itemDuel(nil, mv("Strike", { power = 10 }))
+  local m14 = s14.members[1]
+  m14.moves[1].kingsRock = true
+  holding(m14, "FLINCH", 100, 187)
+  s14:turn({ { move = 1 } })
+  check(not b14.flinched, "King's Rock: never the Dynamax boss")
+  local bossRock = mv("Rock", { power = 10 })
+  bossRock.kingsRock = true
+  local s15, b15, m15 = itemDuel(bossRock, nil, { bossSpeed = 200 })
+  holding(b15, "FLINCH", 100, 187)
+  local ev15 = s15:turn({ { move = 1 } })
+  check(said(ev15, "flinched and couldn't move") ~= nil, "King's Rock: a member flinches")
+
+  -- Leppa Berry: a move out of PP gets 10 back
+  local s16, _, m16 = itemDuel()
+  m16.moves[2] = mv("Ember", { power = 10 })
+  m16.moves[2].pp = 0
+  holding(m16, "RESTORE_PP", 10, 138)
+  local ev16 = s16:turn({ { move = 1 } })
+  check(m16.moves[2].pp == 10 and said(ev16, "restored Ember's PP"), "Leppa Berry: 10 PP back")
+
+  -- White Herb: the drops undone
+  local s17, _, m17 = itemDuel(mv("Growl", { power = 0, status = true, side = { stages = { attack = -1 } } }), nil, { bossSpeed = 200 })
+  holding(m17, "RESTORE_STATS", 0, 180)
+  s17:turn({ { move = 1 } })
+  check(m17.stages.attack == 0 and m17.item == 0, "White Herb: the Attack drop undone")
+
+  -- Magic Room: Leftovers do nothing
+  local s18, _, m18 = itemDuel()
+  holding(m18, "LEFTOVERS", 10, 200)
+  m18.mon.hp = 100
+  s18.ndx.magicRoom = 3
+  s18:turn({ { move = 1 } })
+  check(m18.mon.hp == 100, "Magic Room: no Leftovers")
+end
+
 print(("%d/%d checks passed  (max_raids sim)"):format(passed, passed + failed))
 if failed > 0 then os.exit(1) end

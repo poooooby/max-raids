@@ -77,6 +77,16 @@ local function body(game, log)
   local Rw = X._test.rewards
   if Rw then
     local real = Rw.throw
+    -- the difficulty's catch: the worst roll misses on Sword / Shield and is caught on Solo
+    local bl = Rw.balls and Rw.balls()[1]
+    local bossKey = os.getenv("PROBE_BOSS") or "CHARIZARD_4"
+    if bl and bl.mult ~= 0 then
+      local worst = function(lo, hi) return hi end
+      local missed = real(bossKey, 50, bl, worst, nil, nil, false, false)
+      local sure = real(bossKey, 50, bl, worst, nil, nil, false, true)
+      check(missed == false, "Sword / Shield: the worst roll breaks free")
+      check(sure == true, "Solo: caught for sure")
+    end
     if os.getenv("PROBE_FAIL") == "1" then
       Rw.throw = function() return false, nil end
     else

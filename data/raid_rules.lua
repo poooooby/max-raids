@@ -24,6 +24,10 @@ N.RAID = {
     [4] = { lv = { 45, 50 }, hpMult = 2.5, perfect = 4, shields = { 0.7, 0.3 }, ev = 20, bag = "l", medalTurns = 8 },
     [5] = { lv = { 55, 60 }, hpMult = 3.0, perfect = 4, shields = { 0.7, 0.3 }, ev = 32, bag = "l", medalTurns = 8 },
   },
+  -- the RAID DIFFICULTY option's Solo (its default): the boss's HP and its Attack / Sp. Atk raised by
+  -- these over the tier's, every tier alike, for a team of four of the player's own (the games give a
+  -- solo player three helpers at 70% of the host's level); Sword / Shield: the tier's numbers alone
+  SOLO = { HP_K = 1.6, ATK_K = 1.4 },
   -- shield segments: BASE + floor((base Def + base Sp. Def) / PER), within MIN..MAX
   SEGMENTS = { BASE = 2, PER = 60, MIN = 2, MAX = 8 },
   -- a fainted member cheers on the turn it sits out: one of these, by weight
@@ -140,7 +144,8 @@ N.EVIDENCE = {
   ["RAID.REWARD.DYNAMAX_CANDY"] = { class = "verified", source = "Serebii, Sword / Shield den listings (den18): Dynamax Candy 1 at 1-4★, 2 at 5★", confidence = "high" },
   ["RAID.REWARD.DYNAMAX_CRYSTAL"] = { class = "ours", source = "Sword / Shield's Dynamax Crystals open the Max Lair's legendary Pokemon (Crown Tundra); here one opens a legendary's raid at a den, a rare 4-5★ drop (Wooble 2026-10-27: 'legendary raid key')", confidence = "high" },
   ["RAID.REWARD.MAX_MUSHROOMS"] = { class = "ours", source = "Sword / Shield's Max Mushrooms and Max Honey came from the Isle of Armor's wilds and Max Lair, not dens; these rare drops (and National Dex's shop) are ours", confidence = "high" },
-  ["RAID.SEGMENTS"] = { class = "ours", source = "the games: 2 to 8 segments, by the boss's defensive stats (Bulbapedia, Serebii); this formula is ours", confidence = "medium" },
+  ["RAID.SOLO"] = { class = "ours", source = "a solo host's three NPC partners are at 70% of the host's level, rounded down (Bulbapedia Max Raid Battle; Gameranx); at 70% a Pokemon deals about half the host's damage and lasts about half as long, so a team of four of one's own deals ~1.6x the host-and-partners' damage and takes the boss's hits better; one factor for every tier (Wooble), checked by tests/drivers/balance_probe.lua (2026-11-05, PROBE_REAL=1: a player's own team - each at its stage, 2-3 IVs of 31, 510 EVs at random - every boss of a tier 4 times, Lv 15 / 25 / 35 / 45 / 55 / 65 for 1-5 stars; won, median turns, knock-outs - Solo 93% 4 1.9 / 75% 4 2.2 / 43% 6 3.3 / 72% 5 2.7 / 79% 6 2.4 / 61% 6 2.6, Sword / Shield 96% 3 1.0 / 97% 4 1.3 / 79% 5 2.3 / 78% 5 2.1 / 93% 5 1.4 / 82% 5 1.5; the games' solo raid with the same team 82% / 38% / 4% / 12% / 57% / 79%: too harsh to match at 2-4 stars, tiers' own factors fitted to it were dropped); a Solo raid's catch is sure (Wooble)", confidence = "medium" },
+  ["RAID.SEGMENTS"] ={ class = "ours", source = "the games: 2 to 8 segments, by the boss's defensive stats (Bulbapedia, Serebii); this formula is ours", confidence = "medium" },
   ["RAID.CHEER"] = { class = "verified", source = "Serebii: cheer heals, raises a stat, sets a screen or breaks the barrier, about 16% each, nothing 20%; the screens are a Defense / Sp. Def raise here", confidence = "medium" },
   ["RAID.POUCH"] = { class = "ours", source = "raids in the games have no bag; ITEM is ours", confidence = "high" },
   ["RAID.REWARD"] = { class = "ours", source = "the games give Exp. Candies, TRs, berries and the like from raids; this pool (Gen 3's items) and the multipliers are ours; the Exp is Gen 3's formula (engine Experience.gainFor)", confidence = "medium" },

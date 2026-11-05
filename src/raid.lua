@@ -2264,8 +2264,9 @@ return function(mod, deps)
     local ball = r.cmd.balls[i or r.cmd.ball]
     if not ball then return false end
     local level = r.boss and r.boss.mon.level or 20
+    -- (a raid on RAID DIFFICULTY Solo: the catch is sure)
     local caught, info = Rewards.throw(r.key, level, ball, r.rng, r.boss and r.boss.mon.ivs or nil, r.boss and r.boss.gender,
-      r.shiny)
+      r.shiny, r.boss and r.boss.solo == true)
     r.throw = { t0 = r.t, caught = caught, info = type(info) == "table" and info or nil, ball = ball,
       rgb = BALL_RGB[ball.key] or BALL_RGB.ITEM_POKE_BALL, said = {}, cues = {}, acc = 0 }
     r.phase = "throw"

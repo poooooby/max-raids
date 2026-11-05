@@ -59,5 +59,6 @@ tests/achievements_test.lua
 tests/drivers/ach_probe.lua
 tests/drivers/move_audit.lua
 tests/drivers/move_effects_probe.lua
+tests/drivers/held_items_probe.lua
 tests/drivers/looks_probe.lua
 tests/drivers/looks_audit.lua
