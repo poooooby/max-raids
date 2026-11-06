@@ -59,6 +59,8 @@ local function body(game, log)
   local before
   if type(TCb) == "table" then before = TCb.enabled end
   log("engine touch pad before the raid: enabled", tostring(before))
+  -- PROBE_MOVE_INFO=basic|full|off: the MOVE INFO option for the run
+  if os.getenv("PROBE_MOVE_INFO") then X._test.moveInfo(os.getenv("PROBE_MOVE_INFO")) end
   local ok, why = X.open(key)
   check(ok == true, "the raid opens: " .. tostring(why))
   local Stack = require("src.ui.game3.stack")
@@ -106,6 +108,14 @@ local function body(game, log)
   check(X.state().menu == "moves" and X.state().actor == 1, "A on Fight opens the moves")
   after(0.3)
   shot("r09a_moves")
+  do
+    -- how each move does on the boss, as its button shows it
+    local cur = R.current()
+    for i, row in ipairs(cur and cur.cmd and cur.cmd.moveList or {}) do
+      log(("move %d %s: eff %s, shown %s"):format(i, tostring(row.name), tostring(row.eff),
+        tostring(row.effWord or (row.eff and X._test.pad and X._test.pad.EFF_WORD and X._test.pad.EFF_WORD[row.eff]))))
+    end
+  end
   U.tap(game, "a")
   U.wait(4)
   check(X.state().actor == 2 and X.state().chosen == 1, "A on a move: the second member's turn")

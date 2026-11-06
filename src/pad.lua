@@ -389,7 +389,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local e = EFF_RGB[mv.eff]
       G.setFont(font(t.h * 0.22))
       G.setColor(e[1], e[2], e[3], 1)
-      G.print(EFF_WORD[mv.eff], nx, t.y + t.h * 0.6)
+      G.print(mv.effWord or EFF_WORD[mv.eff], nx, t.y + t.h * 0.6)
     end
     -- the PP
     G.setFont(fp)
@@ -1343,13 +1343,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           if on(i) then G.setColor(0.8, 0.8, 0.85, 1) else G.setColor(0.3, 0.3, 0.35, 1) end
           if not live then G.setColor(0.9, 0.25, 0.25, 1) end
           if sub then G.printf(sub, x, y + down + ch * 0.66, cw, "center") end
-          local EW = { super = "Super effective", weak = "Not very effective", none = "No effect" }
-          local ER = { super = { 0.2, 0.75, 0.3 }, weak = { 0.55, 0.55, 0.6 }, none = { 0.9, 0.25, 0.25 } }
+          local EW, ER = Pad.EFF_WORD, Pad.EFF_RGB
           if mv.eff and EW[mv.eff] then
             local e = ER[mv.eff]
             G.setFont(font(ch * 0.1))
             G.setColor(e[1], e[2], e[3], 1)
-            G.printf(EW[mv.eff], x, y + down + ch * 0.8, cw, "center")
+            G.printf(mv.effWord or EW[mv.eff], x, y + down + ch * 0.8, cw, "center")
           end
         end
       end

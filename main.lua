@@ -47,6 +47,10 @@ return function(mod)
     -- (data/raid_rules.lua RAID.SOLO), Sword / Shield keeps the games' own numbers
     { key = "difficulty", label = "RAID DIFFICULTY", type = "choice", default = "solo",
       choices = { { "SOLO", "solo" }, { "SWORD / SHIELD", "swsh" } } },
+    -- how a move does on the boss, under its button: basic words ("Super effective"), full the
+    -- multiplier (2x, 1/2x), or nothing
+    { key = "move_info", label = "MOVE INFO", type = "choice", default = "basic",
+      choices = { { "BASIC", "basic" }, { "FULL", "full" }, { "OFF", "off" } } },
     -- dens on the routes (off: none spawn; those already chosen stay saved)
     { key = "dens", label = "RAID DENS", type = "toggle", default = true },
     -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
@@ -102,6 +106,7 @@ return function(mod)
   end
   local Battle = nil
   local difficultyForced = nil -- (drivers: _test.difficulty("solo" | "swsh"))
+  local moveInfoForced = nil -- (drivers: _test.moveInfo("basic" | "full" | "off"))
   if makeBattle then
     -- (the National Dex's exports: what its newer moves do besides their damage)
     local function dex()
@@ -240,6 +245,7 @@ return function(mod)
       if (outcome == "win" or outcome == "fled") and den and Dens and Dens.finish then pcall(Dens.finish, den) end
     end,
     padOnSecond = padOnSecond,
+    moveInfo = function() return moveInfoForced or mod.options:get("move_info") end,
     onOpen = function()
       if Stack then
         local ok, err = pcall(Stack.push, LAYER_ID, Layer, { hideBelow = true, fullscreen = true })
@@ -454,6 +460,7 @@ return function(mod)
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,
     padSecond = function(on) padForced = on end, difficulty = function(v) difficultyForced = v end,
+    moveInfo = function(v) moveInfoForced = v end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }
   mod.log:info("Galar Rising ready (%d bosses)", #(Bosses.ORDER or {}))
 end

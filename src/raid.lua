@@ -1087,6 +1087,18 @@ return function(mod, deps)
     if m == 0 then return "none" elseif m > 1 then return "super" elseif m < 1 then return "weak" end
     return nil
   end
+  -- a multiplier as the move buttons show it: 2x, 4x, 1/2x, 1/4x, 0x (kept, made once each)
+  local multWords = {}
+  local function multWord(m)
+    local s = multWords[m]
+    if not s then
+      if m == 0 then s = "0x"
+      elseif m >= 1 then s = ("%gx"):format(m)
+      else s = ("1/%gx"):format(1 / m) end
+      multWords[m] = s
+    end
+    return s
+  end
   local function hpRgb(share)
     if share > 0.5 then return { 0.2, 0.75, 0.3 } elseif share > 0.2 then return { 0.9, 0.7, 0.1 } end
     return { 0.9, 0.25, 0.2 }
@@ -1190,7 +1202,12 @@ return function(mod, deps)
           local why = not maxForms and r.sim and r.sim.barredWhy and r.sim:barredWhy(b, mv)
           if why then row.live = false; row.right = why end
           row.rgb = Battle and Battle.TYPE_RGB[shown.typeName] or nil
-          if not shown.status and r.adapter and r.boss then row.eff = effOf(r.adapter.effectiveness(shown.type, r.boss)) end
+          local show = deps.moveInfo and deps.moveInfo() or "basic"
+          if show ~= "off" and not shown.status and r.adapter and r.boss then
+            local m = r.adapter.effectiveness(shown.type, r.boss)
+            row.eff = effOf(m)
+            if row.eff and show == "full" then row.effWord = multWord(m) end
+          end
         else
           list[i] = nil
         end
