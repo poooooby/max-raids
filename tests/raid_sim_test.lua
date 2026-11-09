@@ -1974,5 +1974,52 @@ do
   check(m18.mon.hp == 100, "Magic Room: no Leftovers")
 end
 
+-- ------------------------------------------------------------------ locks and the outcome
+
+-- every lock has its kind; a flinch ends a Rollout but not an Encore; a faint ends any
+do
+  local s, boss, m = duel(g3("Rollout", "ROLLOUT", { power = 30 }), { bossHp = 5000 })
+  s:turn({ { move = 1 } })
+  check(m.lock and m.lock.kind == "rollout", "Rollout's lock is of kind rollout")
+  m.flinched = true
+  s:turn({})
+  check(m.lock == nil, "...a flinch ends it")
+  m.lock = { kind = "encore", mv = m.moves[1], encore = true, turns = 3 }
+  m.flinched = true
+  s:turn({})
+  check(m.lock and m.lock.kind == "encore", "a flinch leaves an Encore")
+  for _, kind in ipairs({ "charge", "rollout", "uproar", "bide", "encore", "rampage" }) do
+    local s2, _, m2 = duel(mv("Tackle", { power = 10 }))
+    m2.lock = { kind = kind, mv = m2.moves[1], turns = 2, rollout = 2 }
+    if kind == "uproar" then s2.uproar = m2 end
+    s2:fainted({}, m2)
+    check(m2.lock == nil and s2.uproar == nil, "a faint ends a " .. kind .. " lock")
+  end
+end
+
+-- Uproar: its holder losing the lock to a flinch lets sleep work again
+do
+  local s, boss, m = duel(g3("Uproar", "UPROAR", { power = 50 }), { bossHp = 5000 })
+  s:turn({ { move = 1 } })
+  check(m.lock and m.lock.kind == "uproar" and s.uproar == m, "Uproar holds its user and the field")
+  m.flinched = true
+  s:turn({})
+  check(m.lock == nil and s.uproar == nil, "...a flinch ends it, the field quiet again")
+end
+
+-- the outcome: a recoil's 4th knock-out on the blow that fells the boss is a win
+do
+  local boss = battler("Boss", 50, 10, { mv("Splash", { power = 0, status = true }) }, true)
+  local m = battler("M1", 10, 90, { mv("Brave Bird", { power = 120, side = { drain = -33 } }) })
+  local s = Sim.new{ boss = boss, members = { m }, adapter = adapter(), rng = rngOf(7) }
+  s.faints = 3
+  s:turn({ { move = 1 } })
+  check(boss.mon.hp == 0 and m.mon.hp == 0, "the boss and its attacker both down")
+  check(s.over == "win", "...and the raid is won (" .. tostring(s.over) .. ")")
+  local s2 = Sim.new{ boss = battler("B", 100, 10, {}, true), members = { battler("M", 10, 10, {}) }, adapter = adapter(), rng = rngOf(1) }
+  s2:endWith("faints"); s2:endWith("storm")
+  check(s2.over == "faints", "the first outcome holds against a lesser one")
+end
+
 print(("%d/%d checks passed  (max_raids sim)"):format(passed, passed + failed))
 if failed > 0 then os.exit(1) end

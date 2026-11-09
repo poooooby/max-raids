@@ -2922,6 +2922,8 @@ return function(mod, deps)
 
   function Rd.playEvents(skip)
     if not (r and r.phase == "battle" and r.events) then return end
+    -- (a hurried press waits for a move's look to have begun: its sound, blow and drain then play)
+    if skip and r.anim and not r.anim.started then return end
     if not skip and r.t - r.evT < r.evDur then return end
     r.evI = r.evI + 1
     local e = r.events[r.evI]

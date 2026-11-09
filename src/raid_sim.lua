@@ -492,18 +492,51 @@ function Sim:specials(ev, att, def, mv, s, damaging)
   return true
 end
 
+-- ------- a battler's lock: one move it is held to, of one kind (b.lock.kind) -
+--   charge   a move's charging turn; released on its next turn (Fly, Solar Beam, Geomancy)
+--   rollout  Rollout / Ice Ball growing (b.lock.rollout, the next hit's step)
+--   uproar   Uproar's turns (the field's sim.uproar its holder: no one sleeps)
+--   bide     Bide's two turns (stored, from)
+--   encore   Encore's turns, on the target's last move
+--   rampage  Outrage and kin, 2-3 turns, then confused
+Sim.LOCK_KINDS = { charge = true, rollout = true, uproar = true, bide = true, encore = true, rampage = true }
+
+-- b's lock when it is of that kind
+local function lockOf(b, kind)
+  local L = b.lock
+  return L and L.kind == kind and L or nil
+end
+Sim.lockOf = lockOf
+
+-- b's lock let go (and the uproar with it, when b holds it); keepEncore: an Encore stays (a flinch
+-- or a turn lost to sleep ends a charge, a Rollout or a rampage, not an Encore)
+function Sim:unlock(b, keepEncore)
+  local L = b.lock
+  if not L or (keepEncore and L.kind == "encore") then return end
+  b.lock = nil
+  if self.uproar == b then self.uproar = nil end
+end
+
+-- the raid's outcome: the first one set holds, but the boss falling outranks a knock-out or the storm
+-- in the same moment (a recoil's 4th knock-out on the blow that felled the boss is a win)
+local OUTCOME_RANK = { win = 3, faints = 2, storm = 1 }
+function Sim:endWith(outcome)
+  if not self.over or (OUTCOME_RANK[outcome] or 0) > (OUTCOME_RANK[self.over] or 0) then self.over = outcome end
+end
+
 -- a battler down: the boss (won), or a member (it sits the next turn out; every knock-out counts)
 function Sim:fainted(ev, b)
   ev[#ev + 1] = { kind = "faint", who = b, text = ("%s fainted!"):format(b.name) }
   if self.noteFainted then self:noteFainted(b) end
   if b.boss then
-    self.over = "win"
+    self:endWith("win")
     return
   end
   self.faints = self.faints + 1
   if b.dmax then self:undynamax(ev, b, true) end
   b.guard, b.guardRun, b.endure, b.helped, b.confused, b.attract, b.torment = nil, nil, nil, nil, nil, nil, nil
-  b.lock, b.recharge, b.semi, b.flinched, b.seeded, b.critUp = nil, nil, nil, nil, nil, nil
+  self:unlock(b)
+  b.recharge, b.semi, b.flinched, b.seeded, b.critUp = nil, nil, nil, nil, nil
   b.__ndxAquaRing, b.__ndxSaltCure, b.__ndxOctolock, b.__ndxMagnetRise, b.__ndxHealBlock = nil, nil, nil, nil, nil
   b.__ndxStat, b.__ndxGrounded, b.__ndxType3, b.__ndxTarShot, b.__ndxGlaiveRush = nil, nil, nil, nil, nil
   b.perish, b.yawn, b.destinyBond, b.grudge, b.substituteHP, b.taunt, b.disabled = nil, nil, nil, nil, nil, nil, nil
@@ -515,7 +548,7 @@ function Sim:fainted(ev, b)
   if self.sides.team.redirect == b then self.sides.team.redirect = nil end
   b.down = 2
   b.status, b.sleep, b.tox, b.trap = nil, nil, nil, nil
-  if self.faints >= (self.rules.FAINTS or 4) then self.over = "faints" end
+  if self.faints >= (self.rules.FAINTS or 4) then self:endWith("faints") end
 end
 
 -- ------- the barrier
@@ -576,7 +609,8 @@ end
 -- the battler skips its move (asleep, frozen, paralysed): true
 function Sim:held(ev, b, mv)
   if b.flinched then
-    b.flinched, b.lock, b.semi = nil, nil, nil
+    b.flinched, b.semi = nil, nil
+    self:unlock(b, true)
     ev[#ev + 1] = { kind = "cant", who = b, text = ("%s flinched and couldn't move!"):format(b.name) }
     return true
   end
@@ -1288,7 +1322,7 @@ function Sim:ruleAfter(ev, att, def, mv, dealt)
     def.__ndxThroatChop = 2
   elseif (rule == "SMACK_DOWN" or rule == "THOUSAND_ARROWS") and up and not self:grounded(def) then
     def.__ndxGrounded = true
-    if def.semi then def.semi, def.lock = nil, nil end
+    if def.semi then def.semi = nil; self:unlock(def, true) end
     ev[#ev + 1] = { kind = "status", who = def, text = ("%s fell straight down!"):format(def.name) }
   elseif rule == "MORTAL_SPIN" then
     local hz = self:sideOf(att).hazards
@@ -1397,7 +1431,8 @@ function Sim:statusRule(ev, att, def, mv, rule)
     if not self:setGravity(ev, att, 5) then return fail() end
     for _, b in ipairs(self:team()) do
       if b.semi then
-        b.semi, b.lock = nil, nil
+        b.semi = nil
+        self:unlock(b, true)
         ev[#ev + 1] = { kind = "status", who = b, text = ("%s fell from the sky due to the gravity!"):format(b.name) }
       end
     end
@@ -1432,11 +1467,11 @@ function Sim:statusRule(ev, att, def, mv, rule)
     att.__ndxMagnetRise = 5
     ev[#ev + 1] = { kind = "status", who = att, text = ("%s levitated with electromagnetism!"):format(att.name) }
   elseif rule == "GEOMANCY" then
-    if att.lock and att.lock.mv == mv then
-      att.lock = nil
+    if lockOf(att, "charge") and att.lock.mv == mv then
+      self:unlock(att)
       stats(att, { "spAtk", "spDef", "speed" }, 2)
     else
-      att.lock = { mv = mv, release = true }
+      att.lock = { kind = "charge", mv = mv, release = true }
       ev[#ev + 1] = { kind = "status", who = att, text = ("%s is absorbing power!"):format(att.name) }
     end
   elseif rule == "LASER_FOCUS" then
@@ -1844,7 +1879,7 @@ end
 function Sim:g3Power(att, def, mv)
   local g = g3Of(mv)
   if g == "ROLLOUT" then
-    local n = att.lock and att.lock.rollout or 1
+    local n = lockOf(att, "rollout") and att.lock.rollout or 1
     local p = (tonumber(mv.power) or 30) * 2 ^ (n - 1)
     if att.curled then p = p * 2 end
     return p
@@ -1867,11 +1902,13 @@ function Sim:g3After(ev, att, def, mv, landed)
   if not g then return end
   local up = alive(def)
   if g == "ROLLOUT" then
-    if not landed then att.lock = nil
-    elseif not att.lock then att.lock = { mv = mv, rollout = 2 }
-    elseif att.lock.rollout then
-      att.lock.rollout = att.lock.rollout + 1
-      if att.lock.rollout > 5 then att.lock = nil end
+    local L = lockOf(att, "rollout")
+    if not landed then
+      if L then self:unlock(att) end
+    elseif not att.lock then att.lock = { kind = "rollout", mv = mv, rollout = 2 }
+    elseif L then
+      L.rollout = L.rollout + 1
+      if L.rollout > 5 then self:unlock(att) end
     end
   elseif g == "FURY_CUTTER" then
     att.furyCutter = landed and min(4, (att.furyCutter or 0) + 1) or 0
@@ -1880,8 +1917,9 @@ function Sim:g3After(ev, att, def, mv, landed)
   elseif g == "RAGE" then
     att.raging = landed or nil
   elseif g == "UPROAR" then
+    local L = lockOf(att, "uproar")
     if not att.lock then
-      att.lock = { mv = mv, turns = self.rng(1, 4), uproar = true }
+      att.lock = { kind = "uproar", mv = mv, turns = self.rng(1, 4), uproar = true }
       self.uproar = att
       ev[#ev + 1] = { kind = "field", who = att, text = ("%s caused an uproar!"):format(att.name) }
       for _, b in ipairs(self:everyone()) do
@@ -1890,10 +1928,10 @@ function Sim:g3After(ev, att, def, mv, landed)
           ev[#ev + 1] = { kind = "status", who = b, status = nil, text = ("The uproar woke %s!"):format(b.name) }
         end
       end
-    else
-      att.lock.turns = att.lock.turns - 1
-      if att.lock.turns <= 0 then
-        att.lock, self.uproar = nil, nil
+    elseif L then
+      L.turns = L.turns - 1
+      if L.turns <= 0 then
+        self:unlock(att)
         ev[#ev + 1] = { kind = "field", who = att, text = ("%s calmed down."):format(att.name) }
       end
     end
@@ -2010,13 +2048,14 @@ function Sim:g3Status(ev, att, def, mv, g)
     att.item, att.consumed = att.consumed, nil
     ev[#ev + 1] = { kind = "status", who = att, text = ("%s found its item!"):format(att.name) }
   elseif g == "BIDE" then
-    if att.lock and att.lock.bide then
-      att.lock.turns = att.lock.turns - 1
-      if att.lock.turns > 0 then
+    local L = lockOf(att, "bide")
+    if L then
+      L.turns = L.turns - 1
+      if L.turns > 0 then
         ev[#ev + 1] = { kind = "status", who = att, text = ("%s is storing energy!"):format(att.name) }
       else
-        local stored, from = att.lock.stored or 0, att.lock.from or self.boss
-        att.lock = nil
+        local stored, from = L.stored or 0, L.from or self.boss
+        self:unlock(att)
         ev[#ev + 1] = { kind = "status", who = att, text = ("%s unleashed its energy!"):format(att.name) }
         if stored <= 0 or not alive(from) then return fail() end
         local dmg = self:capAtShield(from, min(hpOf(from), self:throughBoss(ev, from, stored * 2)))
@@ -2025,7 +2064,7 @@ function Sim:g3Status(ev, att, def, mv, g)
         if not alive(from) then self:fainted(ev, from) elseif from.boss then self:checkShield(ev) end
       end
     else
-      att.lock = { mv = mv, bide = true, turns = 2, stored = 0 }
+      att.lock = { kind = "bide", mv = mv, bide = true, turns = 2, stored = 0 }
       ev[#ev + 1] = { kind = "status", who = att, text = ("%s is storing energy!"):format(att.name) }
     end
   -- ---- on the target
@@ -2037,7 +2076,7 @@ function Sim:g3Status(ev, att, def, mv, g)
     ev[#ev + 1] = { kind = "status", who = target, text = ("%s's %s was disabled!"):format(target.name, target.lastMove.name) }
   elseif g == "ENCORE" then
     if isDmax(target) or target.boss or target.lock or (target.lastMove.pp or 0) <= 0 then return fail() end
-    target.lock = { mv = target.lastMove, encore = true, turns = self.rng(2, 6) }
+    target.lock = { kind = "encore", mv = target.lastMove, encore = true, turns = self.rng(2, 6) }
     ev[#ev + 1] = { kind = "status", who = target, text = ("%s received an encore!"):format(target.name) }
   elseif g == "TAUNT" then
     if (target.taunt or 0) > 0 then return fail() end
@@ -2191,7 +2230,7 @@ end
 function Sim:use(ev, att, mv, targets, ally, locked)
   if not alive(att) or self.over then return end
   if locked ~= "called" then
-    if self:held(ev, att, mv) then att.lock, att.semi = nil, nil; return end
+    if self:held(ev, att, mv) then att.semi = nil; self:unlock(att, true); return end
     -- tormented: not the move it used last; Disable, Taunt, Imprison
     if self:tormented(att, mv) then
       ev[#ev + 1] = { kind = "cant", who = att, torment = true,
@@ -2288,8 +2327,8 @@ function Sim:use(ev, att, mv, targets, ally, locked)
   -- (in the sun Solar Beam and Solar Blade need no charge, nor Electro Shot in the rain)
   local quick = ((key == "solarbeam" or key == "solarblade") and self.weather == "SUN")
     or (key == "electroshot" and self.weather == "RAIN")
-  if sd0 and sd0.charge and not quick and not att.boss and not att.dmax and locked ~= true then
-    att.lock = { mv = mv, release = true }
+  if sd0 and sd0.charge and not quick and not att.boss and not att.dmax and not (locked == true and lockOf(att, "charge")) then
+    att.lock = { kind = "charge", mv = mv, release = true }
     if sd0.semi then att.semi = Sim.SEMI_KIND[key] or true end
     ev[#ev + 1] = { kind = "status", who = att, charge = true, semi = att.semi, move = mv,
       text = (Sim.CHARGE_TEXT[key] or "%s is charging up!"):format(att.name) }
@@ -2298,7 +2337,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     end
     return
   end
-  if locked == true and att.lock and att.lock.release then att.lock, att.semi = nil, nil end
+  if locked == true and lockOf(att, "charge") then att.semi = nil; self:unlock(att) end
   -- Future Sight and Doom Desire: the hit lands at the end of the turn after next
   if sd0 and sd0.future then
     self.pending = self.pending or {}
@@ -2442,7 +2481,8 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           self:noteHurt(def, att, mv, dmg)
           def.lastHitType = mv.type
           -- (Bide stores what it takes)
-          if def.lock and def.lock.bide then def.lock.stored, def.lock.from = (def.lock.stored or 0) + dmg, att end
+          local bide = lockOf(def, "bide")
+          if bide then bide.stored, bide.from = (bide.stored or 0) + dmg, att end
           if n == 1 then hit[#hit + 1] = def end
           landed, total = landed + 1, total + dmg
           ev[#ev + 1] = { kind = "damage", who = att, target = def, amount = dmg, hp = def.mon.hp, move = mv }
@@ -2501,12 +2541,13 @@ function Sim:use(ev, att, mv, targets, ally, locked)
   if sd1 and not att.boss and not att.dmax and alive(att) and not self.over then
     if sd1.recharge and #hit > 0 and self.dmaxActive ~= att then att.recharge = true end
     if sd1.rampage then
+      local L = lockOf(att, "rampage")
       if not att.lock then
-        att.lock = { mv = mv, turns = self.rng(1, 2) }
-      else
-        att.lock.turns = att.lock.turns - 1
-        if att.lock.turns <= 0 then
-          att.lock = nil
+        att.lock = { kind = "rampage", mv = mv, turns = self.rng(1, 2) }
+      elseif L then
+        L.turns = L.turns - 1
+        if L.turns <= 0 then
+          self:unlock(att)
           self:confuse(ev, att)
         end
       end
@@ -3172,10 +3213,10 @@ function Sim:turn(choices)
       self:noteMoved(a.who, a.mv)
       -- (an Encore runs down; out of PP it ends)
       local L = a.who.lock
-      if a.locked and L and L.encore then
+      if a.locked and L and L.kind == "encore" then
         L.turns = L.turns - 1
         if L.turns <= 0 or (L.mv.pp or 0) <= 0 then
-          a.who.lock = nil
+          self:unlock(a.who)
           ev[#ev + 1] = { kind = "status", who = a.who, text = ("%s's encore ended!"):format(a.who.name) }
         end
       end
@@ -3186,7 +3227,7 @@ function Sim:turn(choices)
   if not self.over then self:endTurn(ev) end
   if not self.over then
     self.turnNo = self.turnNo + 1
-    if self.turnNo > (self.rules.TURNS or 10) then self.over = "storm" end
+    if self.turnNo > (self.rules.TURNS or 10) then self:endWith("storm") end
   end
   if self.over then
     local text
