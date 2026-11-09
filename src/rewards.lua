@@ -4,7 +4,7 @@
 -- the Pokedex, in that ball. The rewards: Sword / Shield's drops by tier, into the bag - Exp. Candies
 -- (National Dex Gen 3's), TMs of the boss's types, berries, treasures, a Rare Candy, a PP Max for the
 -- Bottle Cap (RAID.REWARD); nothing straight to the four who fought.
---   Rw = rewards(mod, { N, Bosses, Sprites }) ; Rw.battle = src/battle.lua's (for the TMs' moves)
+--   Rw = rewards(mod, { N, Bosses, Sprites, T }) ; Rw.battle = src/battle.lua's (for the TMs' moves)
 --   Rw.balls() -> { { item, name, n, mult }, ... } ; Rw.chance(stars, mult) (pure)
 --   Rw.throw(key, level, ball, rng, ivs, gender, shiny, sure) -> caught, { name, toPC } | why   (ivs,
 --   gender, shiny: the boss's, kept)
@@ -15,6 +15,11 @@ return function(mod, deps)
   local R = N.RAID
   local floor, max, min, ceil = math.floor, math.max, math.min, math.ceil
   local Rw = {}
+
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = (deps and deps.T) or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
 
   -- an engine module (found ones kept: a mod's require makes garbage each call)
   local engineMods = {}
@@ -53,7 +58,7 @@ return function(mod, deps)
     if n and n >= 289 and n <= 338 and Pokemon and Pokemon.moveFromTmItem and Rw.battle and Rw.battle.move then
       local okM, move = pcall(Pokemon.moveFromTmItem, n)
       local okB, mv = pcall(Rw.battle.move, move)
-      if okM and okB and type(mv) == "table" and mv.name then return ("TM%02d %s"):format(n - 288, mv.name) end
+      if okM and okB and type(mv) == "table" and mv.name then return T("TM%02d %s", n - 288, mv.name) end
     end
     if ItemsData and ItemsData.displayName then
       local ok, nm = pcall(ItemsData.displayName, id)
@@ -336,7 +341,7 @@ return function(mod, deps)
       else
         s.money = (tonumber(s.money) or 0) + coins
       end
-      if gained > 0 then out.items[#out.items + 1] = { id = "money", money = true, name = "Coins", n = gained } end
+      if gained > 0 then out.items[#out.items + 1] = { id = "money", money = true, name = T("Coins"), n = gained } end
     end
     return out
   end

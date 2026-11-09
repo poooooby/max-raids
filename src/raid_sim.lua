@@ -42,13 +42,20 @@
 local Sim = {}
 Sim.__index = Sim
 
+-- the words' language (src/i18n.lua; main sets Sim.T): English as it is without it
+local function plain(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+Sim.T = Sim.T or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plain(s, ...) end,
+  game = plain, t = plain }, { __call = function(_, s, ...) return plain(s, ...) end })
+local T = setmetatable({}, { __index = function(_, k) return Sim.T[k] end, __call = function(_, ...) return Sim.T(...) end })
+
 local max, min, floor = math.max, math.min, math.floor
 
-local STAT_WORD = { attack = "Attack", defense = "Defense", spAtk = "Sp. Atk", spDef = "Sp. Def",
-  speed = "Speed", accuracy = "accuracy", evasion = "evasiveness" }
+local STAT_WORD = { attack = T.mark("Attack"), defense = T.mark("Defense"), spAtk = T.mark("Sp. Atk"),
+  spDef = T.mark("Sp. Def"), speed = T.mark("Speed"), accuracy = T.mark("accuracy"), evasion = T.mark("evasiveness") }
 local STATUS_TEXT = {
-  SLP = "%s fell asleep!", PAR = "%s is paralyzed! It may be unable to move!", PSN = "%s was poisoned!",
-  TOX = "%s was badly poisoned!", BRN = "%s was burned!", FRZ = "%s was frozen solid!",
+  SLP = T.mark("%s fell asleep!"), PAR = T.mark("%s is paralyzed! It may be unable to move!"),
+  PSN = T.mark("%s was poisoned!"), TOX = T.mark("%s was badly poisoned!"), BRN = T.mark("%s was burned!"),
+  FRZ = T.mark("%s was frozen solid!"),
 }
 -- the types a status cannot take (Gen 3: Fire is not burned, Poison and Steel not poisoned, Ice
 -- not frozen)
@@ -58,14 +65,14 @@ Sim.STATUS_TEXT = STATUS_TEXT
 
 -- the cheers' words: what each does to the team
 Sim.CHEER_TEXT = {
-  heal = "The team's HP was restored!",
-  attack = "The team's Attack and Sp. Atk rose!",
-  defense = "The team's Defense and Sp. Def rose!",
-  speed = "The team's Speed rose!",
-  shield = "The cheer broke through the barrier!",
-  nothing = "But nothing happened...",
+  heal = T.mark("The team's HP was restored!"),
+  attack = T.mark("The team's Attack and Sp. Atk rose!"),
+  defense = T.mark("The team's Defense and Sp. Def rose!"),
+  speed = T.mark("The team's Speed rose!"),
+  shield = T.mark("The cheer broke through the barrier!"),
+  nothing = T.mark("But nothing happened..."),
 }
-Sim.ITEM_NAME = { potion = "Potion", full_heal = "Full Heal", revive = "Revive" }
+Sim.ITEM_NAME = { potion = T.mark("Potion"), full_heal = T.mark("Full Heal"), revive = T.mark("Revive") }
 
 function Sim.new(o)
   local self = setmetatable({}, Sim)
@@ -141,9 +148,10 @@ function Sim:tword(key, sub, who, ally)
   local t = self.tw.WORDS and self.tw.WORDS[key]
   if type(t) == "table" then t = t[sub] end
   if type(t) ~= "string" then return nil end
+  t = T(t)
   local key2 = who and sideKey(who) or "team"
-  local side = key2 == "team" and "your team" or self.boss.name
-  local cap = key2 == "team" and "Your team" or self.boss.name
+  local side = key2 == "team" and T("your team") or self.boss.name
+  local cap = key2 == "team" and T("Your team") or self.boss.name
   return (t:gsub("{SIDE_CAP}", cap):gsub("{SIDE}", side):gsub("{BOSS}", self.boss.name or "")
     :gsub("{MON}", who and who.name or ""):gsub("{ALLY}", ally and ally.name or ""))
 end
@@ -182,7 +190,7 @@ function Sim:dynamax(ev, m, i)
   m.choiced = nil
   self.dmaxUsed[i], self.dmaxActive = true, m
   ev[#ev + 1] = { kind = "dynamax", who = m, hp = m.mon.hp, maxHp = m.mon.maxHp, gmax = m.gmaxId ~= nil,
-    text = ("%s %s!"):format(m.name, m.gmaxId and "Gigantamaxed" or "Dynamaxed") }
+    text = m.gmaxId and T("%s Gigantamaxed!", m.name) or T("%s Dynamaxed!", m.name) }
 end
 
 -- back to its own size: its HP keeps its share of the max (quiet: fainted, no words)
@@ -195,7 +203,7 @@ function Sim:undynamax(ev, m, quiet)
   m.dmax = nil
   if self.dmaxActive == m then self.dmaxActive = nil end
   ev[#ev + 1] = { kind = "dynamaxEnd", who = m, hp = m.mon.hp, maxHp = m.mon.maxHp,
-    text = not quiet and ("%s returned to its normal size!"):format(m.name) or nil }
+    text = not quiet and T("%s returned to its normal size!", m.name) or nil }
 end
 
 -- ------- effects
@@ -205,7 +213,7 @@ function Sim:stage(ev, b, stat, n, by)
   if n < 0 and by and by ~= b and self:sideOf(b).mist > 0 then
     if not b.mistSaid then
       b.mistSaid = true
-      ev[#ev + 1] = { kind = "fail", who = b, text = self:tword("misted", nil, b) or ("%s is protected by the mist!"):format(b.name) }
+      ev[#ev + 1] = { kind = "fail", who = b, text = self:tword("misted", nil, b) or T("%s is protected by the mist!", b.name) }
     end
     return
   end
@@ -215,14 +223,14 @@ function Sim:stage(ev, b, stat, n, by)
   local was = b.stages[stat]
   local now = max(-6, min(6, was + n))
   b.stages[stat] = now
-  local word = STAT_WORD[stat] or stat
+  local word = STAT_WORD[stat] and T(STAT_WORD[stat]) or stat
   local text
   if now == was then
-    text = ("%s's %s won't go any %s!"):format(b.name, word, n > 0 and "higher" or "lower")
-  elseif n >= 2 then text = ("%s's %s rose sharply!"):format(b.name, word)
-  elseif n > 0 then text = ("%s's %s rose!"):format(b.name, word)
-  elseif n <= -2 then text = ("%s's %s harshly fell!"):format(b.name, word)
-  else text = ("%s's %s fell!"):format(b.name, word) end
+    text = n > 0 and T("%s's %s won't go any higher!", b.name, word) or T("%s's %s won't go any lower!", b.name, word)
+  elseif n >= 2 then text = T("%s's %s rose sharply!", b.name, word)
+  elseif n > 0 then text = T("%s's %s rose!", b.name, word)
+  elseif n <= -2 then text = T("%s's %s harshly fell!", b.name, word)
+  else text = T("%s's %s fell!", b.name, word) end
   ev[#ev + 1] = { kind = "stage", who = b, stat = stat, n = now - was, text = text }
 end
 
@@ -231,7 +239,7 @@ end
 function Sim:status(ev, b, st, quiet, by)
   if by and by ~= b and self:sideOf(b).safeguard > 0 and not b.status then
     if not quiet then
-      ev[#ev + 1] = { kind = "fail", who = b, text = self:tword("safeguarded", nil, b) or ("%s is protected by Safeguard!"):format(b.name) }
+      ev[#ev + 1] = { kind = "fail", who = b, text = self:tword("safeguarded", nil, b) or T("%s is protected by Safeguard!", b.name) }
     end
     return false
   end
@@ -241,13 +249,13 @@ function Sim:status(ev, b, st, quiet, by)
   local kept = terrain and self:grounded(b) and (terrain == "MISTY" or (terrain == "ELECTRIC" and st == "SLP"))
   if st == "SLP" and (b.raidAbility == "INSOMNIA" or (self.uproar and alive(self.uproar))) then kept = true end
   if b.status or kept or (immune and (immune[b.type1] or immune[b.type2 or -1])) then
-    if not quiet then ev[#ev + 1] = { kind = "fail", text = "But it failed!" } end
+    if not quiet then ev[#ev + 1] = { kind = "fail", text = T("But it failed!") } end
     return false
   end
   b.status = st
   if st == "SLP" then b.sleep = self.rng(2, 5) end
   if st == "TOX" then b.tox = 0 end
-  ev[#ev + 1] = { kind = "status", who = b, status = st, text = STATUS_TEXT[st]:format(b.name) }
+  ev[#ev + 1] = { kind = "status", who = b, status = st, text = T(STATUS_TEXT[st], b.name) }
   return true
 end
 
@@ -259,12 +267,12 @@ function Sim:drain(ev, att, def, s, dealt)
       if s.drain > 0 then
         if not canHeal(att) then return end
         att.mon.hp = min(maxHpOf(att), hpOf(att) + amt)
-        ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = ("%s had its energy drained!"):format(def.name) }
+        ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = T("%s had its energy drained!", def.name) }
       else
         amt = self:capAtShield(att, amt)
         att.mon.hp = max(0, hpOf(att) - amt)
         ev[#ev + 1] = { kind = "residual", who = att, amount = amt, hp = att.mon.hp,
-          text = ("%s was damaged by the recoil!"):format(att.name) }
+          text = T("%s was damaged by the recoil!", att.name) }
         if att.boss then self:checkShield(ev) end
         if not alive(att) then self:fainted(ev, att) end
       end
@@ -278,7 +286,7 @@ end
 function Sim:side(ev, att, def, mv, damaging, dealt)
   local s = mv.side
   if not s then
-    if not damaging then ev[#ev + 1] = { kind = "fail", text = "But nothing happened!" } end
+    if not damaging then ev[#ev + 1] = { kind = "fail", text = T("But nothing happened!") } end
     return
   end
   self:drain(ev, att, def, s, dealt)
@@ -294,9 +302,9 @@ function Sim:side(ev, att, def, mv, damaging, dealt)
     if s.sandHeal and self.weather == "SAND" then share = s.sandHeal end
     target.mon.hp = min(maxHpOf(target), before + floor(maxHpOf(target) * share))
     if target.mon.hp == before then
-      ev[#ev + 1] = { kind = "fail", text = ("%s's HP is full!"):format(target.name) }
+      ev[#ev + 1] = { kind = "fail", text = T("%s's HP is full!", target.name) }
     else
-      ev[#ev + 1] = { kind = "heal", who = target, hp = target.mon.hp, text = ("%s regained health!"):format(target.name) }
+      ev[#ev + 1] = { kind = "heal", who = target, hp = target.mon.hp, text = T("%s regained health!", target.name) }
     end
   end
   if lucky then
@@ -345,44 +353,44 @@ function Sim:specials(ev, att, def, mv, s, damaging)
   -- Focus Energy: critical hits more likely
   if s.focus then
     att.critUp = 2
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s is getting pumped!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s is getting pumped!", att.name) }
   end
   -- Belly Drum: half the user's HP for the Attack stat at +6
   if s.bellyDrum then
     if hpOf(att) <= floor(maxHpOf(att) / 2) or (att.stages.attack or 0) >= 6 then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return false
     end
-    self:selfHurt(ev, att, floor(maxHpOf(att) / 2), ("%s cut its own HP and maximized its Attack!"):format(att.name))
+    self:selfHurt(ev, att, floor(maxHpOf(att) / 2), T("%s cut its own HP and maximized its Attack!", att.name))
     att.stages.attack = 6
-    ev[#ev + 1] = { kind = "stage", who = att, stat = "attack", n = 6, text = ("%s's Attack was maximized!"):format(att.name) }
+    ev[#ev + 1] = { kind = "stage", who = att, stat = "attack", n = 6, text = T("%s's Attack was maximized!", att.name) }
   end
   -- Haze: every stat change on the field gone
   if s.haze then
     for _, b in ipairs(self.members) do for k in pairs(b.stages) do b.stages[k] = 0 end end
     for k in pairs(self.boss.stages) do self.boss.stages[k] = 0 end
-    ev[#ev + 1] = { kind = "field", who = att, text = "All stat changes were eliminated!" }
+    ev[#ev + 1] = { kind = "field", who = att, text = T("All stat changes were eliminated!") }
   end
   -- Rest: full HP, two turns asleep, a status cured
   if s.rest then
     if hpOf(att) >= maxHpOf(att) or att.status == "SLP" then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return false
     end
     att.status, att.tox = "SLP", nil
     att.sleep = 3
     att.mon.hp = maxHpOf(att)
-    ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = ("%s slept and became healthy!"):format(att.name) }
+    ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = T("%s slept and became healthy!", att.name) }
   end
   -- Leech Seed: the target loses 1/8 of its HP each turn, healing the seeder (not a Grass type)
   if s.seed then
     local grass = 12
     if not alive(def) or def.seeded or def.type1 == grass or def.type2 == grass then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return false
     end
     def.seeded = att
-    ev[#ev + 1] = { kind = "status", who = def, text = ("%s was seeded!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, text = T("%s was seeded!", def.name) }
   end
   -- Pain Split: the two share their HP out evenly
   if s.painSplit then
@@ -391,22 +399,22 @@ function Sim:specials(ev, att, def, mv, s, damaging)
     if cut > 0 then cut = self:capAtShield(def, cut); def.mon.hp = hpOf(def) - cut
     else def.mon.hp = min(maxHpOf(def), avg) end
     att.mon.hp = min(maxHpOf(att), avg)
-    ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = "The battlers shared their pain!" }
+    ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = T("The battlers shared their pain!") }
     if def.boss then self:checkShield(ev) end
   end
   -- Trap: the target is held and hurt for 4-5 turns
   if s.trap and damaging and alive(def) and (def.trap or 0) == 0 then
     def.trap, def.trapFrac = self.rng(4, 5), 8
-    ev[#ev + 1] = { kind = "status", who = def, text = ("%s was trapped!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, text = T("%s was trapped!", def.name) }
   end
   -- Confusion (a hit's chance, or the move's own)
   if s.confuse and alive(def) and def ~= att then
     if self.rng(1, 100) <= s.confuse then
       if not self:confuse(ev, def, att) and not damaging then
-        ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+        ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       end
     elseif not damaging then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
     end
   end
   -- Flinching: a Dynamax Pokemon (the boss) cannot be flinched; the target must not have moved yet
@@ -420,25 +428,25 @@ function Sim:specials(ev, att, def, mv, s, damaging)
   -- weather: five turns of rain, sun, sandstorm or hail
   if s.weather then
     if self.weather == s.weather then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return false
     end
     self.weather, self.weatherTurns = s.weather, 5
-    ev[#ev + 1] = { kind = "field", who = att, weather = s.weather, text = Sim.WEATHER_TEXT[s.weather].up }
+    ev[#ev + 1] = { kind = "field", who = att, weather = s.weather, text = T(Sim.WEATHER_TEXT[s.weather].up) }
   end
   -- Attract: infatuation (a male and a female only)
   if s.attract then
-    if not self:attract(ev, def, att) then ev[#ev + 1] = { kind = "fail", text = "But it failed!" } end
+    if not self:attract(ev, def, att) then ev[#ev + 1] = { kind = "fail", text = T("But it failed!") } end
   end
   -- Curse: a Ghost pays half its HP to curse the foe (a quarter of the foe's HP a turn); anything
   -- else trades Speed for Attack and Defense
   if s.curse then
     if att.type1 == 7 or att.type2 == 7 then
       if def.cursed or not alive(def) then
-        ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+        ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
         return false
       end
-      self:selfHurt(ev, att, floor(maxHpOf(att) / 2), ("%s cut its own HP and laid a curse on %s!"):format(att.name, def.name))
+      self:selfHurt(ev, att, floor(maxHpOf(att) / 2), T("%s cut its own HP and laid a curse on %s!", att.name, def.name))
       def.cursed = true
     else
       self:stage(ev, att, "speed", -1)
@@ -449,33 +457,33 @@ function Sim:specials(ev, att, def, mv, s, damaging)
   -- Nightmare: a sleeping target loses a quarter of its HP each turn it sleeps
   if s.nightmare then
     if def.status ~= "SLP" or def.nightmare then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return false
     end
     def.nightmare = true
-    ev[#ev + 1] = { kind = "status", who = def, text = ("%s began having a nightmare!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, text = T("%s began having a nightmare!", def.name) }
   end
   -- Lock-On and Mind Reader: the user's next move cannot miss
   if s.lockOn and alive(def) then
     att.lockOn = def
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s took aim at %s!"):format(att.name, def.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s took aim at %s!", att.name, def.name) }
   end
   -- Ingrain: roots that restore 1/16 of the user's HP each turn
   if s.ingrain then
     if att.ingrained then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return false
     end
     att.ingrained = true
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s planted its roots!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s planted its roots!", att.name) }
   end
   -- Refresh: the user's paralysis, poison or burn cured
   if s.refresh then
     if att.status == "PSN" or att.status == "TOX" or att.status == "BRN" or att.status == "PAR" then
       att.status, att.tox = nil, nil
-      ev[#ev + 1] = { kind = "status", who = att, status = nil, text = ("%s's status returned to normal!"):format(att.name) }
+      ev[#ev + 1] = { kind = "status", who = att, status = nil, text = T("%s's status returned to normal!", att.name) }
     else
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return false
     end
   end
@@ -526,7 +534,7 @@ end
 
 -- a battler down: the boss (won), or a member (it sits the next turn out; every knock-out counts)
 function Sim:fainted(ev, b)
-  ev[#ev + 1] = { kind = "faint", who = b, text = ("%s fainted!"):format(b.name) }
+  ev[#ev + 1] = { kind = "faint", who = b, text = T("%s fainted!", b.name) }
   if self.noteFainted then self:noteFainted(b) end
   if b.boss then
     self:endWith("win")
@@ -586,7 +594,7 @@ function Sim:checkShield(ev)
       local n = b.segments or 2
       b.shield = { left = n, max = n }
       ev[#ev + 1] = { kind = "shield", step = "up", who = b, left = n, max = n,
-        text = ("A mysterious barrier appeared in front of %s!"):format(b.name) }
+        text = T("A mysterious barrier appeared in front of %s!", b.name) }
       return
     end
   end
@@ -596,7 +604,7 @@ function Sim:breakShield(ev)
   local b = self.boss
   b.shield = nil
   ev[#ev + 1] = { kind = "shield", step = "break", who = b, left = 0, max = 0,
-    text = ("The mysterious barrier around %s disappeared!"):format(b.name) }
+    text = T("The mysterious barrier around %s disappeared!", b.name) }
   local drop = self.rules.BREAK_DROP or -2
   self:stage(ev, b, "defense", drop)
   self:stage(ev, b, "spDef", drop)
@@ -611,27 +619,27 @@ function Sim:held(ev, b, mv)
   if b.flinched then
     b.flinched, b.semi = nil, nil
     self:unlock(b, true)
-    ev[#ev + 1] = { kind = "cant", who = b, text = ("%s flinched and couldn't move!"):format(b.name) }
+    ev[#ev + 1] = { kind = "cant", who = b, text = T("%s flinched and couldn't move!", b.name) }
     return true
   end
   if b.status == "SLP" then
     b.sleep = (b.sleep or 1) - 1
     if b.sleep > 0 then
-      ev[#ev + 1] = { kind = "cant", who = b, ail = "SLP", text = ("%s is fast asleep."):format(b.name) }
+      ev[#ev + 1] = { kind = "cant", who = b, ail = "SLP", text = T("%s is fast asleep.", b.name) }
       -- (Snore and Sleep Talk are used asleep)
       local g = mv and mv.side and mv.side.g3
       if g == "SNORE" or g == "SLEEP_TALK" then return false end
       return true
     end
     b.status, b.sleep = nil, nil
-    ev[#ev + 1] = { kind = "status", who = b, status = nil, text = ("%s woke up!"):format(b.name) }
+    ev[#ev + 1] = { kind = "status", who = b, status = nil, text = T("%s woke up!", b.name) }
   elseif b.status == "FRZ" then
     if self.rng(1, 5) ~= 1 then
-      ev[#ev + 1] = { kind = "cant", who = b, ail = "FRZ", text = ("%s is frozen solid!"):format(b.name) }
+      ev[#ev + 1] = { kind = "cant", who = b, ail = "FRZ", text = T("%s is frozen solid!", b.name) }
       return true
     end
     b.status = nil
-    ev[#ev + 1] = { kind = "status", who = b, status = nil, text = ("%s thawed out!"):format(b.name) }
+    ev[#ev + 1] = { kind = "status", who = b, status = nil, text = T("%s thawed out!", b.name) }
   end
   -- confused (G-Max Smite, Gold Rush): 2-5 turns, a 1 in 3 chance each turn to strike itself instead
   -- (Gen 7 on), a 40-power typeless physical blow (the adapter's confusionHit)
@@ -639,15 +647,15 @@ function Sim:held(ev, b, mv)
     b.confused = b.confused - 1
     if b.confused <= 0 then
       b.confused = nil
-      ev[#ev + 1] = { kind = "status", who = b, text = ("%s snapped out of its confusion!"):format(b.name) }
+      ev[#ev + 1] = { kind = "status", who = b, text = T("%s snapped out of its confusion!", b.name) }
     else
-      ev[#ev + 1] = { kind = "cant", who = b, confused = true, text = ("%s is confused!"):format(b.name) }
+      ev[#ev + 1] = { kind = "cant", who = b, confused = true, text = T("%s is confused!", b.name) }
       if self.rng(1, 3) == 1 then
         local cut = (self.A.confusionHit and self.A.confusionHit(b)) or max(1, floor(maxHpOf(b) / 8))
         cut = self:capAtShield(b, min(hpOf(b), cut))
         b.mon.hp = hpOf(b) - cut
         ev[#ev + 1] = { kind = "residual", who = b, amount = cut, hp = b.mon.hp,
-          text = "It hurt itself in its confusion!" }
+          text = T("It hurt itself in its confusion!") }
         if not alive(b) then self:fainted(ev, b) elseif b.boss then self:checkShield(ev) end
         return true
       end
@@ -659,15 +667,15 @@ function Sim:held(ev, b, mv)
     if not alive(by) or (by.down or 0) > 0 then
       b.attract = nil
     else
-      ev[#ev + 1] = { kind = "cant", who = b, attract = true, text = ("%s is in love with %s!"):format(b.name, by.name) }
+      ev[#ev + 1] = { kind = "cant", who = b, attract = true, text = T("%s is in love with %s!", b.name, by.name) }
       if self.rng(1, 100) <= 50 then
-        ev[#ev + 1] = { kind = "cant", who = b, attract = true, text = ("%s is immobilized by love!"):format(b.name) }
+        ev[#ev + 1] = { kind = "cant", who = b, attract = true, text = T("%s is immobilized by love!", b.name) }
         return true
       end
     end
   end
   if b.status == "PAR" and self.rng(1, 4) == 1 then
-    ev[#ev + 1] = { kind = "cant", who = b, ail = "PAR", text = ("%s is paralyzed! It can't move!"):format(b.name) }
+    ev[#ev + 1] = { kind = "cant", who = b, ail = "PAR", text = T("%s is paralyzed! It can't move!", b.name) }
     return true
   end
   return false
@@ -679,7 +687,7 @@ function Sim:torment(ev, b)
   if not alive(b) or b.torment or isDmax(b) or (b.down or 0) > 0 then return false end
   b.torment = true
   ev[#ev + 1] = { kind = "status", who = b, torment = true,
-    text = fill(self.words.torment or "{MON} was subjected to torment!", self.boss, b) }
+    text = fill(self.words.torment and T(self.words.torment) or T("{MON} was subjected to torment!"), self.boss, b) }
   return true
 end
 -- whether a tormented battler is barred from `mv` now (its last move, and it has another to use)
@@ -700,7 +708,7 @@ function Sim:setGravity(ev, by, turns)
   if (self.gravity or 0) > 0 then return false end
   self.gravity = turns
   ev[#ev + 1] = { kind = "side", side = "field", what = "gravity", up = true, who = by,
-    text = self.words.gravity or "Gravity intensified!" }
+    text = self.words.gravity and T(self.words.gravity) or T("Gravity intensified!") }
   return true
 end
 
@@ -713,7 +721,7 @@ function Sim:attract(ev, b, by)
   if self.A.abilityName and self.A.abilityName(b) == "OBLIVIOUS" then return false end
   b.attract = by
   ev[#ev + 1] = { kind = "status", who = b, attract = true,
-    text = fill(self.words.attract or "{MON} fell in love!", self.boss, b) }
+    text = fill(self.words.attract and T(self.words.attract) or T("{MON} fell in love!"), self.boss, b) }
   return true
 end
 
@@ -724,7 +732,7 @@ function Sim:confuse(ev, b, by)
   if by and by ~= b and self:sideOf(b).safeguard > 0 then return false end
   b.confused = self.rng(2, 5)
   ev[#ev + 1] = { kind = "status", who = b, confused = true,
-    text = fill(self.words.confused or "{MON} became confused!", self.boss, b) }
+    text = fill(self.words.confused and T(self.words.confused) or T("{MON} became confused!"), self.boss, b) }
   return true
 end
 
@@ -786,7 +794,7 @@ function Sim:gmaxMain(ev, att, mv, hit, e)
       -- (G-Max Resonance: Aurora Veil on the team's side)
       self.sides.team.veil = e.turns or 5
       ev[#ev + 1] = { kind = "side", side = "team", what = "veil", up = true, who = att,
-        text = W.teamVeil or "The team is protected by a shimmering veil!" }
+        text = W.teamVeil and T(W.teamVeil) or T("The team is protected by a shimmering veil!") }
       return
     elseif e.kind == "heal" then
       for _, m in ipairs(self:team()) do
@@ -795,22 +803,22 @@ function Sim:gmaxMain(ev, att, mv, hit, e)
           ev[#ev + 1] = { kind = "heal", who = m, hp = m.mon.hp }
         end
       end
-      ev[#ev + 1] = { kind = "field", who = att, text = W.teamHeal or "The team's HP was restored!" }
+      ev[#ev + 1] = { kind = "field", who = att, text = W.teamHeal and T(W.teamHeal) or T("The team's HP was restored!") }
       return
     elseif e.kind == "cure" then
       for _, m in ipairs(self:team()) do m.status, m.sleep, m.tox = nil, nil, nil end
-      ev[#ev + 1] = { kind = "field", who = att, text = W.teamCure or "The team's status returned to normal!" }
+      ev[#ev + 1] = { kind = "field", who = att, text = W.teamCure and T(W.teamCure) or T("The team's status returned to normal!") }
       return
     elseif e.kind == "crit" then
       for _, m in ipairs(self:team()) do m.critUp = (m.critUp or 0) + (e.n or 1) end
-      ev[#ev + 1] = { kind = "field", who = att, text = W.teamCrit or "The team is getting pumped!" }
+      ev[#ev + 1] = { kind = "field", who = att, text = W.teamCrit and T(W.teamCrit) or T("The team is getting pumped!") }
       return
     elseif e.kind == "field" then
       if not self.bossField then
         self.bossField = { turns = e.turns or 4, frac = e.frac or 6, spare = e.spareNum, spareName = e.spare }
         local t = W.fieldFoe and W.fieldFoe[e.spare]
         -- (foeField: round the boss - the team's own field look is fieldType's)
-        ev[#ev + 1] = { kind = "field", who = att, foeField = e.spare, text = fill(t or "{BOSS} was surrounded!", b) }
+        ev[#ev + 1] = { kind = "field", who = att, foeField = e.spare, text = fill(t and T(t) or T("{BOSS} was surrounded!"), b) }
       end
       return
     elseif e.kind == "pp" then
@@ -822,7 +830,7 @@ function Sim:gmaxMain(ev, att, mv, hit, e)
     elseif e.kind == "coins" then
       self.coinUses = self.coinUses + 1
       self.money = self.money + (tonumber(att.mon.level) or 1) * 100 * min(3, self.coinUses)
-      ev[#ev + 1] = { kind = "field", who = att, text = W.coins or "Coins were scattered everywhere!" }
+      ev[#ev + 1] = { kind = "field", who = att, text = W.coins and T(W.coins) or T("Coins were scattered everywhere!") }
       return
     end
     -- status, drowsy, stages, trap: on those it hit (the boss), as below
@@ -839,7 +847,7 @@ function Sim:gmaxMain(ev, att, mv, hit, e)
   elseif e.kind == "drowsy" then
     for _, m in ipairs(hit) do
       if alive(m) and not m.status and self:sideOf(m).safeguard <= 0 and self.rng(1, 100) <= (e.chance or 50) then
-        if W.drowsy then ev[#ev + 1] = { kind = "status", who = m, text = fill(W.drowsy, att, m) } end
+        if W.drowsy then ev[#ev + 1] = { kind = "status", who = m, text = fill(T(W.drowsy), att, m) } end
         self:status(ev, m, "SLP", true, att)
       end
     end
@@ -858,36 +866,36 @@ function Sim:gmaxMain(ev, att, mv, hit, e)
         last.pp = (last.pp or 0) - cut
         if cut > 0 then
           ev[#ev + 1] = { kind = "field", who = m,
-            text = ("%s's %s lost %d PP!"):format(m.name, last.name or "move", cut) }
+            text = T("%s's %s lost %d PP!", m.name, last.name or T("move"), cut) }
         end
       end
     end
   elseif e.kind == "veil" then
     self.sides.boss.veil = e.turns or 5
     self:syncVeil()
-    ev[#ev + 1] = { kind = "field", who = att, text = fill(W.veil or "{BOSS} is protected by a veil!", att) }
+    ev[#ev + 1] = { kind = "field", who = att, text = fill(W.veil and T(W.veil) or T("{BOSS} is protected by a veil!"), att) }
   elseif e.kind == "heal" then
     att.mon.hp = min(maxHpOf(att), hpOf(att) + floor(maxHpOf(att) / (e.frac or 6)))
-    ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = fill(W.heal or "{BOSS}'s HP was restored!", att) }
+    ev[#ev + 1] = { kind = "heal", who = att, hp = att.mon.hp, text = fill(W.heal and T(W.heal) or T("{BOSS}'s HP was restored!"), att) }
   elseif e.kind == "cure" then
     if att.status then
       att.status, att.sleep, att.tox = nil, nil, nil
-      ev[#ev + 1] = { kind = "status", who = att, text = fill(W.cure or "{BOSS}'s status returned to normal!", att) }
+      ev[#ev + 1] = { kind = "status", who = att, text = fill(W.cure and T(W.cure) or T("{BOSS}'s status returned to normal!"), att) }
     end
   elseif e.kind == "crit" then
     att.critUp = (att.critUp or 0) + (e.n or 1)
-    ev[#ev + 1] = { kind = "field", who = att, text = fill(W.crit or "{BOSS} is getting pumped!", att) }
+    ev[#ev + 1] = { kind = "field", who = att, text = fill(W.crit and T(W.crit) or T("{BOSS} is getting pumped!"), att) }
   elseif e.kind == "field" then
     if not self.field then
       self.field = { turns = e.turns or 4, frac = e.frac or 6, spare = e.spareNum, spareName = e.spare }
       local t = W.field and W.field[e.spare]
-      ev[#ev + 1] = { kind = "field", who = att, fieldType = e.spare, text = t or "The team was surrounded!" }
+      ev[#ev + 1] = { kind = "field", who = att, fieldType = e.spare, text = t and T(t) or T("The team was surrounded!") }
     end
   elseif e.kind == "trap" then
     for _, m in ipairs(hit) do
       if alive(m) and not m.trap then
         m.trap, m.trapFrac = e.turns or 4, e.frac or 8
-        ev[#ev + 1] = { kind = "status", who = m, text = fill(W.trap or "{MON} became trapped!", att, m) }
+        ev[#ev + 1] = { kind = "status", who = m, text = fill(W.trap and T(W.trap) or T("{MON} became trapped!"), att, m) }
       end
     end
   end
@@ -904,8 +912,8 @@ function Sim:blowAway(ev, key, by)
   if any then
     local who = key == "boss" and self.boss or nil
     ev[#ev + 1] = { kind = "side", side = key, what = "blown", up = false, who = by,
-      text = self:tword("blown", nil, who or { name = "", boss = nil }) or self.words.defog
-        or "The veil around the target was blown away!" }
+      text = self:tword("blown", nil, who or { name = "", boss = nil }) or (self.words.defog and T(self.words.defog))
+        or T("The veil around the target was blown away!") }
   end
 end
 
@@ -927,7 +935,7 @@ end
 function Sim:stopped(att, mv, def)
   if mv.pierce or att == def then return nil end
   if def.guard == "max" then return "block", { kind = "guard", who = def, blocked = true, max = true,
-    text = fill(self.words.guard or "{MON} protected itself!", self.boss, def) } end
+    text = fill(self.words.guard and T(self.words.guard) or T("{MON} protected itself!"), self.boss, def) } end
   local how, what = nil, nil
   if def.guard == "protect" and not (def.protectRow and def.protectRow.damagingOnly and mv.status) then
     how, what = "protect", "protect"
@@ -941,11 +949,11 @@ function Sim:stopped(att, mv, def)
   if not how then return nil end
   if mv.isGmax and not mv.status then
     return "pierce", { kind = "guard", who = def, pierced = true, what = what,
-      text = self:tword("pierced", nil, def) or ("%s couldn't fully protect itself and got hurt!"):format(def.name) }
+      text = self:tword("pierced", nil, def) or T("%s couldn't fully protect itself and got hurt!", def.name) }
   end
   local text
-  if how == "protect" then text = self:tword("protect", nil, def) or ("%s protected itself!"):format(def.name)
-  else text = self:tword("guarded", what, def) or ("%s was protected!"):format(def.name) end
+  if how == "protect" then text = self:tword("protect", nil, def) or T("%s protected itself!", def.name)
+  else text = self:tword("guarded", what, def) or T("%s was protected!", def.name) end
   return "block", { kind = "guard", who = def, blocked = true, what = what, text = text }
 end
 
@@ -958,7 +966,7 @@ function Sim:contactCost(ev, att, def, mv)
     if cut > 0 then
       att.mon.hp = hpOf(att) - cut
       ev[#ev + 1] = { kind = "residual", who = att, amount = cut, hp = att.mon.hp,
-        text = self:tword("hurt", nil, att) or ("%s was hurt!"):format(att.name) }
+        text = self:tword("hurt", nil, att) or T("%s was hurt!", att.name) }
       if not alive(att) then self:fainted(ev, att) elseif att.boss then self:checkShield(ev) end
     end
   end
@@ -968,35 +976,35 @@ function Sim:contactCost(ev, att, def, mv)
   end
 end
 
--- one of the team moves (data/raid_team_moves.lua row T) by att; target: the ally picked
-function Sim:teamMove(ev, att, mv, T, target)
+-- one of the team moves (data/raid_team_moves.lua row TM) by att; target: the ally picked
+function Sim:teamMove(ev, att, mv, TM, target)
   local key = sideKey(att)
   local sd = self.sides[key]
-  local function fail() ev[#ev + 1] = { kind = "fail", text = "But it failed!" } end
+  local function fail() ev[#ev + 1] = { kind = "fail", text = T("But it failed!") } end
   local function allies(withSelf)
     local l = {}
     for _, b in ipairs(self:onSide(key)) do if withSelf or b ~= att then l[#l + 1] = b end end
     return l
   end
-  local kind = T.kind
+  local kind = TM.kind
   if kind == "screen" then
-    if T.needs == "hail" and self.weather ~= "HAIL" then return fail() end
-    if sd[T.screen] > 0 then return fail() end
-    sd[T.screen] = T.turns or 5
+    if TM.needs == "hail" and self.weather ~= "HAIL" then return fail() end
+    if sd[TM.screen] > 0 then return fail() end
+    sd[TM.screen] = TM.turns or 5
     self:syncVeil()
-    ev[#ev + 1] = { kind = "side", side = key, what = T.screen, up = true, who = att, text = self:tword("screenUp", T.screen, att) }
+    ev[#ev + 1] = { kind = "side", side = key, what = TM.screen, up = true, who = att, text = self:tword("screenUp", TM.screen, att) }
   elseif kind == "side" then
-    if sd[T.flag] > 0 then return fail() end
-    sd[T.flag] = T.turns or 5
-    ev[#ev + 1] = { kind = "side", side = key, what = T.flag, up = true, who = att, text = self:tword("sideUp", T.flag, att) }
+    if sd[TM.flag] > 0 then return fail() end
+    sd[TM.flag] = TM.turns or 5
+    ev[#ev + 1] = { kind = "side", side = key, what = TM.flag, up = true, who = att, text = self:tword("sideUp", TM.flag, att) }
   elseif kind == "guard" then
-    if T.guard == "mat" and att.outSince ~= self.turnNo then return fail() end
-    sd.guards[T.guard] = true
-    ev[#ev + 1] = { kind = "side", side = key, what = T.guard, up = true, who = att, text = self:tword("guardUp", T.guard, att) }
+    if TM.guard == "mat" and att.outSince ~= self.turnNo then return fail() end
+    sd.guards[TM.guard] = true
+    ev[#ev + 1] = { kind = "side", side = key, what = TM.guard, up = true, who = att, text = self:tword("guardUp", TM.guard, att) }
   elseif kind == "protect" then
     if not guardRoll(self, att) then return fail() end
-    att.guard, att.protectRow = "protect", T
-    ev[#ev + 1] = { kind = "guard", who = att, protect = true, text = self:tword("protect", nil, att) or ("%s protected itself!"):format(att.name) }
+    att.guard, att.protectRow = "protect", TM
+    ev[#ev + 1] = { kind = "guard", who = att, protect = true, text = self:tword("protect", nil, att) or T("%s protected itself!", att.name) }
   elseif kind == "endure" then
     if not guardRoll(self, att) then return fail() end
     att.endure = true
@@ -1012,20 +1020,20 @@ function Sim:teamMove(ev, att, mv, T, target)
       text = self:tword("help", nil, att, target) }
   elseif kind == "heal" then
     local list
-    if T.team then list = allies(true)
+    if TM.team then list = allies(true)
     elseif target and target ~= att and alive(target) and not foes(att, target) and (target.down or 0) == 0 then list = { target }
     else return fail() end
     local any = false
     for _, b in ipairs(list) do
       local before = hpOf(b)
       if before < maxHpOf(b) then
-        b.mon.hp = min(maxHpOf(b), before + floor(maxHpOf(b) * (T.frac or 0.25) + 0.5))
-        ev[#ev + 1] = { kind = "heal", who = b, hp = b.mon.hp, text = self:tword("heal", nil, b) or ("%s's HP was restored."):format(b.name) }
+        b.mon.hp = min(maxHpOf(b), before + floor(maxHpOf(b) * (TM.frac or 0.25) + 0.5))
+        ev[#ev + 1] = { kind = "heal", who = b, hp = b.mon.hp, text = self:tword("heal", nil, b) or T("%s's HP was restored.", b.name) }
         any = true
       end
-      if T.cure and b.status then
+      if TM.cure and b.status then
         b.status, b.sleep, b.tox = nil, nil, nil
-        ev[#ev + 1] = { kind = "status", who = b, text = ("%s's status returned to normal!"):format(b.name) }
+        ev[#ev + 1] = { kind = "status", who = b, text = T("%s's status returned to normal!", b.name) }
         any = true
       end
     end
@@ -1037,14 +1045,14 @@ function Sim:teamMove(ev, att, mv, T, target)
     for _, b in ipairs(allies(true)) do
       if b.status then
         b.status, b.sleep, b.tox = nil, nil, nil
-        ev[#ev + 1] = { kind = "status", who = b, text = ("%s's status returned to normal!"):format(b.name) }
+        ev[#ev + 1] = { kind = "status", who = b, text = T("%s's status returned to normal!", b.name) }
       end
     end
   elseif kind == "wish" then
     if sd.wish then return fail() end
     local slot = nil
     for i, m in ipairs(self.members) do if m == att then slot = i end end
-    sd.wish = { turns = 2, amount = max(1, floor(maxHpOf(att) * (T.frac or 0.5))), slot = slot, name = att.name }
+    sd.wish = { turns = 2, amount = max(1, floor(maxHpOf(att) * (TM.frac or 0.5))), slot = slot, name = att.name }
     ev[#ev + 1] = { kind = "side", side = key, what = "wish", up = true, who = att, text = self:tword("wish", nil, att) }
   elseif kind == "sacrifice" then
     if att.boss then return fail() end
@@ -1054,39 +1062,39 @@ function Sim:teamMove(ev, att, mv, T, target)
     self:fainted(ev, att)
   elseif kind == "boost" then
     local list = {}
-    if T.grass then
+    if TM.grass then
       for _, k in ipairs({ "team", "boss" }) do
         for _, b in ipairs(self:onSide(k)) do if b.type1 == 12 or b.type2 == 12 then list[#list + 1] = b end end
       end
-    elseif T.team then list = allies(true)
-    elseif T.allies then list = allies(false)
+    elseif TM.team then list = allies(true)
+    elseif TM.allies then list = allies(false)
     elseif target and target ~= att and alive(target) and not foes(att, target) and (target.down or 0) == 0 then list = { target } end
-    if T.ability then
+    if TM.ability then
       local keep = {}
       for _, b in ipairs(list) do
         local ab = self.A.abilityName and self.A.abilityName(b)
-        if ab and T.ability[ab] then keep[#keep + 1] = b end
+        if ab and TM.ability[ab] then keep[#keep + 1] = b end
       end
       list = keep
     end
     if #list == 0 then return fail() end
     for _, b in ipairs(list) do
       for _, stat in ipairs({ "attack", "defense", "spAtk", "spDef", "speed" }) do
-        local n = T.stages[stat]
+        local n = TM.stages[stat]
         if n then self:stage(ev, b, stat, n, att) end
       end
     end
   else
-    ev[#ev + 1] = { kind = "fail", text = "But nothing happened!" }
+    ev[#ev + 1] = { kind = "fail", text = T("But nothing happened!") }
   end
 end
 
 -- whether a team move goes to work as one (Pollen Puff aimed at a foe is an attack)
 local function asTeamMove(att, mv, target)
-  local T = mv.team
-  if not T or mv.isMax then return nil end
-  if T.orFoe and (target == nil or foes(att, target)) then return nil end
-  return T
+  local TM = mv.team
+  if not TM or mv.isMax then return nil end
+  if TM.orFoe and (target == nil or foes(att, target)) then return nil end
+  return TM
 end
 
 -- ------- the National Dex's rules (its src/move_rules.lua, src/move_field.lua carried out here)
@@ -1101,21 +1109,26 @@ local T_ = { NORMAL = 0, FIGHTING = 1, FLYING = 2, POISON = 3, GROUND = 4, ROCK 
   STEEL = 8, MYSTERY = 9, FIRE = 10, WATER = 11, GRASS = 12, ELECTRIC = 13, PSYCHIC = 14, ICE = 15, DRAGON = 16,
   DARK = 17, FAIRY = 18 }
 Sim.TYPE = T_
-Sim.TYPE_NAME = { [0] = "Normal", "Fighting", "Flying", "Poison", "Ground", "Rock", "Bug", "Ghost", "Steel", "???",
-  "Fire", "Water", "Grass", "Electric", "Psychic", "Ice", "Dragon", "Dark", "Fairy" }
+Sim.TYPE_NAME = { [0] = T.mark("Normal"), T.mark("Fighting"), T.mark("Flying"), T.mark("Poison"), T.mark("Ground"),
+  T.mark("Rock"), T.mark("Bug"), T.mark("Ghost"), T.mark("Steel"), T.mark("???"), T.mark("Fire"), T.mark("Water"),
+  T.mark("Grass"), T.mark("Electric"), T.mark("Psychic"), T.mark("Ice"), T.mark("Dragon"), T.mark("Dark"), T.mark("Fairy") }
 
 Sim.TERRAIN = {
-  MISTY_TERRAIN = { kind = "MISTY", up = "Mist swirled around the battlefield!", down = "The mist disappeared from the battlefield." },
-  GRASSY_TERRAIN = { kind = "GRASSY", up = "Grass grew to cover the battlefield!", down = "The grass disappeared from the battlefield." },
-  ELECTRIC_TERRAIN = { kind = "ELECTRIC", up = "An electric current ran across the battlefield!", down = "The electricity disappeared from the battlefield." },
-  PSYCHIC_TERRAIN = { kind = "PSYCHIC", up = "The battlefield got weird!", down = "The weirdness disappeared from the battlefield!" },
+  MISTY_TERRAIN = { kind = "MISTY", up = T.mark("Mist swirled around the battlefield!"),
+    down = T.mark("The mist disappeared from the battlefield.") },
+  GRASSY_TERRAIN = { kind = "GRASSY", up = T.mark("Grass grew to cover the battlefield!"),
+    down = T.mark("The grass disappeared from the battlefield.") },
+  ELECTRIC_TERRAIN = { kind = "ELECTRIC", up = T.mark("An electric current ran across the battlefield!"),
+    down = T.mark("The electricity disappeared from the battlefield.") },
+  PSYCHIC_TERRAIN = { kind = "PSYCHIC", up = T.mark("The battlefield got weird!"),
+    down = T.mark("The weirdness disappeared from the battlefield!") },
 }
 local TERRAIN_DOWN = {}
 for _, t in pairs(Sim.TERRAIN) do TERRAIN_DOWN[t.kind] = t.down end
 -- the field's own timers: their words when they end
-Sim.FIELD_END = { trickRoom = "The twisted dimensions returned to normal!",
-  wonderRoom = "Wonder Room wore off, and Defense and Sp. Def stats returned to normal!",
-  magicRoom = "Magic Room wore off, and held items' effects returned to normal!" }
+Sim.FIELD_END = { trickRoom = T.mark("The twisted dimensions returned to normal!"),
+  wonderRoom = T.mark("Wonder Room wore off, and Defense and Sp. Def stats returned to normal!"),
+  magicRoom = T.mark("Magic Room wore off, and held items' effects returned to normal!") }
 -- the sound moves (Throat Chop bars them)
 Sim.SOUND = {}
 for _, k in ipairs({ "alluringvoice", "boomburst", "bugbuzz", "chatter", "clangingscales", "clangoroussoul", "confide",
@@ -1154,7 +1167,7 @@ local function ndxSide(b) return b.side or (b.boss and "enemy" or "player") end
 function Sim:healFor(ev, b, amt, text)
   if not alive(b) or not canHeal(b) or hpOf(b) >= maxHpOf(b) then return false end
   b.mon.hp = min(maxHpOf(b), hpOf(b) + max(1, floor(amt)))
-  ev[#ev + 1] = { kind = "heal", who = b, hp = b.mon.hp, text = text or ("%s regained health!"):format(b.name) }
+  ev[#ev + 1] = { kind = "heal", who = b, hp = b.mon.hp, text = text or T("%s regained health!", b.name) }
   return true
 end
 
@@ -1171,25 +1184,25 @@ function Sim:entry(ev, m)
   if hz.stealthRock then
     local eff = self.A.effectiveness and self.A.effectiveness(T_.ROCK, m) or 1
     local cut = max(1, floor(maxHpOf(m) * eff / 8))
-    self:selfHurt(ev, m, cut, ("Pointed stones dug into %s!"):format(m.name))
+    self:selfHurt(ev, m, cut, T("Pointed stones dug into %s!", m.name))
     if not alive(m) then return end
   end
   if (hz.spikes or 0) > 0 and self:grounded(m) then
     local div = ({ 8, 6, 4 })[min(3, hz.spikes)]
-    self:selfHurt(ev, m, floor(maxHpOf(m) / div), ("%s was hurt by the spikes!"):format(m.name))
+    self:selfHurt(ev, m, floor(maxHpOf(m) / div), T("%s was hurt by the spikes!", m.name))
     if not alive(m) then return end
   end
   if (hz.toxicSpikes or 0) > 0 and self:grounded(m) then
     if self:hasType(m, T_.POISON) then
       hz.toxicSpikes = nil
       ev[#ev + 1] = { kind = "side", side = sideKey(m), what = "toxicSpikes", up = false,
-        text = ("The poison spikes disappeared from around %s's feet!"):format(m.name) }
+        text = T("The poison spikes disappeared from around %s's feet!", m.name) }
     elseif not self:hasType(m, T_.STEEL) then
       self:status(ev, m, hz.toxicSpikes >= 2 and "TOX" or "PSN", true)
     end
   end
   if hz.stickyWeb and self:grounded(m) then
-    ev[#ev + 1] = { kind = "status", who = m, text = ("%s was caught in a sticky web!"):format(m.name) }
+    ev[#ev + 1] = { kind = "status", who = m, text = T("%s was caught in a sticky web!", m.name) }
     self:stage(ev, m, "speed", -1)
   end
 end
@@ -1239,13 +1252,13 @@ end
 function Sim:ruleBefore(ev, att, def, mv)
   local rule = mv.side and mv.side.rule
   if att.__ndxPowder == self.turnNo and mv.type == T_.FIRE then
-    ev[#ev + 1] = { kind = "status", who = att, text = ("When the flame touched the powder on %s, it exploded!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("When the flame touched the powder on %s, it exploded!", att.name) }
     self:selfHurt(ev, att, floor(maxHpOf(att) / 4), nil)
     return "fail"
   end
   if def == att then return nil end
   if self:terrain() == "PSYCHIC" and (mv.priority or 0) > 0 and foes(att, def) and self:grounded(def) then
-    ev[#ev + 1] = { kind = "fail", text = ("%s is protected by the Psychic Terrain!"):format(def.name) }
+    ev[#ev + 1] = { kind = "fail", text = T("%s is protected by the Psychic Terrain!", def.name) }
     return "priority"
   end
   if rule == "SPECTRAL_THIEF" then
@@ -1258,7 +1271,7 @@ function Sim:ruleBefore(ev, att, def, mv)
         any = true
       end
     end
-    if any then ev[#ev + 1] = { kind = "stage", who = att, text = ("%s stole the target's boosted stats!"):format(att.name) } end
+    if any then ev[#ev + 1] = { kind = "stage", who = att, text = T("%s stole the target's boosted stats!", att.name) } end
   end
   return nil
 end
@@ -1271,7 +1284,7 @@ function Sim:ruleAfter(ev, att, def, mv, dealt)
   if rule == "CLEAR_SMOG" and up then
     local any = false
     for k, v in pairs(def.stages) do if v ~= 0 then def.stages[k] = 0; any = true end end
-    if any then ev[#ev + 1] = { kind = "stage", who = def, text = ("%s's stat changes were removed!"):format(def.name) } end
+    if any then ev[#ev + 1] = { kind = "stage", who = def, text = T("%s's stat changes were removed!", def.name) } end
   elseif rule == "FELL_STINGER" and not up and alive(att) then
     self:stage(ev, att, "attack", 3)
   elseif rule == "FINAL_GAMBIT" and alive(att) then
@@ -1280,16 +1293,16 @@ function Sim:ruleAfter(ev, att, def, mv, dealt)
     self:fainted(ev, att)
   elseif rule == "SPARKLING_ARIA" and up and def.status == "BRN" then
     def.status = nil
-    ev[#ev + 1] = { kind = "status", who = def, status = nil, text = ("%s's burn was healed!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, status = nil, text = T("%s's burn was healed!", def.name) }
   elseif rule == "WAKE_UP_SLAP" and up and def.status == "SLP" then
     def.status, def.sleep = nil, nil
-    ev[#ev + 1] = { kind = "status", who = def, status = nil, text = ("%s woke up!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, status = nil, text = T("%s woke up!", def.name) }
   elseif rule == "BURN_UP" or rule == "DOUBLE_SHOCK" then
     local t = rule == "BURN_UP" and T_.FIRE or T_.ELECTRIC
     if att.type2 == t then att.type2 = nil
     elseif att.type1 == t then att.type1, att.type2 = att.type2 or T_.MYSTERY, nil end
     ev[#ev + 1] = { kind = "status", who = att,
-      text = rule == "BURN_UP" and ("%s burned itself out!"):format(att.name) or ("%s used up all of its electricity!"):format(att.name) }
+      text = rule == "BURN_UP" and T("%s burned itself out!", att.name) or T("%s used up all of its electricity!", att.name) }
   elseif rule == "GLAIVE_RUSH" then
     att.__ndxGlaiveRush = true
   elseif rule == "DIRE_CLAW" and up and self.rng(1, 100) <= 50 then
@@ -1299,31 +1312,31 @@ function Sim:ruleAfter(ev, att, def, mv, dealt)
   elseif (rule == "BUG_BITE" or rule == "PLUCK" or rule == "INCINERATE") and up and self.A.isBerry and self.A.isBerry(def.item) then
     def.item = 0
     ev[#ev + 1] = { kind = "status", who = def,
-      text = rule == "INCINERATE" and ("%s's berry was burned up!"):format(def.name) or ("%s stole and ate %s's berry!"):format(att.name, def.name) }
+      text = rule == "INCINERATE" and T("%s's berry was burned up!", def.name) or T("%s stole and ate %s's berry!", att.name, def.name) }
   elseif rule == "CORE_ENFORCER" and up and def.__ndxMovedTurn == self.turnNo and not def.abilitySuppressed then
     def.abilitySuppressed, def.raidAbility = true, nil
-    ev[#ev + 1] = { kind = "status", who = def, text = ("%s's ability was suppressed!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, text = T("%s's ability was suppressed!", def.name) }
   elseif rule == "PLASMA_FISTS" then
     self.A.st.__ndxIonDeluge = self.turnNo
-    ev[#ev + 1] = { kind = "field", who = att, text = "A deluge of ions showers the battlefield!" }
+    ev[#ev + 1] = { kind = "field", who = att, text = T("A deluge of ions showers the battlefield!") }
   elseif rule == "EERIE_SPELL" and up then
     local last = def.lastMove
     if last and (last.pp or 0) > 0 then
       local before = last.pp
       last.pp = max(0, last.pp - 3)
-      ev[#ev + 1] = { kind = "status", who = def, text = ("%s's %s lost %d PP!"):format(def.name, last.name, before - last.pp) }
+      ev[#ev + 1] = { kind = "status", who = def, text = T("%s's %s lost %d PP!", def.name, last.name, before - last.pp) }
     end
   elseif rule == "STEEL_ROLLER" or rule == "ICE_SPINNER" then
     self:endTerrain(ev)
   elseif rule == "SALT_CURE" and up and not def.__ndxSaltCure then
     def.__ndxSaltCure = true
-    ev[#ev + 1] = { kind = "status", who = def, text = ("%s is being salt cured!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, text = T("%s is being salt cured!", def.name) }
   elseif rule == "THROAT_CHOP" and up then
     def.__ndxThroatChop = 2
   elseif (rule == "SMACK_DOWN" or rule == "THOUSAND_ARROWS") and up and not self:grounded(def) then
     def.__ndxGrounded = true
     if def.semi then def.semi = nil; self:unlock(def, true) end
-    ev[#ev + 1] = { kind = "status", who = def, text = ("%s fell straight down!"):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, text = T("%s fell straight down!", def.name) }
   elseif rule == "MORTAL_SPIN" then
     local hz = self:sideOf(att).hazards
     hz.stealthRock, hz.spikes, hz.toxicSpikes, hz.stickyWeb = nil, nil, nil, nil
@@ -1334,14 +1347,14 @@ function Sim:ruleAfter(ev, att, def, mv, dealt)
     if (hz.spikes or 0) < 3 then
       hz.spikes = (hz.spikes or 0) + 1
       ev[#ev + 1] = { kind = "side", side = sideKey(def), what = "spikes", up = true, who = att,
-        text = ("Spikes were scattered around %s's feet!"):format(def.boss and def.name or "your team") }
+        text = T("Spikes were scattered around %s's feet!", def.boss and def.name or T("your team")) }
     end
   elseif rule == "STONE_AXE" then
     local hz = self:sideOf(def).hazards
     if not hz.stealthRock then
       hz.stealthRock = true
       ev[#ev + 1] = { kind = "side", side = sideKey(def), what = "stealthRock", up = true, who = att,
-        text = ("Pointed stones float in the air around %s!"):format(def.boss and def.name or "your team") }
+        text = T("Pointed stones float in the air around %s!", def.boss and def.name or T("your team")) }
     end
   end
 end
@@ -1349,23 +1362,23 @@ end
 function Sim:endTerrain(ev)
   local f = self.ndx
   if (f.terrainTurns or 0) > 0 then
-    ev[#ev + 1] = { kind = "field", who = self.boss, terrain = false, text = TERRAIN_DOWN[f.terrain] }
+    ev[#ev + 1] = { kind = "field", who = self.boss, terrain = false, text = TERRAIN_DOWN[f.terrain] and T(TERRAIN_DOWN[f.terrain]) }
     f.terrain, f.terrainTurns = nil, nil
   end
 end
 
 -- a status move with a rule: false when it failed
 function Sim:statusRule(ev, att, def, mv, rule)
-  local function fail() ev[#ev + 1] = { kind = "fail", text = "But it failed!" }; return false end
+  local function fail() ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }; return false end
   local own, foe = self:sideOf(att), att.boss and self.sides.team or self.sides.boss
-  local foeName = att.boss and "your team" or self.boss.name
-  local ownName = att.boss and self.boss.name or "your team"
+  local foeName = att.boss and T("your team") or self.boss.name
+  local ownName = att.boss and self.boss.name or T("your team")
   local f = self.ndx
   local target = def ~= att and def or nil
   local function fieldTimer(key, turns, upText)
     if (f[key] or 0) > 0 then
       f[key] = nil
-      ev[#ev + 1] = { kind = "field", who = att, room = key, up = false, text = Sim.FIELD_END[key] }
+      ev[#ev + 1] = { kind = "field", who = att, room = key, up = false, text = T(Sim.FIELD_END[key]) }
     else
       f[key] = turns
       ev[#ev + 1] = { kind = "field", who = att, room = key, up = true, text = upText }
@@ -1384,22 +1397,22 @@ function Sim:statusRule(ev, att, def, mv, rule)
     if foe.hazards.stealthRock then return fail() end
     foe.hazards.stealthRock = true
     ev[#ev + 1] = { kind = "side", side = att.boss and "team" or "boss", what = "stealthRock", up = true, who = att,
-      text = ("Pointed stones float in the air around %s!"):format(foeName) }
+      text = T("Pointed stones float in the air around %s!", foeName) }
   elseif rule == "SPIKES" then
     if (foe.hazards.spikes or 0) >= 3 then return fail() end
     foe.hazards.spikes = (foe.hazards.spikes or 0) + 1
     ev[#ev + 1] = { kind = "side", side = att.boss and "team" or "boss", what = "spikes", up = true, who = att,
-      text = ("Spikes were scattered around %s's feet!"):format(foeName) }
+      text = T("Spikes were scattered around %s's feet!", foeName) }
   elseif rule == "TOXIC_SPIKES" then
     if (foe.hazards.toxicSpikes or 0) >= 2 then return fail() end
     foe.hazards.toxicSpikes = (foe.hazards.toxicSpikes or 0) + 1
     ev[#ev + 1] = { kind = "side", side = att.boss and "team" or "boss", what = "toxicSpikes", up = true, who = att,
-      text = ("Poison spikes were scattered around %s's feet!"):format(foeName) }
+      text = T("Poison spikes were scattered around %s's feet!", foeName) }
   elseif rule == "STICKY_WEB" then
     if foe.hazards.stickyWeb then return fail() end
     foe.hazards.stickyWeb = true
     ev[#ev + 1] = { kind = "side", side = att.boss and "team" or "boss", what = "stickyWeb", up = true, who = att,
-      text = ("A sticky web spreads out under %s's feet!"):format(foeName) }
+      text = T("A sticky web spreads out under %s's feet!", foeName) }
   elseif rule == "DEFOG" then
     for _, sd in ipairs({ own, foe }) do
       local hz = sd.hazards
@@ -1414,38 +1427,38 @@ function Sim:statusRule(ev, att, def, mv, rule)
       a[k], b[k] = b[k], a[k]
     end
     self:syncVeil()
-    ev[#ev + 1] = { kind = "field", who = att, text = ("%s swapped the battle effects affecting each side!"):format(att.name) }
+    ev[#ev + 1] = { kind = "field", who = att, text = T("%s swapped the battle effects affecting each side!", att.name) }
   elseif rule == "LUCKY_CHANT" then
     if (own.luckyChant or 0) > 0 then return fail() end
     own.luckyChant = 5
     ev[#ev + 1] = { kind = "side", side = sideKey(att), what = "luckyChant", up = true, who = att,
-      text = ("The Lucky Chant shielded %s from critical hits!"):format(ownName) }
+      text = T("The Lucky Chant shielded %s from critical hits!", ownName) }
   -- ---- the field
   elseif rule == "TRICK_ROOM" then
-    return fieldTimer("trickRoom", 5, ("%s twisted the dimensions!"):format(att.name))
+    return fieldTimer("trickRoom", 5, T("%s twisted the dimensions!", att.name))
   elseif rule == "WONDER_ROOM" then
-    return fieldTimer("wonderRoom", 5, "It created a bizarre area in which Defense and Sp. Def stats are swapped!")
+    return fieldTimer("wonderRoom", 5, T("It created a bizarre area in which Defense and Sp. Def stats are swapped!"))
   elseif rule == "MAGIC_ROOM" then
-    return fieldTimer("magicRoom", 5, "It created a bizarre area in which Pok\195\169mon's held items lose their effects!")
+    return fieldTimer("magicRoom", 5, T("It created a bizarre area in which Pok\195\169mon's held items lose their effects!"))
   elseif rule == "GRAVITY" then
     if not self:setGravity(ev, att, 5) then return fail() end
     for _, b in ipairs(self:team()) do
       if b.semi then
         b.semi = nil
         self:unlock(b, true)
-        ev[#ev + 1] = { kind = "status", who = b, text = ("%s fell from the sky due to the gravity!"):format(b.name) }
+        ev[#ev + 1] = { kind = "status", who = b, text = T("%s fell from the sky due to the gravity!", b.name) }
       end
     end
   elseif rule == "FAIRY_LOCK" then
-    ev[#ev + 1] = { kind = "field", who = att, text = "No one will be able to run away during the next turn!" }
+    ev[#ev + 1] = { kind = "field", who = att, text = T("No one will be able to run away during the next turn!") }
   elseif Sim.TERRAIN[rule] then
     local t = Sim.TERRAIN[rule]
     if self:terrain() == t.kind then return fail() end
     f.terrain, f.terrainTurns = t.kind, 5
-    ev[#ev + 1] = { kind = "field", who = att, terrain = t.kind, text = t.up }
+    ev[#ev + 1] = { kind = "field", who = att, terrain = t.kind, text = T(t.up) }
   elseif rule == "ION_DELUGE" then
     self.A.st.__ndxIonDeluge = self.turnNo
-    ev[#ev + 1] = { kind = "field", who = att, text = "A deluge of ions showers the battlefield!" }
+    ev[#ev + 1] = { kind = "field", who = att, text = T("A deluge of ions showers the battlefield!") }
   elseif rule == "ROTOTILLER" or rule == "FLOWER_SHIELD" then
     local any = false
     local all = { self.boss }
@@ -1461,32 +1474,32 @@ function Sim:statusRule(ev, att, def, mv, rule)
   elseif rule == "AQUA_RING" then
     if att.__ndxAquaRing then return fail() end
     att.__ndxAquaRing = true
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s surrounded itself with a veil of water!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s surrounded itself with a veil of water!", att.name) }
   elseif rule == "MAGNET_RISE" then
     if (att.__ndxMagnetRise or 0) > 0 or att.ingrained or (self.gravity or 0) > 0 then return fail() end
     att.__ndxMagnetRise = 5
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s levitated with electromagnetism!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s levitated with electromagnetism!", att.name) }
   elseif rule == "GEOMANCY" then
     if lockOf(att, "charge") and att.lock.mv == mv then
       self:unlock(att)
       stats(att, { "spAtk", "spDef", "speed" }, 2)
     else
       att.lock = { kind = "charge", mv = mv, release = true }
-      ev[#ev + 1] = { kind = "status", who = att, text = ("%s is absorbing power!"):format(att.name) }
+      ev[#ev + 1] = { kind = "status", who = att, text = T("%s is absorbing power!", att.name) }
     end
   elseif rule == "LASER_FOCUS" then
     att.__ndxLaserFocus = self.turnNo
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s concentrated intensely!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s concentrated intensely!", att.name) }
   elseif rule == "TAKE_HEART" then
     if att.status then
       att.status, att.sleep, att.tox = nil, nil, nil
-      ev[#ev + 1] = { kind = "status", who = att, status = nil, text = ("%s's status returned to normal!"):format(att.name) }
+      ev[#ev + 1] = { kind = "status", who = att, status = nil, text = T("%s's status returned to normal!", att.name) }
     end
   elseif rule == "POWER_TRICK" then
     local a, d = statOf(att, "attack"), statOf(att, "defense")
     att.__ndxStat = att.__ndxStat or {}
     att.__ndxStat.attack, att.__ndxStat.defense = d, a
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s switched its Attack and Defense!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s switched its Attack and Defense!", att.name) }
   elseif rule == "CLANGOROUS_SOUL" or rule == "FILLET_AWAY" then
     local cost = rule == "CLANGOROUS_SOUL" and floor(maxHpOf(att) / 3) or floor(maxHpOf(att) / 2)
     local list = rule == "CLANGOROUS_SOUL" and { "attack", "defense", "spAtk", "spDef", "speed" } or { "attack", "spAtk", "speed" }
@@ -1498,11 +1511,11 @@ function Sim:statusRule(ev, att, def, mv, rule)
     if att.__ndxNoRetreat or not room(att, list) then return fail() end
     att.__ndxNoRetreat = true
     stats(att, list, 1)
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s can no longer escape because it used No Retreat!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s can no longer escape because it used No Retreat!", att.name) }
   elseif rule == "STUFF_CHEEKS" then
     if not (self.A.isBerry and self.A.isBerry(att.item)) or (att.stages.defense or 0) >= 6 then return fail() end
     att.item, att.ateBerry = 0, true
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s ate its berry!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s ate its berry!", att.name) }
     self:stage(ev, att, "defense", 2)
   elseif rule == "ACUPRESSURE" then
     local open = {}
@@ -1519,7 +1532,7 @@ function Sim:statusRule(ev, att, def, mv, rule)
     who.down, who.outSince = 0, self.turnNo + 1
     who.mon.hp = max(1, floor(maxHpOf(who) / 2))
     for k in pairs(who.stages) do who.stages[k] = 0 end
-    ev[#ev + 1] = { kind = "back", who = who, hp = who.mon.hp, text = ("%s was revived and is ready to fight again!"):format(who.name) }
+    ev[#ev + 1] = { kind = "back", who = who, hp = who.mon.hp, text = T("%s was revived and is ready to fight again!", who.name) }
     self:entry(ev, who)
   elseif rule == "SHED_TAIL" or rule == "CHILLY_RECEPTION" then
     -- (they leave the field for another: no one to come in during a raid)
@@ -1535,7 +1548,7 @@ function Sim:statusRule(ev, att, def, mv, rule)
     if rule == "GASTRO_ACID" then
       if target.abilitySuppressed then return fail() end
       target.abilitySuppressed, target.raidAbility = true, nil
-      ev[#ev + 1] = { kind = "status", who = target, text = ("%s's ability was suppressed!"):format(target.name) }
+      ev[#ev + 1] = { kind = "status", who = target, text = T("%s's ability was suppressed!", target.name) }
     else
       local name = rule == "WORRY_SEED" and "INSOMNIA" or rule == "SIMPLE_BEAM" and "SIMPLE"
         or (self.A.abilityName and self.A.abilityName(att))
@@ -1543,38 +1556,38 @@ function Sim:statusRule(ev, att, def, mv, rule)
       target.raidAbility = name
       if name == "INSOMNIA" and target.status == "SLP" then target.status, target.sleep = nil, nil end
       ev[#ev + 1] = { kind = "status", who = target,
-        text = ("%s acquired %s!"):format(target.name, (name:lower():gsub("_", " "):gsub("^%l", string.upper))) }
+        text = T("%s acquired %s!", target.name, (name:lower():gsub("_", " "):gsub("^%l", string.upper))) }
     end
   elseif rule == "DOODLE" then
     local name = target.raidAbility or (self.A.abilityName and self.A.abilityName(target))
     if not name or name == "WONDER_GUARD" then return fail() end
     for _, b in ipairs(self:onSide(sideKey(att))) do b.raidAbility = name end
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s acquired %s!"):format(att.name, name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s acquired %s!", att.name, name) }
   elseif rule == "SOAK" or rule == "MAGIC_POWDER" then
     local t = rule == "SOAK" and T_.WATER or T_.PSYCHIC
     if target.type1 == t and target.type2 == nil then return fail() end
     target.type1, target.type2, target.__ndxType3 = t, nil, nil
     ev[#ev + 1] = { kind = "status", who = target,
-      text = ("%s transformed into the %s type!"):format(target.name, t == T_.WATER and "Water" or "Psychic") }
+      text = T("%s transformed into the %s type!", target.name, t == T_.WATER and T("Water") or T("Psychic")) }
   elseif rule == "REFLECT_TYPE" then
     if target.type1 == T_.MYSTERY and target.type2 == nil then return fail() end
     att.type1, att.type2, att.__ndxType3 = target.type1, target.type2, target.__ndxType3
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s's type became the same as %s's!"):format(att.name, target.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s's type became the same as %s's!", att.name, target.name) }
   elseif rule == "TRICK_OR_TREAT" or rule == "FORESTS_CURSE" then
     local t = rule == "TRICK_OR_TREAT" and T_.GHOST or T_.GRASS
     if self:hasType(target, t) then return fail() end
     target.__ndxType3 = t
     ev[#ev + 1] = { kind = "status", who = target,
-      text = ("%s type was added to %s!"):format(t == T_.GHOST and "Ghost" or "Grass", target.name) }
+      text = t == T_.GHOST and T("Ghost type was added to %s!", target.name) or T("Grass type was added to %s!", target.name) }
   elseif rule == "TAR_SHOT" then
     if target.__ndxTarShot then return fail() end
     target.__ndxTarShot = true
     self:stage(ev, target, "speed", -1, att)
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s became weaker to fire!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s became weaker to fire!", target.name) }
   elseif rule == "ELECTRIFY" then
     if target.__ndxMovedTurn == self.turnNo then return fail() end
     target.__ndxElectrified = self.turnNo
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s's moves have been electrified!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s's moves have been electrified!", target.name) }
   elseif rule == "POWER_SPLIT" or rule == "GUARD_SPLIT" then
     local keys = rule == "POWER_SPLIT" and { "attack", "spAtk" } or { "defense", "spDef" }
     att.__ndxStat, target.__ndxStat = att.__ndxStat or {}, target.__ndxStat or {}
@@ -1583,22 +1596,23 @@ function Sim:statusRule(ev, att, def, mv, rule)
       att.__ndxStat[k], target.__ndxStat[k] = avg, avg
     end
     ev[#ev + 1] = { kind = "status", who = att,
-      text = ("%s shared its %s with the target!"):format(att.name, rule == "POWER_SPLIT" and "power" or "guard") }
+      text = rule == "POWER_SPLIT" and T("%s shared its power with the target!", att.name)
+        or T("%s shared its guard with the target!", att.name) }
   elseif rule == "POWER_SWAP" or rule == "GUARD_SWAP" or rule == "HEART_SWAP" then
     local keys = rule == "POWER_SWAP" and { "attack", "spAtk" } or rule == "GUARD_SWAP" and { "defense", "spDef" }
       or { "attack", "defense", "spAtk", "spDef", "speed", "accuracy", "evasion" }
     for _, k in ipairs(keys) do att.stages[k], target.stages[k] = target.stages[k] or 0, att.stages[k] or 0 end
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s switched stat changes with the target!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s switched stat changes with the target!", att.name) }
   elseif rule == "SPEED_SWAP" then
     local a, b = statOf(att, "speed"), statOf(target, "speed")
     att.__ndxStat, target.__ndxStat = att.__ndxStat or {}, target.__ndxStat or {}
     att.__ndxStat.speed, target.__ndxStat.speed = b, a
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s switched Speed with the target!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s switched Speed with the target!", att.name) }
   elseif rule == "TOPSY_TURVY" then
     local any = false
     for k, v in pairs(target.stages) do if v ~= 0 then target.stages[k] = -v; any = true end end
     if not any then return fail() end
-    ev[#ev + 1] = { kind = "stage", who = target, text = ("%s's stat changes were all reversed!"):format(target.name) }
+    ev[#ev + 1] = { kind = "stage", who = target, text = T("%s's stat changes were all reversed!", target.name) }
   elseif rule == "STRENGTH_SAP" then
     if (target.stages.attack or 0) <= -6 then return fail() end
     local amount = statOf(target, "attack")
@@ -1614,31 +1628,31 @@ function Sim:statusRule(ev, att, def, mv, rule)
     self:stage(ev, target, "spAtk", -2, att)
   elseif rule == "POWDER" then
     target.__ndxPowder = self.turnNo
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s is covered in powder!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s is covered in powder!", target.name) }
   elseif rule == "PSYCHO_SHIFT" then
     local st = att.status
     if not st or target.status then return fail() end
     if not self:status(ev, target, st, true, att) then return fail() end
     att.status, att.sleep, att.tox = nil, nil, nil
-    ev[#ev + 1] = { kind = "status", who = att, status = nil, text = ("%s transferred its status to %s!"):format(att.name, target.name) }
+    ev[#ev + 1] = { kind = "status", who = att, status = nil, text = T("%s transferred its status to %s!", att.name, target.name) }
   elseif rule == "MIRACLE_EYE" then
     if target.__ndxMiracleEye then return fail() end
     target.__ndxMiracleEye = true
     target.stages.evasion = min(0, target.stages.evasion or 0)
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s was identified!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s was identified!", target.name) }
   elseif rule == "PURIFY" then
     if not target.status then return fail() end
     target.status, target.sleep, target.tox = nil, nil, nil
-    ev[#ev + 1] = { kind = "status", who = target, status = nil, text = ("%s's status returned to normal!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, status = nil, text = T("%s's status returned to normal!", target.name) }
     self:healFor(ev, att, maxHpOf(att) / 2)
   elseif rule == "OCTOLOCK" then
     if target.__ndxOctolock then return fail() end
     target.__ndxOctolock = att
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s can no longer escape!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s can no longer escape!", target.name) }
   elseif rule == "HEAL_BLOCK" then
     if (target.__ndxHealBlock or 0) > 0 then return fail() end
     target.__ndxHealBlock = 5
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s was prevented from healing!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s was prevented from healing!", target.name) }
   else
     return nil
   end
@@ -1650,13 +1664,13 @@ function Sim:ruleEndTurn(ev, all)
   local f = self.ndx
   for _, x in ipairs(all) do
     if not self.over and alive(x) then
-      if x.__ndxAquaRing then self:healFor(ev, x, maxHpOf(x) / 16, ("A veil of water restored %s's HP!"):format(x.name)) end
+      if x.__ndxAquaRing then self:healFor(ev, x, maxHpOf(x) / 16, T("A veil of water restored %s's HP!", x.name)) end
       if self:terrain() == "GRASSY" and self:grounded(x) then
-        self:healFor(ev, x, maxHpOf(x) / 16, ("%s is healed by the grassy terrain!"):format(x.name))
+        self:healFor(ev, x, maxHpOf(x) / 16, T("%s is healed by the grassy terrain!", x.name))
       end
       if x.__ndxSaltCure then
         local div = (self:hasType(x, T_.WATER) or self:hasType(x, T_.STEEL)) and 4 or 8
-        self:selfHurt(ev, x, floor(maxHpOf(x) / div), ("%s is being hurt by Salt Cure!"):format(x.name))
+        self:selfHurt(ev, x, floor(maxHpOf(x) / div), T("%s is being hurt by Salt Cure!", x.name))
       end
       local octo = x.__ndxOctolock
       if octo and alive(x) then
@@ -1672,9 +1686,9 @@ function Sim:ruleEndTurn(ev, all)
           if x[key] <= 0 then
             x[key] = nil
             if key == "__ndxMagnetRise" then
-              ev[#ev + 1] = { kind = "status", who = x, text = ("%s's electromagnetism wore off!"):format(x.name) }
+              ev[#ev + 1] = { kind = "status", who = x, text = T("%s's electromagnetism wore off!", x.name) }
             elseif key == "__ndxHealBlock" then
-              ev[#ev + 1] = { kind = "status", who = x, text = ("%s's Heal Block wore off!"):format(x.name) }
+              ev[#ev + 1] = { kind = "status", who = x, text = T("%s's Heal Block wore off!", x.name) }
             end
           end
         end
@@ -1687,7 +1701,7 @@ function Sim:ruleEndTurn(ev, all)
       f[key] = f[key] - 1
       if f[key] <= 0 then
         f[key] = nil
-        ev[#ev + 1] = { kind = "field", who = self.boss, room = key, up = false, text = Sim.FIELD_END[key] }
+        ev[#ev + 1] = { kind = "field", who = self.boss, room = key, up = false, text = T(Sim.FIELD_END[key]) }
       end
     end
   end
@@ -1781,16 +1795,16 @@ Sim.REACH = {
 
 -- why a battler cannot pick a move now (Torment, Disable, Taunt, Imprison): the word, or nil
 function Sim:barredWhy(b, mv)
-  if self:tormented(b, mv) then return "Torment" end
+  if self:tormented(b, mv) then return T("Torment") end
   if self:choiceLocked(b, mv) then return self:itemName(b.item) end
   local pm = mv.base or mv
-  if b.disabled and b.disabled.mv == pm then return "Disable" end
-  if (b.taunt or 0) > 0 and pm.status then return "Taunt" end
+  if b.disabled and b.disabled.mv == pm then return T("Disable") end
+  if (b.taunt or 0) > 0 and pm.status then return T("Taunt") end
   local key = squash(pm.key)
   if key ~= "" then
     for _, x in ipairs(self:everyone()) do
       if x.imprison and foes(x, b) and alive(x) then
-        for _, m in ipairs(x.moves or {}) do if squash(m.key) == key then return "Imprison" end end
+        for _, m in ipairs(x.moves or {}) do if squash(m.key) == key then return T("Imprison") end end
       end
     end
   end
@@ -1857,12 +1871,12 @@ function Sim:g3Fails(ev, att, mv, targets)
   local g = g3Of(mv)
   if not g then return false end
   local def = targets[1]
-  local function no(text) ev[#ev + 1] = { kind = "fail", text = text or "But it failed!" }; return true end
+  local function no(text) ev[#ev + 1] = { kind = "fail", text = text or T("But it failed!") }; return true end
   if g == "FOCUS_PUNCH" and (att.damageTakenThisTurn or 0) > 0 then
-    return no(("%s lost its focus and couldn't move!"):format(att.name))
+    return no(T("%s lost its focus and couldn't move!", att.name))
   elseif (g == "SNORE" or g == "SLEEP_TALK") and att.status ~= "SLP" then return no()
-  elseif g == "SPIT_UP" and (att.stockpile or 0) <= 0 then return no(("But it failed to spit up a thing!"):format())
-  elseif g == "SWALLOW" and (att.stockpile or 0) <= 0 then return no(("But it failed to swallow a thing!"):format())
+  elseif g == "SPIT_UP" and (att.stockpile or 0) <= 0 then return no(T("But it failed to spit up a thing!"))
+  elseif g == "SWALLOW" and (att.stockpile or 0) <= 0 then return no(T("But it failed to swallow a thing!"))
   elseif (g == "BATON_PASS" or g == "TELEPORT" or g == "ROAR") then return no()
   elseif g == "PERISH_SONG" then
     local any = false
@@ -1921,59 +1935,59 @@ function Sim:g3After(ev, att, def, mv, landed)
     if not att.lock then
       att.lock = { kind = "uproar", mv = mv, turns = self.rng(1, 4), uproar = true }
       self.uproar = att
-      ev[#ev + 1] = { kind = "field", who = att, text = ("%s caused an uproar!"):format(att.name) }
+      ev[#ev + 1] = { kind = "field", who = att, text = T("%s caused an uproar!", att.name) }
       for _, b in ipairs(self:everyone()) do
         if b.status == "SLP" and alive(b) then
           b.status, b.sleep = nil, nil
-          ev[#ev + 1] = { kind = "status", who = b, status = nil, text = ("The uproar woke %s!"):format(b.name) }
+          ev[#ev + 1] = { kind = "status", who = b, status = nil, text = T("The uproar woke %s!", b.name) }
         end
       end
     elseif L then
       L.turns = L.turns - 1
       if L.turns <= 0 then
         self:unlock(att)
-        ev[#ev + 1] = { kind = "field", who = att, text = ("%s calmed down."):format(att.name) }
+        ev[#ev + 1] = { kind = "field", who = att, text = T("%s calmed down.", att.name) }
       end
     end
   elseif not landed then
     return
   elseif g == "KNOCK_OFF" and up and (tonumber(def.item) or 0) ~= 0 then
     loseItem(def)
-    ev[#ev + 1] = { kind = "status", who = def, text = ("%s knocked off %s's item!"):format(att.name, def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, text = T("%s knocked off %s's item!", att.name, def.name) }
   elseif g == "THIEF" and up and (tonumber(def.item) or 0) ~= 0 and (tonumber(att.item) or 0) == 0 then
     att.item, def.item = def.item, 0
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s stole %s's item!"):format(att.name, def.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s stole %s's item!", att.name, def.name) }
   elseif g == "RAPID_SPIN" and alive(att) then
     local hz = self:sideOf(att).hazards
     hz.spikes, hz.stealthRock, hz.toxicSpikes, hz.stickyWeb = nil, nil, nil, nil
     att.trap, att.seeded = nil, nil
   elseif g == "SMELLINGSALT" and up and def.status == "PAR" then
     def.status = nil
-    ev[#ev + 1] = { kind = "status", who = def, status = nil, text = ("%s was cured of paralysis."):format(def.name) }
+    ev[#ev + 1] = { kind = "status", who = def, status = nil, text = T("%s was cured of paralysis.", def.name) }
   elseif g == "PAY_DAY" and not att.boss then
     self.money = (self.money or 0) + (tonumber(att.mon.level) or 1) * 5
-    ev[#ev + 1] = { kind = "status", who = att, coins = true, text = "Coins scattered everywhere!" }
+    ev[#ev + 1] = { kind = "status", who = att, coins = true, text = T("Coins scattered everywhere!") }
   end
 end
 
 -- a Gen 3 status move: false when it failed
 function Sim:g3Status(ev, att, def, mv, g)
-  local function fail() ev[#ev + 1] = { kind = "fail", text = "But it failed!" }; return false end
+  local function fail() ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }; return false end
   local target = def ~= att and def or nil
   if g == "STOCKPILE" then
     if (att.stockpile or 0) >= 3 then
-      ev[#ev + 1] = { kind = "fail", text = ("%s can't stockpile any more!"):format(att.name) }
+      ev[#ev + 1] = { kind = "fail", text = T("%s can't stockpile any more!", att.name) }
       return false
     end
     att.stockpile = (att.stockpile or 0) + 1
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s stockpiled %d!"):format(att.name, att.stockpile) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s stockpiled %d!", att.name, att.stockpile) }
   elseif g == "SWALLOW" then
     local n = att.stockpile or 0
     att.stockpile = 0
     if not self:healFor(ev, att, maxHpOf(att) * ({ 0.25, 0.5, 1 })[min(3, n)]) then return fail() end
   elseif g == "CHARGE" then
     att.expCharged = 2
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s began charging power!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s began charging power!", att.name) }
   elseif g == "CONVERSION" then
     local list = {}
     for _, m in ipairs(att.moves or {}) do
@@ -1983,7 +1997,7 @@ function Sim:g3Status(ev, att, def, mv, g)
     if #list == 0 then return fail() end
     local t = list[self.rng(1, #list)]
     att.type1, att.type2, att.__ndxType3 = t, nil, nil
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s transformed into the %s type!"):format(att.name, Sim.TYPE_NAME[t] or "?") }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s transformed into the %s type!", att.name, Sim.TYPE_NAME[t] and T(Sim.TYPE_NAME[t]) or "?") }
   elseif g == "CONVERSION_2" then
     local hitBy = att.lastHitType
     if not hitBy then return fail() end
@@ -1997,66 +2011,66 @@ function Sim:g3Status(ev, att, def, mv, g)
     if #list == 0 then return fail() end
     local t = list[self.rng(1, #list)]
     att.type1, att.type2, att.__ndxType3 = t, nil, nil
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s transformed into the %s type!"):format(att.name, Sim.TYPE_NAME[t] or "?") }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s transformed into the %s type!", att.name, Sim.TYPE_NAME[t] and T(Sim.TYPE_NAME[t]) or "?") }
   elseif g == "CAMOUFLAGE" then
     local t = Sim.CAMOUFLAGE[self:terrain() or ""] or T_.NORMAL
     if att.type1 == t and att.type2 == nil then return fail() end
     att.type1, att.type2, att.__ndxType3 = t, nil, nil
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s transformed into the %s type!"):format(att.name, Sim.TYPE_NAME[t] or "?") }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s transformed into the %s type!", att.name, Sim.TYPE_NAME[t] and T(Sim.TYPE_NAME[t]) or "?") }
   elseif g == "DESTINY_BOND" then
     att.destinyBond = true
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s is trying to take its foe down with it!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s is trying to take its foe down with it!", att.name) }
   elseif g == "GRUDGE" then
     att.grudge = true
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s wants its target to bear a grudge!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s wants its target to bear a grudge!", att.name) }
   elseif g == "IMPRISON" then
     if att.imprison then return fail() end
     att.imprison = true
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s sealed any moves its target shares with it!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s sealed any moves its target shares with it!", att.name) }
   elseif g == "MAGIC_COAT" then
     att.magicCoat = self.turnNo
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s shrouded itself with Magic Coat!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s shrouded itself with Magic Coat!", att.name) }
   elseif g == "SNATCH" then
     att.snatch = self.turnNo
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s waits for a target to make a move!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s waits for a target to make a move!", att.name) }
   elseif g == "MUD_SPORT" or g == "WATER_SPORT" then
     local key = g == "MUD_SPORT" and "mudSport" or "waterSport"
     if (self.ndx[key] or 0) > 0 then return fail() end
     self.ndx[key] = 5
     ev[#ev + 1] = { kind = "field", who = att,
-      text = g == "MUD_SPORT" and "Electricity's power was weakened!" or "Fire's power was weakened!" }
+      text = g == "MUD_SPORT" and T("Electricity's power was weakened!") or T("Fire's power was weakened!") }
   elseif g == "SUBSTITUTE" then
     local cost = floor(maxHpOf(att) / 4)
     if (att.substituteHP or 0) > 0 then
-      ev[#ev + 1] = { kind = "fail", text = ("%s already has a substitute!"):format(att.name) }
+      ev[#ev + 1] = { kind = "fail", text = T("%s already has a substitute!", att.name) }
       return false
     end
     if hpOf(att) <= cost then
-      ev[#ev + 1] = { kind = "fail", text = "But it does not have enough HP left to make a substitute!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it does not have enough HP left to make a substitute!") }
       return false
     end
     self:selfHurt(ev, att, cost, nil)
     att.substituteHP = cost
-    ev[#ev + 1] = { kind = "status", who = att, substitute = true, text = ("%s put in a substitute!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, substitute = true, text = T("%s put in a substitute!", att.name) }
   elseif g == "PERISH_SONG" then
-    ev[#ev + 1] = { kind = "field", who = att, text = "All Pok\195\169mon that heard the song will faint in three turns!" }
+    ev[#ev + 1] = { kind = "field", who = att, text = T("All Pok\195\169mon that heard the song will faint in three turns!") }
     for _, b in ipairs(self:everyone()) do
       if alive(b) and not isDmax(b) and not b.perish and (b.down or 0) == 0 then b.perish = 4 end
     end
   elseif g == "RECYCLE" then
     if not att.consumed or (tonumber(att.item) or 0) ~= 0 then return fail() end
     att.item, att.consumed = att.consumed, nil
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s found its item!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s found its item!", att.name) }
   elseif g == "BIDE" then
     local L = lockOf(att, "bide")
     if L then
       L.turns = L.turns - 1
       if L.turns > 0 then
-        ev[#ev + 1] = { kind = "status", who = att, text = ("%s is storing energy!"):format(att.name) }
+        ev[#ev + 1] = { kind = "status", who = att, text = T("%s is storing energy!", att.name) }
       else
         local stored, from = L.stored or 0, L.from or self.boss
         self:unlock(att)
-        ev[#ev + 1] = { kind = "status", who = att, text = ("%s unleashed its energy!"):format(att.name) }
+        ev[#ev + 1] = { kind = "status", who = att, text = T("%s unleashed its energy!", att.name) }
         if stored <= 0 or not alive(from) then return fail() end
         local dmg = self:capAtShield(from, min(hpOf(from), self:throughBoss(ev, from, stored * 2)))
         from.mon.hp = hpOf(from) - dmg
@@ -2065,7 +2079,7 @@ function Sim:g3Status(ev, att, def, mv, g)
       end
     else
       att.lock = { kind = "bide", mv = mv, bide = true, turns = 2, stored = 0 }
-      ev[#ev + 1] = { kind = "status", who = att, text = ("%s is storing energy!"):format(att.name) }
+      ev[#ev + 1] = { kind = "status", who = att, text = T("%s is storing energy!", att.name) }
     end
   -- ---- on the target
   elseif not target then
@@ -2073,15 +2087,15 @@ function Sim:g3Status(ev, att, def, mv, g)
   elseif g == "DISABLE" then
     if isDmax(target) or target.disabled then return fail() end
     target.disabled = { mv = target.lastMove, turns = self.rng(2, 5) }
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s's %s was disabled!"):format(target.name, target.lastMove.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s's %s was disabled!", target.name, target.lastMove.name) }
   elseif g == "ENCORE" then
     if isDmax(target) or target.boss or target.lock or (target.lastMove.pp or 0) <= 0 then return fail() end
     target.lock = { kind = "encore", mv = target.lastMove, encore = true, turns = self.rng(2, 6) }
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s received an encore!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s received an encore!", target.name) }
   elseif g == "TAUNT" then
     if (target.taunt or 0) > 0 then return fail() end
     target.taunt = 2
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s fell for the taunt!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s fell for the taunt!", target.name) }
   elseif g == "TORMENT" then
     if not self:torment(ev, target) then return fail() end
   elseif g == "SPITE" then
@@ -2089,7 +2103,7 @@ function Sim:g3Status(ev, att, def, mv, g)
     if (last.pp or 0) <= 0 then return fail() end
     local cut = min(last.pp, self.rng(2, 5))
     last.pp = last.pp - cut
-    ev[#ev + 1] = { kind = "status", who = target, text = ("It reduced the PP of %s's %s by %d!"):format(target.name, last.name, cut) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("It reduced the PP of %s's %s by %d!", target.name, last.name, cut) }
   elseif g == "MIMIC" or g == "SKETCH" then
     local last = target.lastMove
     if last.isMax or last.isGmax or Sim.NO_CALL[squash(last.key)] and squash(last.key) ~= "metronome" then return fail() end
@@ -2099,7 +2113,7 @@ function Sim:g3Status(ev, att, def, mv, g)
     if not slot then return fail() end
     self:putMove(att, slot, moveCopy(last, g == "MIMIC" and 5 or nil))
     ev[#ev + 1] = { kind = "status", who = att,
-      text = (g == "MIMIC" and "%s learned %s!" or "%s sketched %s!"):format(att.name, last.name) }
+      text = g == "MIMIC" and T("%s learned %s!", att.name, last.name) or T("%s sketched %s!", att.name, last.name) }
   elseif g == "TRANSFORM" then
     if att.transformed then return fail() end
     att.transformed = true
@@ -2110,38 +2124,38 @@ function Sim:g3Status(ev, att, def, mv, g)
     att.moves = {}
     att.maxMoves = {}
     for i, m in ipairs(target.moves or {}) do self:putMove(att, i, moveCopy(m, 5)) end
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s transformed into %s!"):format(att.name, target.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s transformed into %s!", att.name, target.name) }
   elseif g == "PSYCH_UP" then
     for k, v in pairs(target.stages) do att.stages[k] = v end
-    ev[#ev + 1] = { kind = "stage", who = att, text = ("%s copied %s's stat changes!"):format(att.name, target.name) }
+    ev[#ev + 1] = { kind = "stage", who = att, text = T("%s copied %s's stat changes!", att.name, target.name) }
   elseif g == "ROLE_PLAY" then
     local name = target.raidAbility or (self.A.abilityName and self.A.abilityName(target))
     if not name or name == "WONDER_GUARD" then return fail() end
     att.raidAbility = name
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s copied %s's ability!"):format(att.name, target.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s copied %s's ability!", att.name, target.name) }
   elseif g == "SKILL_SWAP" then
     local a = att.raidAbility or (self.A.abilityName and self.A.abilityName(att))
     local b = target.raidAbility or (self.A.abilityName and self.A.abilityName(target))
     if not (a and b) or a == "WONDER_GUARD" or b == "WONDER_GUARD" then return fail() end
     att.raidAbility, target.raidAbility = b, a
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s swapped Abilities with its target!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s swapped Abilities with its target!", att.name) }
   elseif g == "TRICK" then
     local a, b = tonumber(att.item) or 0, tonumber(target.item) or 0
     if a == 0 and b == 0 then return fail() end
     att.item, target.item = b, a
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s switched items with its target!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s switched items with its target!", att.name) }
   elseif g == "MEAN_LOOK" then
     if target.meanLooked then return fail() end
     target.meanLooked = true
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s can no longer escape!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s can no longer escape!", target.name) }
   elseif g == "FORESIGHT" then
     target.expIdentified = true
     target.stages.evasion = min(0, target.stages.evasion or 0)
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s was identified!"):format(target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s was identified!", target.name) }
   elseif g == "YAWN" then
     if target.status or target.yawn or self:sideOf(target).safeguard > 0 then return fail() end
     target.yawn = 2
-    ev[#ev + 1] = { kind = "status", who = target, text = ("%s made %s drowsy!"):format(att.name, target.name) }
+    ev[#ev + 1] = { kind = "status", who = target, text = T("%s made %s drowsy!", att.name, target.name) }
   else
     return nil
   end
@@ -2161,7 +2175,7 @@ function Sim:g3EndTurn(ev)
       end
       if b.perish then
         b.perish = b.perish - 1
-        ev[#ev + 1] = { kind = "status", who = b, text = ("%s's perish count fell to %d."):format(b.name, b.perish) }
+        ev[#ev + 1] = { kind = "status", who = b, text = T("%s's perish count fell to %d.", b.name, b.perish) }
         if b.perish <= 0 then
           b.perish = nil
           b.mon.hp = 0
@@ -2178,14 +2192,14 @@ function Sim:g3EndTurn(ev)
       b.taunt = b.taunt - 1
       if b.taunt <= 0 then
         b.taunt = nil
-        ev[#ev + 1] = { kind = "status", who = b, text = ("%s's taunt wore off!"):format(b.name) }
+        ev[#ev + 1] = { kind = "status", who = b, text = T("%s's taunt wore off!", b.name) }
       end
     end
     if b.disabled then
       b.disabled.turns = b.disabled.turns - 1
       if b.disabled.turns <= 0 then
         b.disabled = nil
-        ev[#ev + 1] = { kind = "status", who = b, text = ("%s is no longer disabled!"):format(b.name) }
+        ev[#ev + 1] = { kind = "status", who = b, text = T("%s is no longer disabled!", b.name) }
       end
     end
   end
@@ -2196,24 +2210,24 @@ function Sim:g3EndTurn(ev)
       if f[key] <= 0 then
         f[key] = nil
         ev[#ev + 1] = { kind = "field", who = self.boss,
-          text = key == "mudSport" and "The effects of Mud Sport have faded." or "The effects of Water Sport have faded." }
+          text = key == "mudSport" and T("The effects of Mud Sport have faded.") or T("The effects of Water Sport have faded.") }
       end
     end
   end
 end
 
 Sim.WEATHER_TEXT = {
-  RAIN = { up = "It started to rain!", down = "The rain stopped." },
-  SUN = { up = "The sunlight turned harsh!", down = "The sunlight faded." },
-  SAND = { up = "A sandstorm kicked up!", down = "The sandstorm subsided." },
-  HAIL = { up = "It started to hail!", down = "The hail stopped." },
+  RAIN = { up = T.mark("It started to rain!"), down = T.mark("The rain stopped.") },
+  SUN = { up = T.mark("The sunlight turned harsh!"), down = T.mark("The sunlight faded.") },
+  SAND = { up = T.mark("A sandstorm kicked up!"), down = T.mark("The sandstorm subsided.") },
+  HAIL = { up = T.mark("It started to hail!"), down = T.mark("The hail stopped.") },
 }
 -- the words of a charge turn, by move
-Sim.CHARGE_TEXT = { solarbeam = "%s absorbed light!", razorwind = "%s made a whirlwind!", skullbash = "%s tucked in its head!",
-  skyattack = "%s became cloaked in a harsh light!", fly = "%s flew up high!", dig = "%s burrowed its way under the ground!",
-  dive = "%s hid underwater!", bounce = "%s sprang up!", phantomforce = "%s vanished instantly!",
-  shadowforce = "%s vanished instantly!", solarblade = "%s absorbed light!", electroshot = "%s absorbed electricity!",
-  meteorbeam = "%s is overflowing with space power!" }
+Sim.CHARGE_TEXT = { solarbeam = T.mark("%s absorbed light!"), razorwind = T.mark("%s made a whirlwind!"), skullbash = T.mark("%s tucked in its head!"),
+  skyattack = T.mark("%s became cloaked in a harsh light!"), fly = T.mark("%s flew up high!"), dig = T.mark("%s burrowed its way under the ground!"),
+  dive = T.mark("%s hid underwater!"), bounce = T.mark("%s sprang up!"), phantomforce = T.mark("%s vanished instantly!"),
+  shadowforce = T.mark("%s vanished instantly!"), solarblade = T.mark("%s absorbed light!"), electroshot = T.mark("%s absorbed electricity!"),
+  meteorbeam = T.mark("%s is overflowing with space power!") }
 -- how many times a multi-hit move strikes: 2-5 (35 / 35 / 15 / 15 %), a fixed count, or Triple Kick's three
 function Sim:hitCount(mv)
   local h = mv.side and mv.side.hits
@@ -2234,17 +2248,17 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     -- tormented: not the move it used last; Disable, Taunt, Imprison
     if self:tormented(att, mv) then
       ev[#ev + 1] = { kind = "cant", who = att, torment = true,
-        text = ("%s can't use the same move twice in a row due to the torment!"):format(att.name) }
+        text = T("%s can't use the same move twice in a row due to the torment!", att.name) }
       return
     end
     local why = self:barredWhy(att, mv)
     if why then
-      ev[#ev + 1] = { kind = "cant", who = att, text = ("%s can't use %s because of %s!"):format(att.name, mv.name, why) }
+      ev[#ev + 1] = { kind = "cant", who = att, text = T("%s can't use %s because of %s!", att.name, mv.name, why) }
       return
     end
   end
   ev[#ev + 1] = { kind = "use", who = att, move = mv, gmax = mv.isGmax == true,
-    text = ("%s used %s!"):format(att.name, mv.name) }
+    text = T("%s used %s!", att.name, mv.name) }
   -- (the move it last used: G-Max Depletion takes its PP, Torment bars it; a called move is not it)
   if locked ~= "called" then att.lastMove = mv.base or mv end
   -- (Choice Band: the move it keeps to from now on)
@@ -2253,7 +2267,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
   end
   -- under Gravity the moves that leave the ground fail
   if (self.gravity or 0) > 0 and Sim.NO_GRAVITY[squash(mv.key)] then
-    ev[#ev + 1] = { kind = "fail", text = ("%s can't use %s because of gravity!"):format(att.name, mv.name) }
+    ev[#ev + 1] = { kind = "fail", text = T("%s can't use %s because of gravity!", att.name, mv.name) }
     return
   end
   -- (a Max Move spends its base move's PP)
@@ -2268,25 +2282,25 @@ function Sim:use(ev, att, mv, targets, ally, locked)
   if mv.guard then
     if guardRoll(self, att) then
       att.guard = "max"
-      ev[#ev + 1] = { kind = "guard", who = att, max = true, text = fill(self.words.guard or "{MON} protected itself!", self.boss, att) }
+      ev[#ev + 1] = { kind = "guard", who = att, max = true, text = fill(self.words.guard and T(self.words.guard) or T("{MON} protected itself!"), self.boss, att) }
     else
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
     end
     return
   end
   -- Fake Out and First Impression work only on the user's first turn out
   if Sim.FIRST_TURN[squash(mv.key)] and att.outSince ~= self.turnNo then
-    ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+    ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
     return
   end
   -- Throat Chop: no sound moves for two turns; the National Dex's moves that fail first (Sucker
   -- Punch with nothing coming, Last Resort, Burn Up without the Fire type ...)
   if (att.__ndxThroatChop or 0) > 0 and Sim.SOUND[squash(mv.key)] then
-    ev[#ev + 1] = { kind = "fail", text = ("The effects of Throat Chop prevent %s from using sound moves!"):format(att.name) }
+    ev[#ev + 1] = { kind = "fail", text = T("The effects of Throat Chop prevent %s from using sound moves!", att.name) }
     return
   end
   if self:ruleFails(att, mv, targets) then
-    ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+    ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
     return
   end
   if self:g3Fails(ev, att, mv, targets) then return end
@@ -2295,7 +2309,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
   if g == "METRONOME" or g == "ASSIST" or g == "SLEEP_TALK" or g == "NATURE_POWER" or g == "MIRROR_MOVE" then
     local called = self:calledMove(att, mv, targets[1] or self.boss)
     if not called then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       return
     end
     return self:use(ev, att, called, self:targetsFor(att, called), nil, "called")
@@ -2304,15 +2318,15 @@ function Sim:use(ev, att, mv, targets, ally, locked)
   self.lastUsed = mv.base or mv
   self:noteEcho(mv)
   -- a team move (screens, guards, heals, ...)
-  local T = asTeamMove(att, mv, ally or targets[1])
-  if T then return self:teamMove(ev, att, mv, T, ally) end
+  local TM = asTeamMove(att, mv, ally or targets[1])
+  if TM then return self:teamMove(ev, att, mv, TM, ally) end
   -- a status move on its user
   if mv.status and mv.side and mv.side.self then
     -- (Snatch: a foe waiting for it takes the move for itself)
     for _, x in ipairs(self:everyone()) do
       if x.snatch == self.turnNo and foes(x, att) and alive(x) then
         x.snatch = nil
-        ev[#ev + 1] = { kind = "status", who = x, text = ("%s snatched %s's move!"):format(x.name, att.name) }
+        ev[#ev + 1] = { kind = "status", who = x, text = T("%s snatched %s's move!", x.name, att.name) }
         self:side(ev, x, x, mv, false)
         return
       end
@@ -2331,7 +2345,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     att.lock = { kind = "charge", mv = mv, release = true }
     if sd0.semi then att.semi = Sim.SEMI_KIND[key] or true end
     ev[#ev + 1] = { kind = "status", who = att, charge = true, semi = att.semi, move = mv,
-      text = (Sim.CHARGE_TEXT[key] or "%s is charging up!"):format(att.name) }
+      text = Sim.CHARGE_TEXT[key] and T(Sim.CHARGE_TEXT[key], att.name) or T("%s is charging up!", att.name) }
     if sd0.chargeStages then
       for stat, n in pairs(sd0.chargeStages) do self:stage(ev, att, stat, n) end
     end
@@ -2344,12 +2358,12 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     local def = targets[1]
     for _, p in ipairs(self.pending) do
       if p.def == def then
-        ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+        ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
         return
       end
     end
     self.pending[#self.pending + 1] = { att = att, def = def, mv = mv, turns = 3 }
-    ev[#ev + 1] = { kind = "status", who = att, text = ("%s foresaw an attack!"):format(att.name) }
+    ev[#ev + 1] = { kind = "status", who = att, text = T("%s foresaw an attack!", att.name) }
     return
   end
   local spread = #targets > 1
@@ -2364,34 +2378,34 @@ function Sim:use(ev, att, mv, targets, ally, locked)
     local through = mv.side and (mv.side.vanish or mv.side.rule == "FEINT" or mv.side.rule == "HYPERSPACE_HOLE")
     if through and def.guard == "protect" and mv.side.rule == "FEINT" then
       def.guard = nil
-      ev[#ev + 1] = { kind = "status", who = def, text = ("%s fell for the feint!"):format(def.name) }
+      ev[#ev + 1] = { kind = "status", who = def, text = T("%s fell for the feint!", def.name) }
     end
     if alive(def) and not (through and def.guard ~= "max") then stop, sev = self:stopped(att, mv, def) end
     if stop == "block" then
       ev[#ev + 1] = sev
       self:contactCost(ev, att, def, mv)
     elseif alive(def) and isDmax(def) and (Sim.WEIGHT[key] or Sim.NO_DMAX[key] or (mv.side and mv.side.ohko)) then
-      ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+      ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
     elseif alive(def) and mv.side and mv.side.needSleep and def.status ~= "SLP" then
-      ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = ("It doesn't affect %s..."):format(def.name) }
+      ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = T("It doesn't affect %s...", def.name) }
     elseif alive(def) then
       if self:ruleBefore(ev, att, def, mv) then
         -- (stopped before the hit: Powder, Psychic Terrain)
       elseif def.semi and not att.semi and not (Sim.REACH[def.semi] and Sim.REACH[def.semi][key]) then
-        ev[#ev + 1] = { kind = "miss", who = att, target = def, text = ("%s avoided the attack!"):format(def.name) }
+        ev[#ev + 1] = { kind = "miss", who = att, target = def, text = T("%s avoided the attack!", def.name) }
       elseif aimed ~= def and (not self.A.hits(att, def, mv, (self.gravity or 0) > 0, self.weather) or self:itemDodge(def, mv)) then
-        ev[#ev + 1] = { kind = "miss", who = att, target = def, text = ("%s avoided the attack!"):format(def.name) }
+        ev[#ev + 1] = { kind = "miss", who = att, target = def, text = T("%s avoided the attack!", def.name) }
         -- Jump Kick and Hi Jump Kick: a miss costs the user half its max HP
         if mv.side and mv.side.missRecoil and alive(att) then
-          self:selfHurt(ev, att, floor(maxHpOf(att) / 2), ("%s kept going and crashed!"):format(att.name))
+          self:selfHurt(ev, att, floor(maxHpOf(att) / 2), T("%s kept going and crashed!", att.name))
         end
         self:g3After(ev, att, def, mv, false)
       elseif mv.status and (def.substituteHP or 0) > 0 and foes(att, def) then
         -- (a substitute takes no status moves)
-        ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+        ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
       elseif mv.status and def.magicCoat == self.turnNo and foes(att, def) then
         -- (Magic Coat bounces it back)
-        ev[#ev + 1] = { kind = "status", who = def, text = ("%s bounced the %s back!"):format(def.name, mv.name) }
+        ev[#ev + 1] = { kind = "status", who = def, text = T("%s bounced the %s back!", def.name, mv.name) }
         self:side(ev, def, att, mv, false)
       elseif mv.status then
         self:side(ev, att, def, mv, false)
@@ -2403,7 +2417,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           sd.reflect, sd.light, sd.veil = 0, 0, 0
           self:syncVeil()
           ev[#ev + 1] = { kind = "side", side = sideKey(def), what = "reflect", up = false, who = att,
-            text = "It shattered the barrier!" }
+            text = T("It shattered the barrier!") }
         end
         -- (a move reaching one mid-Fly, Dig or Dive hits it twice as hard: Gust, Earthquake, Surf)
         local reach = def.semi and Sim.REACH[def.semi] and Sim.REACH[def.semi][key]
@@ -2425,12 +2439,12 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           -- (Present: a fifth of the time it heals the target instead)
           if g3power == "heal" then
             if not self:healFor(ev, def, maxHpOf(def) / 4) then
-              ev[#ev + 1] = { kind = "fail", text = ("%s couldn't receive the gift!"):format(def.name) }
+              ev[#ev + 1] = { kind = "fail", text = T("%s couldn't receive the gift!", def.name) }
             end
             break
           end
           local striker = beat and beat[n] or att
-          if beat then ev[#ev + 1] = { kind = "status", who = striker, text = ("%s's attack!"):format(striker.name) } end
+          if beat then ev[#ev + 1] = { kind = "status", who = striker, text = T("%s's attack!", striker.name) } end
           local dmg, info = self.A.damage(striker, def, mv, spread, { reflect = sd.reflect > 0 or sd.veil > 0,
             lightScreen = sd.light > 0 or sd.veil > 0, doubleScreens = not def.boss, helped = att.helped or nil,
             gravity = (self.gravity or 0) > 0 or nil, weather = self.weather, turn = self.turnNo, field = self:ndxField(),
@@ -2441,11 +2455,11 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           local eff = tonumber(info.effectiveness) or 1
           -- (Counter, Mirror Coat, Endeavor with nothing to answer)
           if info.failed then
-            ev[#ev + 1] = { kind = "fail", text = "But it failed!" }
+            ev[#ev + 1] = { kind = "fail", text = T("But it failed!") }
             break
           end
           if eff == 0 then
-            ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = ("It doesn't affect %s..."):format(def.name) }
+            ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = T("It doesn't affect %s...", def.name) }
             break
           end
           local hadShield = def.shield ~= nil
@@ -2461,10 +2475,10 @@ function Sim:use(ev, att, mv, targets, ally, locked)
             dmg = min(def.substituteHP, max(1, dmg))
             def.substituteHP = def.substituteHP - dmg
             landed, total = landed + 1, total + dmg
-            ev[#ev + 1] = { kind = "status", who = def, text = ("The substitute took damage for %s!"):format(def.name) }
+            ev[#ev + 1] = { kind = "status", who = def, text = T("The substitute took damage for %s!", def.name) }
             if def.substituteHP <= 0 then
               def.substituteHP = nil
-              ev[#ev + 1] = { kind = "status", who = def, substitute = false, text = ("%s's substitute faded!"):format(def.name) }
+              ev[#ev + 1] = { kind = "status", who = def, substitute = false, text = T("%s's substitute faded!", def.name) }
             end
             goto nextHit
           end
@@ -2489,13 +2503,13 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           if stop == "pierce" and n == 1 then ev[#ev + 1] = sev end
           if endured or banded then
             ev[#ev + 1] = { kind = "side", side = sideKey(def), what = "endured", up = true, who = def,
-              text = banded or self:tword("endured", nil, def) or ("%s endured the hit!"):format(def.name) }
+              text = banded or self:tword("endured", nil, def) or T("%s endured the hit!", def.name) }
           end
-          if info.critical then ev[#ev + 1] = { kind = "crit", target = def, text = "A critical hit!" } end
+          if info.critical then ev[#ev + 1] = { kind = "crit", target = def, text = T("A critical hit!") } end
           if n == 1 then
-            if mv.side and mv.side.ohko then ev[#ev + 1] = { kind = "effect", eff = 1, target = def, text = "It's a one-hit KO!" }
-            elseif eff > 1 then ev[#ev + 1] = { kind = "effect", eff = eff, target = def, text = "It's super effective!" }
-            elseif eff < 1 then ev[#ev + 1] = { kind = "effect", eff = eff, target = def, text = "It's not very effective..." } end
+            if mv.side and mv.side.ohko then ev[#ev + 1] = { kind = "effect", eff = 1, target = def, text = T("It's a one-hit KO!") }
+            elseif eff > 1 then ev[#ev + 1] = { kind = "effect", eff = eff, target = def, text = T("It's super effective!") }
+            elseif eff < 1 then ev[#ev + 1] = { kind = "effect", eff = eff, target = def, text = T("It's not very effective...") } end
           end
           if alive(def) then
             -- (Rage builds)
@@ -2511,12 +2525,12 @@ function Sim:use(ev, att, mv, targets, ally, locked)
             if def.grudge then
               local pm = mv.base or mv
               pm.pp = 0
-              ev[#ev + 1] = { kind = "status", who = att, text = ("%s's %s lost all its PP due to the grudge!"):format(att.name, pm.name) }
+              ev[#ev + 1] = { kind = "status", who = att, text = T("%s's %s lost all its PP due to the grudge!", att.name, pm.name) }
             end
             local bond = def.destinyBond and alive(att) and not isDmax(att) and att ~= def
             self:fainted(ev, def)
             if bond and not self.over then
-              ev[#ev + 1] = { kind = "status", who = def, text = ("%s took its attacker down with it!"):format(def.name) }
+              ev[#ev + 1] = { kind = "status", who = def, text = T("%s took its attacker down with it!", def.name) }
               att.mon.hp = 0
               ev[#ev + 1] = { kind = "residual", who = att, amount = 0, hp = 0 }
               self:fainted(ev, att)
@@ -2527,7 +2541,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
         if landed > 0 and not self.over then self:ruleAfter(ev, att, def, mv, total) end
         if not self.over then self:g3After(ev, att, def, mv, landed > 0) end
         if landed > 1 and not self.over then
-          ev[#ev + 1] = { kind = "hits", target = def, n = landed, text = ("Hit %d times!"):format(landed) }
+          ev[#ev + 1] = { kind = "hits", target = def, n = landed, text = T("Hit %d times!", landed) }
         end
       end
     end
@@ -2564,7 +2578,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
       local cut = min(hpOf(att), math.ceil(maxHpOf(att) / 2))
       att.mon.hp = hpOf(att) - cut
       ev[#ev + 1] = { kind = "residual", who = att, amount = cut, hp = att.mon.hp,
-        text = ("%s cut its own HP!"):format(att.name) }
+        text = T("%s cut its own HP!", att.name) }
       if not alive(att) then self:fainted(ev, att) end
     end
   end
@@ -2576,12 +2590,15 @@ end
 Sim.PINCH_STAT = { ATTACK_UP = "attack", DEFENSE_UP = "defense", SPEED_UP = "speed", SP_ATTACK_UP = "spAtk",
   SP_DEFENSE_UP = "spDef" }
 Sim.CONFUSE_FLAVOR = { CONFUSE_SPICY = 0, CONFUSE_DRY = 1, CONFUSE_SWEET = 2, CONFUSE_BITTER = 3, CONFUSE_SOUR = 4 }
-Sim.FLAVOR_WORD = { [0] = "spicy", "dry", "sweet", "bitter", "sour" }
+Sim.FLAVOR_WORD = { [0] = T.mark("spicy"), T.mark("dry"), T.mark("sweet"), T.mark("bitter"), T.mark("sour") }
 Sim.CURE_ITEM = { CURE_PAR = { PAR = true }, CURE_SLP = { SLP = true }, CURE_PSN = { PSN = true, TOX = true },
   CURE_BRN = { BRN = true }, CURE_FRZ = { FRZ = true } }
-Sim.CURE_TEXT = { CURE_PAR = "%s's %s cured paralysis!", CURE_SLP = "%s's %s woke it from its sleep!",
-  CURE_PSN = "%s's %s cured poison!", CURE_BRN = "%s's %s healed its burn!", CURE_FRZ = "%s's %s defrosted it!" }
-local PROBLEM = { PSN = "poison", TOX = "poison", SLP = "sleep", PAR = "paralysis", BRN = "burn", FRZ = "ice" }
+Sim.CURE_TEXT = { CURE_PAR = T.mark("%s's %s cured paralysis!"), CURE_SLP = T.mark("%s's %s woke it from its sleep!"),
+  CURE_PSN = T.mark("%s's %s cured poison!"), CURE_BRN = T.mark("%s's %s healed its burn!"), CURE_FRZ = T.mark("%s's %s defrosted it!") }
+-- the words of a status cured by a cure-all item: "%s's %s cured its <problem> problem!"
+local PROBLEM_TEXT = { PSN = T.mark("%s's %s cured its poison problem!"), TOX = T.mark("%s's %s cured its poison problem!"),
+  SLP = T.mark("%s's %s cured its sleep problem!"), PAR = T.mark("%s's %s cured its paralysis problem!"),
+  BRN = T.mark("%s's %s cured its burn problem!"), FRZ = T.mark("%s's %s cured its ice problem!") }
 local PINCH_ORDER = { "attack", "defense", "speed", "spAtk", "spDef" }
 
 -- a battler's held item: its hold effect's name, parameter and item (the adapter's held), nil without
@@ -2590,7 +2607,7 @@ function Sim:heldOf(b)
   if not self.A.held or (tonumber(b.item) or 0) == 0 or (self.ndx.magicRoom or 0) > 0 then return nil end
   return self.A.held(b)
 end
-function Sim:itemName(item) return self.A.itemName and self.A.itemName(item) or "item" end
+function Sim:itemName(item) return self.A.itemName and self.A.itemName(item) or T("item") end
 
 -- an item's heal (`amt` HP): false when there is nothing to heal
 function Sim:itemHeal(ev, b, amt, text)
@@ -2608,28 +2625,27 @@ function Sim:itemCure(ev, b, he, item)
     if not (s and Sim.CURE_ITEM[he][s]) then return false end
     if s == "SLP" then b.nightmare = nil end
     b.status, b.sleep, b.tox = nil, nil, nil
-    text = Sim.CURE_TEXT[he]:format(b.name, name)
+    text = T(Sim.CURE_TEXT[he], b.name, name)
   elseif he == "CURE_CONFUSION" then
     if not b.confused then return false end
     b.confused = nil
-    text = ("%s's %s snapped it out of confusion!"):format(b.name, name)
+    text = T("%s's %s snapped it out of confusion!", b.name, name)
   elseif he == "CURE_ATTRACT" then
     if not b.attract then return false end
     b.attract = nil
-    text = ("%s's %s cured its love problem!"):format(b.name, name)
+    text = T("%s's %s cured its love problem!", b.name, name)
   elseif he == "CURE_STATUS" then
     if not s and not b.confused then return false end
-    local word = s and PROBLEM[s] or "confusion"
     local both = s ~= nil and b.confused ~= nil
     if s == "SLP" then b.nightmare = nil end
     b.status, b.sleep, b.tox, b.confused = nil, nil, nil, nil
-    text = both and ("%s's %s normalized its status!"):format(b.name, name)
-      or ("%s's %s cured its %s problem!"):format(b.name, name, word)
+    text = both and T("%s's %s normalized its status!", b.name, name)
+      or T(s and PROBLEM_TEXT[s] or T.mark("%s's %s cured its confusion problem!"), b.name, name)
   elseif he == "RESTORE_STATS" then
     local any = false
     for k, v in pairs(b.stages) do if v < 0 then b.stages[k], any = 0, true end end
     if not any then return false end
-    text = ("%s's %s returned its stats to normal!"):format(b.name, name)
+    text = T("%s's %s returned its stats to normal!", b.name, name)
   else
     return false
   end
@@ -2648,19 +2664,19 @@ function Sim:itemNormal(ev, b, moveTurn)
   local hp, top, name = hpOf(b), maxHpOf(b), self:itemName(item)
   p = tonumber(p) or 0
   if he == "RESTORE_HP" then
-    if hp <= floor(top / 2) and self:itemHeal(ev, b, p, ("%s's %s restored its health!"):format(b.name, name)) then
+    if hp <= floor(top / 2) and self:itemHeal(ev, b, p, T("%s's %s restored its health!", b.name, name)) then
       loseItem(b)
       return true
     end
   elseif he == "LEFTOVERS" then
     if not moveTurn then
-      return self:itemHeal(ev, b, top / 16, ("%s restored a little HP using its %s!"):format(b.name, name))
+      return self:itemHeal(ev, b, top / 16, T("%s restored a little HP using its %s!", b.name, name))
     end
   elseif Sim.CONFUSE_FLAVOR[he] then
-    if hp <= floor(top / 2) and self:itemHeal(ev, b, top / max(1, p), ("%s's %s restored its health!"):format(b.name, name)) then
+    if hp <= floor(top / 2) and self:itemHeal(ev, b, top / max(1, p), T("%s's %s restored its health!", b.name, name)) then
       local flavor = Sim.CONFUSE_FLAVOR[he]
       if self.A.dislikes and self.A.dislikes(b, flavor) then
-        ev[#ev + 1] = { kind = "status", who = b, text = ("For %s, the %s was too %s!"):format(b.name, name, Sim.FLAVOR_WORD[flavor]) }
+        ev[#ev + 1] = { kind = "status", who = b, text = T("For %s, the %s was too %s!", b.name, name, T(Sim.FLAVOR_WORD[flavor])) }
         if not (self.A.abilityName and self.A.abilityName(b) == "OWN_TEMPO") then self:confuse(ev, b) end
       end
       loseItem(b)
@@ -2671,14 +2687,14 @@ function Sim:itemNormal(ev, b, moveTurn)
     if hp <= floor(top / max(1, p)) and (b.stages[stat] or 0) < 6 then
       local n0 = #ev
       self:stage(ev, b, stat, 1)
-      if ev[n0 + 1] then ev[n0 + 1].text = ("Using its %s, %s's %s rose!"):format(name, b.name, STAT_WORD[stat]) end
+      if ev[n0 + 1] then ev[n0 + 1].text = T("Using its %s, %s's %s rose!", name, b.name, T(STAT_WORD[stat])) end
       loseItem(b)
       return true
     end
   elseif he == "CRITICAL_UP" then
     if hp <= floor(top / max(1, p)) and (b.critUp or 0) < 2 then
       b.critUp = 2
-      ev[#ev + 1] = { kind = "status", who = b, held = true, text = ("%s used its %s to get pumped!"):format(b.name, name) }
+      ev[#ev + 1] = { kind = "status", who = b, held = true, text = T("%s used its %s to get pumped!", b.name, name) }
       loseItem(b)
       return true
     end
@@ -2690,7 +2706,7 @@ function Sim:itemNormal(ev, b, moveTurn)
         local stat = open[self.rng(1, #open)]
         local n0 = #ev
         self:stage(ev, b, stat, 2)
-        if ev[n0 + 1] then ev[n0 + 1].text = ("Using its %s, %s's %s rose sharply!"):format(name, b.name, STAT_WORD[stat]) end
+        if ev[n0 + 1] then ev[n0 + 1].text = T("Using its %s, %s's %s rose sharply!", name, b.name, T(STAT_WORD[stat])) end
         loseItem(b)
         return true
       end
@@ -2699,7 +2715,7 @@ function Sim:itemNormal(ev, b, moveTurn)
     for _, mv in ipairs(b.moves or {}) do
       if (mv.pp or 1) == 0 then
         mv.pp = min(mv.maxPp or p, p)
-        ev[#ev + 1] = { kind = "status", who = b, held = true, text = ("%s's %s restored %s's PP!"):format(b.name, name, mv.name) }
+        ev[#ev + 1] = { kind = "status", who = b, held = true, text = T("%s's %s restored %s's PP!", b.name, name, mv.name) }
         loseItem(b)
         return true
       end
@@ -2723,7 +2739,7 @@ function Sim:focusBand(def, dmg)
   if dmg < hpOf(def) then return nil end
   local he, p, item = self:heldOf(def)
   if he ~= "FOCUS_BAND" or self.rng(0, 99) >= (tonumber(p) or 0) then return nil end
-  return ("%s hung on using its %s!"):format(def.name, self:itemName(item))
+  return T("%s hung on using its %s!", def.name, self:itemName(item))
 end
 
 -- a move's accuracy against BrightPowder / Lax Incense: true when the item makes it miss
@@ -2745,7 +2761,7 @@ function Sim:itemAfterMove(ev, att, mv, hit, dealt)
       end
     end
   elseif he == "SHELL_BELL" and dealt > 0 then
-    self:itemHeal(ev, att, dealt / max(1, tonumber(p) or 8), ("%s restored a little HP using its %s!"):format(att.name, self:itemName(item)))
+    self:itemHeal(ev, att, dealt / max(1, tonumber(p) or 8), T("%s restored a little HP using its %s!", att.name, self:itemName(item)))
   end
 end
 
@@ -2764,7 +2780,7 @@ end
 -- a member sitting out cheers the team on: one of rules.CHEER by weight (the barrier one only while
 -- a barrier stands)
 function Sim:cheer(ev, m)
-  ev[#ev + 1] = { kind = "cheer", who = m, text = ("%s is cheering the team on!"):format(m.name) }
+  ev[#ev + 1] = { kind = "cheer", who = m, text = T("%s is cheering the team on!", m.name) }
   local list, total = {}, 0
   for _, c in ipairs(self.rules.CHEER or {}) do
     if c.id ~= "shield" or self.boss.shield then
@@ -2796,7 +2812,7 @@ function Sim:cheer(ev, m)
     self:breakShield(ev)
     return
   end
-  ev[#ev + 1] = { kind = "cheer", who = m, cheer = pick, text = Sim.CHEER_TEXT[pick or "nothing"] }
+  ev[#ev + 1] = { kind = "cheer", who = m, cheer = pick, text = T(Sim.CHEER_TEXT[pick or "nothing"]) }
   for _, q in ipairs(quiet) do ev[#ev + 1] = q end
 end
 
@@ -2804,30 +2820,30 @@ end
 function Sim:useItem(ev, user, id, target)
   local it = self.pouch[id]
   if not it or it.n <= 0 then return end
-  local name = Sim.ITEM_NAME[id] or id
-  ev[#ev + 1] = { kind = "item", who = user, item = id, text = ("%s used a %s on %s!"):format(user.name, name, target.name) }
+  local name = Sim.ITEM_NAME[id] and T(Sim.ITEM_NAME[id]) or id
+  ev[#ev + 1] = { kind = "item", who = user, item = id, text = T("%s used a %s on %s!", user.name, name, target.name) }
   local worked = false
   if id == "revive" then
     if (target.down or 0) > 0 then
       target.down, target.outSince = 0, self.turnNo + 1
       target.mon.hp = floor(maxHpOf(target) / 2)
       for k in pairs(target.stages) do target.stages[k] = 0 end
-      ev[#ev + 1] = { kind = "back", who = target, hp = target.mon.hp, text = ("%s was revived!"):format(target.name) }
+      ev[#ev + 1] = { kind = "back", who = target, hp = target.mon.hp, text = T("%s was revived!", target.name) }
       worked = true
     end
   elseif (target.down or 0) == 0 and alive(target) then
     if id == "potion" and hpOf(target) < maxHpOf(target) then
       target.mon.hp = min(maxHpOf(target), hpOf(target) + floor(maxHpOf(target) * (it.heal or 0.5)))
-      ev[#ev + 1] = { kind = "heal", who = target, hp = target.mon.hp, text = ("%s's HP was restored."):format(target.name) }
+      ev[#ev + 1] = { kind = "heal", who = target, hp = target.mon.hp, text = T("%s's HP was restored.", target.name) }
       worked = true
     elseif id == "full_heal" and target.status then
       target.status, target.sleep, target.tox = nil, nil, nil
-      ev[#ev + 1] = { kind = "status", who = target, text = ("%s was cured of its status problem."):format(target.name) }
+      ev[#ev + 1] = { kind = "status", who = target, text = T("%s was cured of its status problem.", target.name) }
       worked = true
     end
   end
   if worked then it.n = it.n - 1
-  else ev[#ev + 1] = { kind = "fail", text = "But it had no effect..." } end
+  else ev[#ev + 1] = { kind = "fail", text = T("But it had no effect...") } end
 end
 
 -- ------- a turn
@@ -2909,7 +2925,8 @@ function Sim:endTurn(ev)
   if f then
     for _, m in ipairs(team) do
       if not (f.spare and (m.type1 == f.spare or m.type2 == f.spare)) then
-        local t = W.fieldHurt and W.fieldHurt[f.spareName] or "{MON} is hurt!"
+        local t = W.fieldHurt and W.fieldHurt[f.spareName]
+        t = t and T(t) or T("{MON} is hurt!")
         hurt(m, floor(maxHpOf(m) / f.frac), fill(t, b, m))
       end
     end
@@ -2920,7 +2937,8 @@ function Sim:endTurn(ev)
   local bf = self.bossField
   if bf then
     if not (bf.spare and (b.type1 == bf.spare or b.type2 == bf.spare)) then
-      local t = W.fieldFoeHurt and W.fieldFoeHurt[bf.spareName] or "{BOSS} is hurt!"
+      local t = W.fieldFoeHurt and W.fieldFoeHurt[bf.spareName]
+      t = t and T(t) or T("{BOSS} is hurt!")
       hurt(b, floor(maxHpOf(b) / bf.frac), fill(t, b))
     end
     bf.turns = bf.turns - 1
@@ -2932,7 +2950,7 @@ function Sim:endTurn(ev)
     if (m.trap or 0) > 0 then
       -- (counted down first: the hurt may knock it out, which lets the trap go)
       m.trap = m.trap - 1
-      hurt(m, floor(maxHpOf(m) / (m.trapFrac or 8)), fill(W.trapHurt or "{MON} is hurt by the trap!", b, m))
+      hurt(m, floor(maxHpOf(m) / (m.trapFrac or 8)), fill(W.trapHurt and T(W.trapHurt) or T("{MON} is hurt by the trap!"), b, m))
     end
   end
   -- the held items (Leftovers, berries), before Leech Seed and poison as Gen 3's turn's end
@@ -2947,11 +2965,11 @@ function Sim:endTurn(ev)
       else
         local cut = self:capAtShield(x, min(hpOf(x), max(1, floor(maxHpOf(x) / 8))))
         x.mon.hp = hpOf(x) - cut
-        ev[#ev + 1] = { kind = "residual", who = x, amount = cut, hp = x.mon.hp, text = ("%s's health is sapped by Leech Seed!"):format(x.name) }
+        ev[#ev + 1] = { kind = "residual", who = x, amount = cut, hp = x.mon.hp, text = T("%s's health is sapped by Leech Seed!", x.name) }
         if not alive(x) then self:fainted(ev, x) elseif x.boss then self:checkShield(ev) end
         if not self.over and alive(by) and canHeal(by) then
           by.mon.hp = min(maxHpOf(by), hpOf(by) + cut)
-          ev[#ev + 1] = { kind = "heal", who = by, hp = by.mon.hp, text = ("%s regained health!"):format(by.name) }
+          ev[#ev + 1] = { kind = "heal", who = by, hp = by.mon.hp, text = T("%s regained health!", by.name) }
         end
       end
     end
@@ -2959,14 +2977,14 @@ function Sim:endTurn(ev)
   -- a curse and a nightmare take a quarter of the HP; roots restore a sixteenth
   for _, x in ipairs(trapped) do
     if not self.over and alive(x) then
-      if x.cursed then hurt(x, floor(maxHpOf(x) / 4), ("%s is afflicted by the curse!"):format(x.name)) end
+      if x.cursed then hurt(x, floor(maxHpOf(x) / 4), T("%s is afflicted by the curse!", x.name)) end
       if x.nightmare then
-        if x.status == "SLP" then hurt(x, floor(maxHpOf(x) / 4), ("%s is locked in a nightmare!"):format(x.name))
+        if x.status == "SLP" then hurt(x, floor(maxHpOf(x) / 4), T("%s is locked in a nightmare!", x.name))
         else x.nightmare = nil end
       end
       if x.ingrained and alive(x) and canHeal(x) and hpOf(x) < maxHpOf(x) then
         x.mon.hp = min(maxHpOf(x), hpOf(x) + max(1, floor(maxHpOf(x) / 16)))
-        ev[#ev + 1] = { kind = "heal", who = x, hp = x.mon.hp, text = ("%s absorbed nutrients with its roots!"):format(x.name) }
+        ev[#ev + 1] = { kind = "heal", who = x, hp = x.mon.hp, text = T("%s absorbed nutrients with its roots!", x.name) }
       end
     end
   end
@@ -2986,12 +3004,12 @@ function Sim:endTurn(ev)
         local dmg, info = self.A.damage(p.att, def, p.mv, false, { weather = self.weather })
         info = info or {}
         if (tonumber(info.effectiveness) or 1) == 0 or dmg <= 0 then
-          ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = ("It doesn't affect %s..."):format(def.name) }
+          ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = T("It doesn't affect %s...", def.name) }
         else
           dmg = self:capAtShield(def, min(hpOf(def), self:throughBoss(ev, def, max(1, dmg))))
           def.mon.hp = hpOf(def) - dmg
           ev[#ev + 1] = { kind = "damage", who = p.att, target = def, amount = dmg, hp = def.mon.hp, move = p.mv,
-            text = ("%s took the %s attack!"):format(def.name, p.mv.name) }
+            text = T("%s took the %s attack!", def.name, p.mv.name) }
           if not alive(def) then self:fainted(ev, def) elseif def.boss then self:checkShield(ev) end
         end
       end
@@ -3004,14 +3022,14 @@ function Sim:endTurn(ev)
     if spared then
       for _, x in ipairs(trapped) do
         if not self.over and alive(x) and not (spared[x.type1] or spared[x.type2 or -1]) then
-          hurt(x, floor(maxHpOf(x) / 16), kind == "SAND" and ("%s is buffeted by the sandstorm!"):format(x.name)
-            or ("%s is pelted by the hail!"):format(x.name))
+          hurt(x, floor(maxHpOf(x) / 16), kind == "SAND" and T("%s is buffeted by the sandstorm!", x.name)
+            or T("%s is pelted by the hail!", x.name))
         end
       end
     end
     self.weatherTurns = (self.weatherTurns or 1) - 1
     if self.weatherTurns <= 0 and not self.over then
-      ev[#ev + 1] = { kind = "field", who = b, weather = false, text = Sim.WEATHER_TEXT[kind].down }
+      ev[#ev + 1] = { kind = "field", who = b, weather = false, text = T(Sim.WEATHER_TEXT[kind].down) }
       self.weather, self.weatherTurns = nil, nil
     end
   end
@@ -3028,7 +3046,7 @@ function Sim:endTurn(ev)
       else
         cut = floor(maxHpOf(x) / 8)
       end
-      hurt(x, cut, st == "BRN" and ("%s was hurt by its burn!"):format(x.name) or ("%s was hurt by poison!"):format(x.name), st)
+      hurt(x, cut, st == "BRN" and T("%s was hurt by its burn!", x.name) or T("%s was hurt by poison!", x.name), st)
     end
   end
   if self.over then return end
@@ -3046,7 +3064,7 @@ function Sim:endTurn(ev)
         if who and alive(who) and canHeal(who) and hpOf(who) < maxHpOf(who) then
           who.mon.hp = min(maxHpOf(who), hpOf(who) + w.amount)
           ev[#ev + 1] = { kind = "heal", who = who, hp = who.mon.hp, wish = true,
-            text = self:tword("wishTrue", nil, { name = w.name }) or ("%s's wish came true!"):format(w.name) }
+            text = self:tword("wishTrue", nil, { name = w.name }) or T("%s's wish came true!", w.name) }
         end
       end
     end
@@ -3056,7 +3074,7 @@ function Sim:endTurn(ev)
     self.gravity = self.gravity - 1
     if self.gravity == 0 then
       ev[#ev + 1] = { kind = "side", side = "field", what = "gravity", up = false,
-        text = W.gravityEnd or "Gravity returned to normal!" }
+        text = W.gravityEnd and T(W.gravityEnd) or T("Gravity returned to normal!") }
     end
   end
   -- the sides' screens, Safeguard, mist and tailwind run down
@@ -3068,10 +3086,10 @@ function Sim:endTurn(ev)
         if sd[k] == 0 then
           local who = key == "boss" and b or { name = "", boss = nil }
           local text
-          if k == "veil" and key == "boss" then text = fill(W.veilEnd or "{BOSS}'s veil wore off!", b)
+          if k == "veil" and key == "boss" then text = fill(W.veilEnd and T(W.veilEnd) or T("{BOSS}'s veil wore off!"), b)
           else
             text = self:tword((k == "reflect" or k == "light" or k == "veil") and "screenEnd" or "sideEnd", k, who)
-              or (k == "veil" and W.teamVeilEnd) or nil
+              or (k == "veil" and W.teamVeilEnd and T(W.teamVeilEnd)) or nil
           end
           ev[#ev + 1] = { kind = "side", side = key, what = k, up = false, who = who.boss and b or nil, text = text }
         end
@@ -3100,11 +3118,11 @@ function Sim:endTurn(ev)
   if self:due("wipe") then
     for _, m in ipairs(team) do for k in pairs(m.stages) do m.stages[k] = 0 end end
     for k, v in pairs(b.stages) do if v < 0 then b.stages[k] = 0 end end
-    ev[#ev + 1] = { kind = "field", who = b, text = ("%s nullified the stat changes affecting the team!"):format(b.name) }
+    ev[#ev + 1] = { kind = "field", who = b, text = T("%s nullified the stat changes affecting the team!", b.name) }
   end
   if self:due("statup") then
     b.auraUsed = true
-    ev[#ev + 1] = { kind = "field", who = b, text = ("%s's aura flared to life!"):format(b.name) }
+    ev[#ev + 1] = { kind = "field", who = b, text = T("%s's aura flared to life!", b.name) }
     for _, s in ipairs({ "attack", "spAtk", "defense", "spDef" }) do self:stage(ev, b, s, 1) end
   end
   -- those who sat this turn out come back
@@ -3114,7 +3132,7 @@ function Sim:endTurn(ev)
       if m.down == 0 then
         m.mon.hp, m.outSince = maxHpOf(m), self.turnNo + 1
         for k in pairs(m.stages) do m.stages[k] = 0 end
-        ev[#ev + 1] = { kind = "back", who = m, hp = m.mon.hp, text = ("%s is back in the fight!"):format(m.name) }
+        ev[#ev + 1] = { kind = "back", who = m, hp = m.mon.hp, text = T("%s is back in the fight!", m.name) }
         -- (its side's hazards meet it)
         self:entry(ev, m)
         if self.over then return end
@@ -3200,7 +3218,7 @@ function Sim:turn(choices)
     elseif a.recharge then
       a.who.recharge = nil
       if alive(a.who) and (a.who.down or 0) == 0 then
-        ev[#ev + 1] = { kind = "cant", who = a.who, text = ("%s must recharge!"):format(a.who.name) }
+        ev[#ev + 1] = { kind = "cant", who = a.who, text = T("%s must recharge!", a.who.name) }
       end
     elseif alive(a.who) and (a.who.boss or (a.who.down or 0) == 0) then
       a.who.actedTurn = self.turnNo
@@ -3217,7 +3235,7 @@ function Sim:turn(choices)
         L.turns = L.turns - 1
         if L.turns <= 0 or (L.mv.pp or 0) <= 0 then
           self:unlock(a.who)
-          ev[#ev + 1] = { kind = "status", who = a.who, text = ("%s's encore ended!"):format(a.who.name) }
+          ev[#ev + 1] = { kind = "status", who = a.who, text = T("%s's encore ended!", a.who.name) }
         end
       end
     end
@@ -3231,14 +3249,14 @@ function Sim:turn(choices)
   end
   if self.over then
     local text
-    if self.over == "win" then text = ("You defeated %s!"):format(self.boss.name)
-    elseif self.over == "storm" then text = ("The storm around %s grew too strong!"):format(self.boss.name)
-    else text = "Too many Pok\195\169mon fainted..." end
+    if self.over == "win" then text = T("You defeated %s!", self.boss.name)
+    elseif self.over == "storm" then text = T("The storm around %s grew too strong!", self.boss.name)
+    else text = T("Too many Pok\195\169mon fainted...") end
     ev[#ev + 1] = { kind = "over", outcome = self.over, text = text }
     -- a member still giant shrinks back before the catch
     if self.over == "win" and self.dmaxActive then self:undynamax(ev, self.dmaxActive) end
     if self.over ~= "win" then
-      ev[#ev + 1] = { kind = "over", outcome = self.over, text = "You were blown out of the den!" }
+      ev[#ev + 1] = { kind = "over", outcome = self.over, text = T("You were blown out of the den!") }
     end
   end
   return ev

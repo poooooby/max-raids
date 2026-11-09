@@ -5,7 +5,7 @@
 -- engine's (mod.world:spawnNpc: drawn and collided like any NPC; not saved, so spawned again
 -- after a load); an active one has a beam of light rising from it (a field actor). Pressing A on
 -- a den (the world.talk hook) opens it (deps.open(den)).
---   Dn = dens(mod, { N, Bosses, open })
+--   Dn = dens(mod, { N, Bosses, open, T })
 --   Dn.pick(view, seed) -> { {x, y}, ... }   (pure: view = { w, h, open(x, y), warps })
 --   Dn.roll(den, day, badges, rng)           (pure: rerolls a den for a day)
 --   Dn.ensure() ; Dn.registerSprites() ; Dn.install(hooks) ; Dn.today() ; Dn.badges()
@@ -15,6 +15,11 @@ return function(mod, deps)
   local D = N.RAID.DENS
   local floor, max, min, abs = math.floor, math.max, math.min, math.abs
   local Dn = {}
+
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = (deps and deps.T) or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
   -- the den's sprites: active / spent (assets/den/), drawn over grass (no grass in front of it yet)
   Dn.SPRITE = { active = "MAX_RAIDS_DEN", spent = "MAX_RAIDS_DEN_SPENT" }
   -- the sprites are 16 x 16, one tile. Gen 3 draws the anchor's row 12 px down the tile, so row 12
@@ -462,9 +467,10 @@ return function(mod, deps)
     -- a watchdog: the shake past SHAKE_MAX_S goes on to the words; the words' box gone this long
     -- without their script ending, the awakening ends (the player never left held)
     SHAKE_MAX_S = 4, QUIET_MAX_S = 3,
+    -- (English; the field's message box draws them in the game's font: T.game where shown)
     WORDS = {
-      "A powerful force shakes the region...",
-      "Pillars of light are rising from\nPOKéMON DENS along the routes!",
+      T.mark("A powerful force shakes the region..."),
+      T.mark("Pillars of light are rising from\nPOKéMON DENS along the routes!"),
     },
   }
   Dn.OUTDOOR_TYPES = { [1] = true, [2] = true, [3] = true, [6] = true }
@@ -563,7 +569,7 @@ return function(mod, deps)
       if watch then watch.stage, watch.quiet = "words", 0 end
       if FieldView then FieldView.cameraPanX, FieldView.cameraPanY = 0, 0 end
       local rows = {}
-      for _, t in ipairs(A.WORDS) do rows[#rows + 1] = { "text", t } end
+      for _, t in ipairs(A.WORDS) do rows[#rows + 1] = { "text", T.game(t) } end
       local ok, err = mod.world:queueScript(rows, { onDone = function() finish() end })
       if not ok then
         mod.log:warn("dens: the awakening's words could not show: %s", tostring(err))

@@ -10,6 +10,11 @@ return function(mod, deps)
   local Bh = {}
   local max, min, floor, sin = math.max, math.min, math.floor, math.sin
 
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = (deps and deps.T) or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
+
   -- sizes in the window's height, measured off a 1784 x 998 capture
   Bh.ORDER = { TOP = 0.025, W = 0.23, H = 0.078, PITCH = 0.097, NOW = 0.02 }
   Bh.PANEL = { H = 0.138, W = 0.556, SLANT = 0.045 }
@@ -19,6 +24,7 @@ return function(mod, deps)
     px = max(6, floor(px + 0.5))
     if not fonts[px] then
       local ok, f = pcall(love.graphics.newFont, px)
+      if ok and f and deps and deps.cjk then deps.cjk(f, px) end
       fonts[px] = ok and f or love.graphics.getFont()
     end
     return fonts[px]
@@ -242,14 +248,15 @@ return function(mod, deps)
     local nw = fNum:getWidth(lv)
     G.print(lv, x1 - nw, py + h * 0.006)
     G.setFont(fLv)
-    G.print("Lv.", x1 - nw - fLv:getWidth("Lv.") - h * 0.002, py + h * 0.006 + fNum:getHeight() - fLv:getHeight() - h * 0.004)
+    local lvWord = T("Lv.")
+    G.print(lvWord, x1 - nw - fLv:getWidth(lvWord) - h * 0.002, py + h * 0.006 + fNum:getHeight() - fLv:getHeight() - h * 0.004)
     -- the HP bar and numbers
     local hp, mhp = tonumber(info.hp) or 0, tonumber(info.maxHp) or 0
     hpBar(G, x0, py + h * 0.052, x1 - x0, h * 0.011, mhp > 0 and hp / mhp or 1, info.dmax ~= nil)
     -- Dynamaxed: a red tab over the panel, its turns left
     if info.dmax then
       local fT = font(h * 0.022)
-      local word = ("DYNAMAX  %d"):format(info.dmax)
+      local word = T("DYNAMAX  %d", info.dmax)
       local tw, th = fT:getWidth(word) + h * 0.03, h * 0.032
       G.setColor(0.95, 0.12, 0.3, 1)
       G.rectangle("fill", x0, py - th - h * 0.004, tw, th, th / 2, th / 2)

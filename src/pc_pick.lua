@@ -7,10 +7,15 @@
 --   A on the box's name, on PARTY POKEMON, on an empty slot, SELECT, START: nothing (no box menu,
 --                            no party drawer, no move - the save is never changed here)
 --   everything else          the game's (moving, L / R and the edges switch boxes, B or CLOSE BOX close)
---   Pick = pc_pick(mod) ; Pick.open(session, { onSelect = function(mon), onClose = function() })
+--   Pick = pc_pick(mod, { T }) ; Pick.open(session, { onSelect = function(mon), onClose = function() })
 --   Pick.isOpen() ; Pick.state() (drivers) ; Pick.press(key) (drivers: a key through the filter)
 
-return function(mod)
+return function(mod, deps)
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = (deps and deps.T) or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
+
   -- an engine module (found ones kept: a mod's require makes garbage each call)
   local engineMods = {}
   local function engine(name)
@@ -30,7 +35,8 @@ return function(mod)
   local SeIds = engine("src.core.game3.se_ids")
 
   local Pick = {}
-  Pick.ACTIONS = { "SELECT", "SUMMARY", "BACK" }
+  -- (English: the ids; drawn through T.game, the game's own font)
+  Pick.ACTIONS = { T.mark("SELECT"), T.mark("SUMMARY"), T.mark("BACK") }
   local st = nil   -- { session, onSelect, onClose, menu = { cursor, mon, box, slot } | nil, summary }
   local origInput, origDraw = nil, nil
 
@@ -126,7 +132,7 @@ return function(mod)
       for i, act in ipairs(Pick.ACTIONS) do
         local y = (menuTop * 8 + 2) + (i - 1) * 16
         if i == st.menu.cursor then Window.cursorPx(textLeft - 8, y) end
-        Window.printPx(act, textLeft, y)
+        Window.printPx(T.game(act), textLeft, y)
       end
     end)
   end

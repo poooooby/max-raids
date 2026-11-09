@@ -16,6 +16,11 @@ return function(mod, deps)
   local floor, max, min = math.floor, math.max, math.min
   local Den = {}
 
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = (deps and deps.T) or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
+
   -- an engine module (found ones kept: a mod's require makes garbage each call)
   local engineMods = {}
   local function engine(name)
@@ -38,9 +43,11 @@ return function(mod, deps)
     PALE_TOP = { 0.95, 0.95, 0.99 }, PALE_FOOT = { 0.86, 0.87, 0.96 },
     SLANT_TOP = 0.67, SLANT_FOOT = 0.42,   -- the red panel's edge across the top and the foot
     RULE_BAND = { 0.55, 0.06, 0.1, 0.95 },
-    RULE = { "The battle ends when", "Pokémon faint four times or", "the battle lasts for 10 turns" },
+    -- (English, translated where drawn)
+    RULE = { T.mark("The battle ends when"), T.mark("Pokémon faint four times or"), T.mark("the battle lasts for 10 turns") },
   }
-  Den.MENU = { "PARTY", "PC", "BACK" }
+  -- (English: the ids, Den.ACCENT's keys; translated where drawn)
+  Den.MENU = { T.mark("PARTY"), T.mark("PC"), T.mark("BACK") }
 
   -- a portrait screen's ground past the den screen's box (top .. top + bh of an h tall screen): the
   -- red panel carried on from its edge above and below, the pale one beside it
@@ -353,9 +360,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   end
 
   -- a pill: the face, the words bold (the default face twice, a pixel apart), a chevron when selected
+  -- (`word` English: Den.ACCENT's key, translated here)
   local function pill(G, t, word, sel, u, live, accent, alone)
     local y = face(G, t, t.h / 2, sel, accent or Den.ACCENT[word] or Den.ACCENT.BACK, u)
     if sel and not alone then chevron(G, t) end
+    word = T(word)
     local f = font(t.h * 0.46)
     G.setFont(f)
     if sel then G.setColor(1, 1, 1, live == false and 0.5 or 1)
@@ -480,7 +489,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if r.legend then
       G.setFont(font(14 * u))
       G.setColor(1, 0.85, 0.9, 1)
-      G.print("A LEGENDARY POK\195\137MON", 22 * u, 60 * u)
+      G.print(T("A LEGENDARY POK\195\137MON"), 22 * u, 60 * u)
     end
     -- its types
     local ty = 84 * u
@@ -511,13 +520,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local bandH = pad * 2 + lh * (#L.RULE - 1) + f:getHeight()
     local bandY = h - 78 * u
     local bw = 0
-    for _, line in ipairs(L.RULE) do bw = max(bw, f:getWidth(line)) end
+    for _, line in ipairs(L.RULE) do bw = max(bw, f:getWidth(T(line))) end
     bw = bw + 30 * u
     local c = L.RULE_BAND
     G.setColor(c[1], c[2], c[3], c[4])
     G.polygon("fill", 0, bandY, bw + bandH * 0.3, bandY, bw, bandY + bandH, 0, bandY + bandH)
     G.setColor(1, 1, 1, 1)
-    for i, line in ipairs(L.RULE) do G.print(line, 14 * u, bandY + pad + (i - 1) * lh) end
+    for i, line in ipairs(L.RULE) do G.print(T(line), 14 * u, bandY + pad + (i - 1) * lh) end
   end
 
   -- the slots, two by two: the icon and the name (a soft card behind, ringed while the cursor is on it)
@@ -602,7 +611,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G.rectangle("fill", x, y, cw, ch, 12 * u, 12 * u)
     G.setFont(font(15 * u))
     G.setColor(0.1, 0.1, 0.12, 1)
-    G.print(("Who goes in slot %d?"):format(p.slot), x + 16 * u, y + 12 * u)
+    G.print(T("Who goes in slot %d?", p.slot), x + 16 * u, y + 12 * u)
     for j, row in ipairs(r.party) do
       local t = rset(where.party[j] or {}, x + 10 * u, y + 40 * u + (j - 1) * (rowH + 4 * u), cw - 20 * u, rowH)
       where.party[j] = t
@@ -617,11 +626,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local ty = fy + (rowH - f:getHeight()) / 2
       G.print(row.name, t.x + rowH * 1.25, ty)
       G.print(row.name, t.x + rowH * 1.25 + max(1, u * 0.7), ty)
-      local right = live and ("Lv. " .. row.level) or "Fainted"
+      local right = live and T("Lv. %d", row.level) or T("Fainted")
       G.printf(right, t.x, ty, t.w - 16 * u, "right")
     end
     local back = rset(where.partyBack, x + cw - 110 * u, y + ch - 38 * u, 96 * u, 28 * u)
-    pill(G, back, "BACK", false, u)
+    pill(G, back, T.mark("BACK"), false, u)
   end
 
   function Den.draw(G, w, h, r)
@@ -631,21 +640,23 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local function crystalPill(y, sel)
       if not crystalShown(r) then rset(where.crystal, 0, 0, 0, 0); return end
       local t = rset(where.crystal, w * 0.62, y, w * 0.34, 34 * u)
-      local word = r.legend and "PUT IT AWAY" or ("DYNAMAX CRYSTAL x%d"):format(Rd.crystals())
+      local word = r.legend and T.mark("PUT IT AWAY") or T("DYNAMAX CRYSTAL x%d", Rd.crystals())
       pill(G, t, word, sel, u, true, Den.ACCENT.CRYSTAL)
     end
     if not r.key then
       G.setFont(font(22 * u))
       G.setColor(1, 1, 1, 1)
-      G.printf("The den is quiet.", 0, h * 0.36, w * 0.5, "center")
+      G.printf(T("The den is quiet."), 0, h * 0.36, w * 0.5, "center")
       G.setFont(font(14 * u))
-      local more = crystalShown(r) and "\nA Dynamax Crystal could call\na legendary Pok\195\169mon here." or ""
-      G.printf("Nothing stirs here today.\nCome back tomorrow." .. more, 0, h * 0.36 + 34 * u, w * 0.5, "center")
+      local words = crystalShown(r)
+        and T("Nothing stirs here today.\nCome back tomorrow.\nA Dynamax Crystal could call\na legendary Pok\195\169mon here.")
+        or T("Nothing stirs here today.\nCome back tomorrow.")
+      G.printf(words, 0, h * 0.36 + 34 * u, w * 0.5, "center")
       clear(where.slots)
       rset(where.start, 0, 0, 0, 0)
       local t = rset(where.exit, w * 0.62, h - 70 * u, w * 0.34, 34 * u)
       -- (the screen's one button without a crystal: lit, no chevron)
-      pill(G, t, "EXIT", r.cursor ~= 7, u, nil, nil, not crystalShown(r))
+      pill(G, t, T.mark("EXIT"), r.cursor ~= 7, u, nil, nil, not crystalShown(r))
       crystalPill(h - 114 * u, r.cursor == 7)
       return
     end
@@ -656,8 +667,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local ts = rset(where.start, bx, h - 104 * u, bw2, bh)
     local te = rset(where.exit, bx, h - 60 * u, bw2, bh)
     local menus = r.denMenu or r.denParty
-    pill(G, ts, "START", r.cursor == 5 and not menus, u, filled(r))
-    pill(G, te, "EXIT", r.cursor == 6 and not menus, u)
+    pill(G, ts, T.mark("START"), r.cursor == 5 and not menus, u, filled(r))
+    pill(G, te, T.mark("EXIT"), r.cursor == 6 and not menus, u)
     crystalPill(h - 148 * u, r.cursor == 7 and not menus)
     drawMenu(G, w, h, u, r)
     drawParty(G, w, h, u, r)

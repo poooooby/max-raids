@@ -216,6 +216,13 @@ you won: Exp. Candies, TMs, berries and more.*
   den and a legendary raid the Dynamax Adventure ones: their adventure theme on the den screen, the
   battle theme in the raid (a legendary raid its own, Eternatus its own), the capture theme while you
   catch. Each loops seamlessly and follows the game's music volume.
+- 🌐 **In five languages:** the raid's words, buttons, battle messages and options in English,
+  Japanese, Portuguese, Spanish or German. Pokémon, move and item names come from the game.
+- ✏️ **Your own words:** LANGUAGE set to CUSTOM writes a file, `lang_custom.lua`, in
+  `mod_cache/max_raids/` inside the folder that holds your saves. It lists every line of the mod,
+  English on the left and what to show on the right. Change any right-hand side, or set `base` to
+  one of the five languages for the lines you leave out. It is read again each time you open a den,
+  so a change shows without restarting the game.
 - 🔊 **The game's own sounds:** moves, hits, barriers and the catch use Gen 3's sound effects.
 - 🐢 **Smooth on slower devices:** the battlefield, the move effects, the sounds and the catch's
   pictures are loaded while the screen is black after Start, so a raid plays without stutters on
@@ -231,6 +238,7 @@ you won: Exp. Candies, TMs, berries and more.*
 | MOVE INFO | How each move does on the boss, under its button. BASIC (default): "Super effective", "Not very effective" or "No effect". FULL: 4x, 2x, 1/2x, 1/4x or 0x. OFF: nothing shown. |
 | RAID DENS | ON (default): dens appear on the routes. OFF: none appear. |
 | PERF.OVERLAY | OFF (default). ON: while you're in a den, frame times show on screen, with the raid's parts and its slowest moments at the top right. For reporting slowdowns: a screenshot during a raid shows what was slow. |
+| LANGUAGE | The language of the mod's own words: ENGLISH (default), にほんご, PORTUGUÊS, ESPAÑOL, DEUTSCH, or CUSTOM, your own file (see Your Screen). |
 
 ## 🎮 Controls
 

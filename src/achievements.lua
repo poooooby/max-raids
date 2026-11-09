@@ -9,11 +9,27 @@
 --                       (an older save is credited) and after each win
 --
 -- deps: data (data/raid_achievements.lua), stars(key) -> a boss key's star tier, wins() -> the
--- save's wins table (tests; else mod.save "wins").
+-- save's wins table (tests; else mod.save "wins"), T (src/i18n.lua: the rows' words translated as
+-- they are registered).
 
 return function(mod, deps)
   local A = {}
   local data = deps.data
+
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = (deps and deps.T) or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
+
+  -- a row's words in the language, the English kept where the translation is past the framework's
+  -- limit (bytes: a title over it is refused, a description cut)
+  local LIMIT = { title = 32, description = 160, category = 16 }
+  local function words(field, english)
+    if type(english) ~= "string" then return english end
+    local s = T(english)
+    if type(s) ~= "string" or s == "" or (LIMIT[field] and #s > LIMIT[field]) then return english end
+    return s
+  end
 
   local ach, handle
   local ready = false
@@ -54,6 +70,10 @@ return function(mod, deps)
     for i, row in ipairs(data.list) do
       local def = {}
       for k, v in pairs(row) do def[k] = v end
+      def.title = words("title", row.title)
+      def.description = words("description", row.description)
+      def.unit = words("unit", row.unit)
+      def.category = words("category", row.category)
       list[i] = def
     end
     local okR, count, errors = pcall(h.registerMany, h, list)

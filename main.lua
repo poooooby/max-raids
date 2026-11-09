@@ -33,30 +33,70 @@ local function loadSibling(mod, name)
 end
 
 return function(mod)
-  mod.options:define({
-    -- Kanto Gear's display options decide where the battle pad goes (as PlayNav's K-GEAR): its
-    -- SEPARATE SCREENS puts it on the second screen, FULLSCREEN / COMBINED keep it on the main one;
-    -- without the Gear, a second display when one is there. Off: BATTLE PAD below decides.
-    { key = "kanto_gear", label = "KANTO GEAR", type = "toggle", default = true },
-    -- where the battle pad goes: over the den on the main screen, or the device's second screen
-    -- (the main screen then keeps the whole den)
-    { key = "battle_pad", label = "BATTLE PAD", type = "choice", default = "main",
-      choices = { { "MAIN SCREEN", "main" }, { "SECOND SCREEN", "second" } },
-      visible_if = { key = "kanto_gear", equals = false } },
-    -- the bosses' strength: Solo raises their HP and attacks for a team of four of the player's own
-    -- (data/raid_rules.lua RAID.SOLO), Sword / Shield keeps the games' own numbers
-    { key = "difficulty", label = "RAID DIFFICULTY", type = "choice", default = "solo",
-      choices = { { "SOLO", "solo" }, { "SWORD / SHIELD", "swsh" } } },
-    -- how a move does on the boss, under its button: basic words ("Super effective"), full the
-    -- multiplier (2x, 1/2x), or nothing
-    { key = "move_info", label = "MOVE INFO", type = "choice", default = "basic",
-      choices = { { "BASIC", "basic" }, { "FULL", "full" }, { "OFF", "off" } } },
-    -- dens on the routes (off: none spawn; those already chosen stay saved)
-    { key = "dens", label = "RAID DENS", type = "toggle", default = true },
-    -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
-    -- raid was doing, shown while a den is open: for reporting slowdowns
-    { key = "perf_overlay", label = "PERF.OVERLAY", type = "toggle", default = false },
-  })
+  -- ------- the words' language (src/i18n.lua): set before the options are defined, so their labels
+  -- are in it; a change labels them again at once
+  local makeI18n = loadSibling(mod, "src/i18n.lua")
+  local I18n = makeI18n and makeI18n({
+    read = function(path) return mod:read(path) end,
+    cache = mod.cache,
+    log = function(fmt, ...) mod.log:warn(fmt, ...) end,
+  }) or nil
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = I18n or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, cgame = function(_, s, ...) return plainWords(s, ...) end, t = plainWords,
+    setLanguage = function() return "en" end, language = function() return "en" end, refresh = function() end },
+    { __call = function(_, s, ...) return plainWords(s, ...) end })
+  local function language()
+    local v = mod.options:get("language")
+    return v ~= nil and v or "en"
+  end
+  T.setLanguage(language())
+
+  local function defineOptions()
+    local schema = {
+      -- Kanto Gear's display options decide where the battle pad goes (as PlayNav's K-GEAR): its
+      -- SEPARATE SCREENS puts it on the second screen, FULLSCREEN / COMBINED keep it on the main one;
+      -- without the Gear, a second display when one is there. Off: BATTLE PAD below decides.
+      { key = "kanto_gear", label = "KANTO GEAR", type = "toggle", default = true },
+      -- where the battle pad goes: over the den on the main screen, or the device's second screen
+      -- (the main screen then keeps the whole den)
+      { key = "battle_pad", label = "BATTLE PAD", type = "choice", default = "main",
+        choices = { { "MAIN SCREEN", "main" }, { "SECOND SCREEN", "second" } },
+        visible_if = { key = "kanto_gear", equals = false } },
+      -- the bosses' strength: Solo raises their HP and attacks for a team of four of the player's own
+      -- (data/raid_rules.lua RAID.SOLO), Sword / Shield keeps the games' own numbers
+      { key = "difficulty", label = "RAID DIFFICULTY", type = "choice", default = "solo",
+        choices = { { "SOLO", "solo" }, { "SWORD / SHIELD", "swsh" } } },
+      -- how a move does on the boss, under its button: basic words ("Super effective"), full the
+      -- multiplier (2x, 1/2x), or nothing
+      { key = "move_info", label = "MOVE INFO", type = "choice", default = "basic",
+        choices = { { "BASIC", "basic" }, { "FULL", "full" }, { "OFF", "off" } } },
+      -- dens on the routes (off: none spawn; those already chosen stay saved)
+      { key = "dens", label = "RAID DENS", type = "toggle", default = true },
+      -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
+      -- raid was doing, shown while a den is open: for reporting slowdowns
+      { key = "perf_overlay", label = "PERF.OVERLAY", type = "toggle", default = false },
+      -- the language of the mod's own words (data/lang/<code>.lua); CUSTOM: the player's own file
+      -- (mod_cache/max_raids/lang_custom.lua in the game's save folder, written on first choosing it)
+      { key = "language", label = "LANGUAGE", type = "choice", default = "en",
+        choices = { { "ENGLISH", "en" }, { "にほんご", "ja" }, { "PORTUGUÊS", "pt" }, { "ESPAÑOL", "es" },
+          { "DEUTSCH", "de" }, { "CUSTOM", "custom" } } },
+    }
+    -- the labels and choices in the language (the LANGUAGE row's choices are each language's own name)
+    for _, row in ipairs(schema) do
+      row.label = T.cgame("option", row.label)
+      if row.key ~= "language" then
+        for _, choice in ipairs(row.choices or {}) do choice[1] = T.cgame("choice", choice[1]) end
+      end
+    end
+    mod.options:define(schema)
+  end
+  defineOptions()
+  mod.events:on("mod.options_changed", function(ev)
+    if not (ev and ev.mod == mod.id and ev.key == "language") then return end
+    T.setLanguage(language())
+    defineOptions()
+  end)
 
   local N = loadSibling(mod, "data/raid_rules.lua")
   local Bosses = loadSibling(mod, "data/raid_bosses.lua")
@@ -93,16 +133,40 @@ return function(mod)
     return
   end
   if HD then mod.hd = HD end
+  -- the battle's words in the language too (src/raid_sim.lua's events)
+  if type(Sim) == "table" then Sim.T = T end
+  -- Japanese in the raid's own fonts: LOVE's default face draws Latin only, so every font the raid
+  -- makes takes the engine's Plain Pixel (kana and CJK) as a fallback, at its size (as PlayNav's
+  -- src/cjk.lua); without the file, Latin as before
+  local CJK_PATH = "assets/fonts/plainpixel/PlainPixel-Regular.ttf"
+  local cjkFonts, cjkMissing = {}, false
+  local function cjk(font, px)
+    if cjkMissing or not (font and font.setFallbacks) then return font end
+    local key = math.floor((px or 12) + 0.5)
+    local fb = cjkFonts[key]
+    if not fb then
+      local ok, f = pcall(love.graphics.newFont, CJK_PATH, key)
+      if not ok or not f then
+        cjkMissing = true
+        mod.log:warn("no %s (%s): Japanese words draw as boxes; reinstall the game to restore it", CJK_PATH, tostring(f))
+        return font
+      end
+      fb = f
+      cjkFonts[key] = fb
+    end
+    pcall(font.setFallbacks, font, fb)
+    return font
+  end
 
   local Scene = nil
   do
-    local ok, sc = pcall(makeScene, mod, { Render3d = makeRender3d })
+    local ok, sc = pcall(makeScene, mod, { Render3d = makeRender3d, T = T })
     if ok and type(sc) == "table" then Scene = sc else mod.log:warn("the den failed to build: %s", tostring(sc)) end
   end
-  local Pad = makePad(mod, {})
+  local Pad = makePad(mod, { T = T, cjk = cjk })
   local Rewards = nil
   if makeRewards then
-    local ok, rw = pcall(makeRewards, mod, { N = N, Bosses = Bosses, Sprites = Sprites })
+    local ok, rw = pcall(makeRewards, mod, { N = N, Bosses = Bosses, Sprites = Sprites, T = T })
     if ok and type(rw) == "table" then Rewards = rw else mod.log:warn("the raid's rewards failed to build: %s", tostring(rw)) end
   end
   local Battle = nil
@@ -115,7 +179,7 @@ return function(mod)
       return ok and type(d) == "table" and d.exports or nil
     end
     local ok, bt = pcall(makeBattle, mod, { N = N, Bosses = Bosses, Sprites = Sprites, Gmax = Gmax, MaxPower = MaxPower,
-      TeamMoves = TeamMoves, dex = dex, difficulty = function() return difficultyForced or mod.options:get("difficulty") end })
+      TeamMoves = TeamMoves, dex = dex, T = T, difficulty = function() return difficultyForced or mod.options:get("difficulty") end })
     if ok and type(bt) == "table" then Battle = bt else mod.log:warn("the raid's battle failed to build: %s", tostring(bt)) end
     -- (the rewards read the TMs' moves through it)
     if Battle and Rewards then Rewards.battle = Battle end
@@ -124,7 +188,7 @@ return function(mod)
   local Dyna = nil
   if makeDyna then
     local ok, dy = pcall(makeDyna, mod, { N = N, Bosses = Bosses, Sprites = Sprites,
-      typeName = Battle and Battle.typeName or nil })
+      typeName = Battle and Battle.typeName or nil, T = T })
     if ok and type(dy) == "table" then
       Dyna = dy
       Dyna.install()
@@ -132,12 +196,12 @@ return function(mod)
       mod.log:warn("the Dynamax dens failed to build: %s", tostring(dy))
     end
   end
-  local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil }) or nil
+  local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil, T = T, cjk = cjk }) or nil
   local PadHide = makePadHide and makePadHide(mod) or nil
   -- the den screen's PC: the game's boxes, to choose a Pokemon from
   local Pick = nil
   if makePick then
-    local ok, pk = pcall(makePick, mod)
+    local ok, pk = pcall(makePick, mod, { T = T })
     if ok and type(pk) == "table" then Pick = pk else mod.log:warn("the den's PC failed to build: %s", tostring(pk)) end
   end
 
@@ -223,7 +287,7 @@ return function(mod)
   -- the raid notes are reported. Without it, nothing.
   local Achievements = nil
   if makeAchievements and AchievementData then
-    local ok, a = pcall(makeAchievements, mod, { data = AchievementData,
+    local ok, a = pcall(makeAchievements, mod, { data = AchievementData, T = T,
       stars = function(key) local b = Bosses[key]; return b and b.stars or nil end })
     if ok and type(a) == "table" then
       if a.install() then Achievements = a end
@@ -232,7 +296,7 @@ return function(mod)
     end
   end
 
-  Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD, Phases = Phases,
+  Raid = makeRaid(mod, { T = T, cjk = cjk, N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD, Phases = Phases,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax, TeamMoves = TeamMoves,
     Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene, Sheets = PixelFx,
       read = function(path) return mod:read(path) end }) or nil, MoveFx = MoveFx, Sounds = Sounds,
@@ -255,6 +319,8 @@ return function(mod)
     padOnSecond = padOnSecond,
     moveInfo = function() return moveInfoForced or mod.options:get("move_info") end,
     onOpen = function()
+      -- (CUSTOM's file read again, so an edit shows at the next den)
+      pcall(T.refresh)
       if Stack then
         local ok, err = pcall(Stack.push, LAYER_ID, Layer, { hideBelow = true, fullscreen = true })
         if not ok then mod.log:warn("the raid's layer could not open: %s", tostring(err)) end
@@ -284,7 +350,7 @@ return function(mod)
       end
       return modOption("national_dex_gen3", "clock_source")
     end
-    local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, Dyna = Dyna, open = function(den) return Raid.openDen(den) end,
+    local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, Dyna = Dyna, open = function(den) return Raid.openDen(den) end, T = T,
       clockSource = clockSource })
     if ok and type(dn) == "table" then
       Dens = dn
@@ -454,6 +520,10 @@ return function(mod)
 
   mod.exports.raid = Raid
   mod.exports.open = function(key, opts) return Raid.open(key, opts) end
+  -- the words' language ("en" ...; drivers: setLanguage(code) as the option does)
+  mod.exports.language = function() return T.language() end
+  mod.exports.setLanguage = function(code) local v = T.setLanguage(code); defineOptions(); return v end
+  mod.exports.T = T
   mod.exports.close = function() return Raid.close() end
   mod.exports.state = function() return Raid.state() end
   mod.exports.bosses = function() return Bosses.ORDER end

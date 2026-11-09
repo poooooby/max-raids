@@ -4,7 +4,7 @@
 -- (Damage.calc with an adapter, so the National Dex's abilities and move rules apply), Gen 3
 -- accuracy and speed, effectiveness, and what a move does besides its damage (by its Gen 3 effect).
 -- src/raid_sim.lua runs the turns over this; nothing here touches the save.
---   Bt = battle(mod, { N, Bosses, Sprites, Gmax, dex })   dex() -> national_dex_gen3's exports (moveExtra);
+--   Bt = battle(mod, { N, Bosses, Sprites, Gmax, dex, T })   dex() -> national_dex_gen3's exports (moveExtra);
 --   Gmax = data/raid_gmax.lua
 --   Bt.member(mon) -> battler ; Bt.boss(key, rng) -> battler ; Bt.adapter(rng) -> the sim's adapter
 --   Bt.TYPE_RGB[name] ; Bt.typeName(num)
@@ -15,6 +15,11 @@ return function(mod, deps)
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
   local Bt = {}
+
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = (deps and deps.T) or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
 
   -- an engine module (found ones kept: a mod's require makes garbage each call)
   local engineMods = {}
@@ -753,7 +758,7 @@ return function(mod, deps)
         local ok, nm = pcall(ItemsData.displayName, item)
         if ok and type(nm) == "string" and nm ~= "" then return titled(nm) end
       end
-      return "item"
+      return T("item")
     end
     -- whether a battler's nature dislikes a flavour (0 spicy .. 4 sour: a confusing berry confuses it)
     function A.dislikes(b, flavor)

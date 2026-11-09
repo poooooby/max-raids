@@ -22,9 +22,14 @@ return function(mod, deps)
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
   local sin, cos, pi, sqrt = math.sin, math.cos, math.pi, math.sqrt
+  -- the words' language (src/i18n.lua; deps.T): English as it is without it
+  local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
+  local T = deps.T or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
+    game = plainWords, t = plainWords }, { __call = function(_, s, ...) return plainWords(s, ...) end })
 
   local Rd = { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Fx = Fx, MoveFx = MoveFx }
   Rd.music_ = Music
+  Rd.T = T
   -- an animation frame lasts AnimationSpeed of these (the pack's metrics, Essentials' units)
   Rd.ANIM_UNIT_S = 1 / 20
 
@@ -615,7 +620,7 @@ return function(mod, deps)
   -- ------- the den screen: what a den holds today, and the four who go in
 
   -- the den screen (src/den_screen.lua): the four slots, PARTY / PC, START / EXIT
-  local Den = deps.makeDen and deps.makeDen(mod, { Rd = Rd, Bosses = Bosses, Battle = Battle, Pick = deps.Pick, Pad = Pad }) or nil
+  local Den = deps.makeDen and deps.makeDen(mod, { Rd = Rd, Bosses = Bosses, Battle = Battle, Pick = deps.Pick, Pad = Pad, T = T, cjk = deps.cjk }) or nil
   Rd.Den = Den
 
   -- the den screen takes no presses for this long after it opens
@@ -768,7 +773,7 @@ return function(mod, deps)
     if not (r and r.phase == "command") then return false end
     local back = r.cmd
     Rd.go("leaveq")
-    Rd.ask({ kind = "yesno", text = "Leave the den? It will be spent for the day.", cb = function(yes)
+    Rd.ask({ kind = "yesno", text = T("Leave the den? It will be spent for the day."), cb = function(yes)
       if not (r and r.phase == "leaveq") then return end
       if yes then return Rd.blowOut() end
       r.cmd, r.say = back, nil
@@ -781,7 +786,7 @@ return function(mod, deps)
     if not r then return false end
     r.blownT = r.t
     Rd.go("blown")
-    Rd.say("You were blown out of the den!")
+    Rd.say(T("You were blown out of the den!"))
     if Scene then
       Scene.shake(Rd.BLOWN.SHAKE, Rd.BLOWN.S)
       if Scene.kick then Scene.kick(6, 0.6) end
@@ -859,7 +864,7 @@ return function(mod, deps)
       if r.shiny and once("shiny", I.SHINY_AT) then Rd.shinySparkle(r.boss) end
       if once("say", I.SAY_AT) then
         local b = Bosses[r.key]
-        Rd.say((b and b.name or "The boss") .. " appeared!")
+        Rd.say(b and T("%s appeared!", b.name) or T("The boss appeared!"))
       end
       if r.cues.say then r.hud = min(1, r.hud + dt / I.HUD_S) end
       if once("member", I.MEMBER_AT) and Scene then Scene.shot("member", I.MEMBER_S, 1) end
@@ -1205,7 +1210,7 @@ return function(mod, deps)
         local id = Rd.POUCH_ORDER[i]
         if id then
           local n = pouchFree(id)
-          row.id, row.name, row.chip, row.right = id, Sim and Sim.ITEM_NAME[id] or id, "Item", "x" .. n
+          row.id, row.name, row.chip, row.right = id, Sim and Sim.ITEM_NAME[id] and T(Sim.ITEM_NAME[id]) or id, T("Item"), "x" .. n
           row.itemId = pouchItemId(id)
           row.rgb, row.live = { 0.35, 0.6, 0.85 }, n > 0
         else
@@ -1221,8 +1226,8 @@ return function(mod, deps)
           row.member, row.name, row.hit = i, m.b.name, hit or nil
           row.eff = hit and c.allPick == "spread" and effOn(tmv, m.b) or nil
           -- (the second screen's cell has no chip: the word under its name)
-          row.note = here and not hit and "Immune" or nil
-          row.chip = not here and "Out" or (not hit and "Immune") or "HP"
+          row.note = here and not hit and T("Immune") or nil
+          row.chip = not here and T("Out") or (not hit and T("Immune")) or T("HP")
           row.right = ("%d/%d"):format(hp, mhp)
           row.rgb, row.live = hpRgb(hp / mhp), hit and true or false
         else
@@ -1231,16 +1236,16 @@ return function(mod, deps)
       elseif c.menu == "target" and c.moveSlot then
         -- (an ally move: the others on the field; Pollen Puff's own row is the boss)
         local m = r.members[i]
-        local T = b.moves[c.moveSlot] and b.moves[c.moveSlot].team or {}
-        if i == c.actor and T.orFoe and r.boss then
+        local TM = b.moves[c.moveSlot] and b.moves[c.moveSlot].team or {}
+        if i == c.actor and TM.orFoe and r.boss then
           local hp, mhp = tonumber(r.boss.mon.hp) or 0, max(1, tonumber(r.boss.mon.maxHp) or 1)
-          row.boss, row.name, row.chip, row.right = true, r.boss.name, "Foe", ("%d%%"):format(math.ceil(100 * hp / mhp))
+          row.boss, row.name, row.chip, row.right = true, r.boss.name, T("Foe"), ("%d%%"):format(math.ceil(100 * hp / mhp))
           row.eff = c.bossEff
           row.rgb, row.live = { 0.85, 0.25, 0.35 }, true
         elseif m and m.b then
           local hp, mhp = tonumber(m.b.mon.hp) or 0, max(1, tonumber(m.b.mon.maxHp) or 1)
           row.member, row.name = i, m.b.name
-          row.chip, row.right = (m.b.down or 0) > 0 and "Out" or "HP", ("%d/%d"):format(hp, mhp)
+          row.chip, row.right = (m.b.down or 0) > 0 and T("Out") or T("HP"), ("%d/%d"):format(hp, mhp)
           row.rgb, row.live = hpRgb(hp / mhp), i ~= c.actor and r.sim ~= nil and r.sim:present(i)
         else
           list[i] = nil
@@ -1250,7 +1255,7 @@ return function(mod, deps)
         if m and m.b then
           local hp, mhp = tonumber(m.b.mon.hp) or 0, max(1, tonumber(m.b.mon.maxHp) or 1)
           row.member, row.name = i, m.b.name
-          row.chip, row.right = (m.b.down or 0) > 0 and "Out" or "HP", ("%d/%d"):format(hp, mhp)
+          row.chip, row.right = (m.b.down or 0) > 0 and T("Out") or T("HP"), ("%d/%d"):format(hp, mhp)
           row.rgb, row.live = hpRgb(hp / mhp), canTake(c.item, i)
         else
           list[i] = nil
@@ -1900,7 +1905,7 @@ return function(mod, deps)
     local most = 0
     for _, t in ipairs(targets) do most = max(most, t.hps and #t.hps or 0) end
     spec = Rd.manyHits(spec, most)
-    local words = #(e.text or "") / Rd.MSG.CPS + 0.25
+    local words = Rd.chars(e.text) / Rd.MSG.CPS + 0.25
     local gmax = mv and mv.isGmax and not mv.guard
     local at = r.t + words + (gmax and Rd.GMAX_CHARGE_S or 0)
     local K = Fx.KIND[(spec[1] == "drop" and spec.shape == "slab") and "slab" or spec[1]] or Fx.KIND.slam
@@ -2144,7 +2149,7 @@ return function(mod, deps)
         if e.hp then e.who.dispTarget = e.hp end
         if e.text then
           Rd.say(e.text)
-          r.evDur = max(#e.text / Rd.MSG.CPS + E.HOLD_S, (up and Rd.DMAX.CHARGE_S or 0) + Rd.DMAX.GROW_S + 0.3)
+          r.evDur = max(Rd.chars(e.text) / Rd.MSG.CPS + E.HOLD_S, (up and Rd.DMAX.CHARGE_S or 0) + Rd.DMAX.GROW_S + 0.3)
         else
           r.say = nil
           r.evDur = Rd.DMAX.GROW_S
@@ -2239,7 +2244,7 @@ return function(mod, deps)
     end
     if e.text then
       Rd.say(e.text)
-      r.evDur = #e.text / Rd.MSG.CPS + E.HOLD_S
+      r.evDur = Rd.chars(e.text) / Rd.MSG.CPS + E.HOLD_S
       -- (a move's use lasts until its look has landed)
       if e.kind == "use" and r.anim then
         r.evDur = max(r.evDur, r.anim.at - r.t + (r.anim.last or r.anim.impact or r.anim.len) + 0.15)
@@ -2316,7 +2321,7 @@ return function(mod, deps)
     if not (r and r.phase == "catch") then return false end
     if which == "catch" then
       if #r.cmd.balls == 0 then
-        Rd.say("You don't have any Pok\195\169 Balls...")
+        Rd.say(T("You don't have any Poké Balls..."))
         return false
       end
       r.say = nil
@@ -2367,9 +2372,9 @@ return function(mod, deps)
 
   -- the choices as the battle pad's pills (each its emblem), the chevron at the selected one
   local CATCH_ITEMS = {
-    catch = { id = "catch", word = "Catch", rgb = { 0.93, 0.18, 0.42 } },
-    leave = { id = "leave", word = "Don't Catch", rgb = { 0.6, 0.6, 0.66 } },
-    use = { id = "use", word = "Use", rgb = { 0.93, 0.18, 0.42 } },
+    catch = { id = "catch", word = T.mark("Catch"), rgb = { 0.93, 0.18, 0.42 } },
+    leave = { id = "leave", word = T.mark("Don't Catch"), rgb = { 0.6, 0.6, 0.66 } },
+    use = { id = "use", word = T.mark("Use"), rgb = { 0.93, 0.18, 0.42 } },
   }
   local function catchPill(G, t, item, sel, live, alone)
     if Pad and Pad.commandPill then return Pad.commandPill(G, t, item, sel, live, alone) end
@@ -2379,7 +2384,7 @@ return function(mod, deps)
     local f = Rd.font(t.h * 0.5)
     G.setFont(f)
     if sel then G.setColor(1, 1, 1, 1) elseif live then G.setColor(0.08, 0.08, 0.1, 1) else G.setColor(0.6, 0.6, 0.62, 1) end
-    G.printf(item.word, t.x, t.y + (t.h - f:getHeight()) / 2, t.w, "center")
+    G.printf(T(item.word), t.x, t.y + (t.h - f:getHeight()) / 2, t.w, "center")
   end
 
   -- a round arrow button, d across at (x, y) top left: the face as the pad's, a dark triangle
@@ -2436,7 +2441,7 @@ return function(mod, deps)
         local fN = Rd.font(hh * 0.42)
         G.setFont(fN)
         local nm = bl.name or "?"
-        if (bl.n or 1) > 1 and not nm:match("s$") then nm = nm .. "s" end
+        if (bl.n or 1) > 1 and not nm:match("s$") then nm = T.c("plural", "%ss", nm) end
         local is = hh * 0.62
         local nw = fN:getWidth(nm)
         local gx = bx + (bw - nw - is - hh * 0.15) / 2
@@ -2632,7 +2637,7 @@ return function(mod, deps)
 
   -- the throw's timeline (update step): cues for the camera, effects and words; the outcome
   local function stepThrow()
-    local T, th = Rd.THROW, r.throw
+    local TH, th = Rd.THROW, r.throw
     local u = r.t - th.t0
     local M = throwTimes()
     local H, B, Gr, R, bh = throwPlaces()
@@ -2643,20 +2648,20 @@ return function(mod, deps)
     end
     -- the boss: drawn in through the open ball
     if u < M.suck then r.shrink = 1
-    elseif u < M.close then r.shrink = 1 - (u - M.suck) / T.SUCK
+    elseif u < M.close then r.shrink = 1 - (u - M.suck) / TH.SUCK
     else r.shrink = 0 end
     local b = Bosses[r.key]
-    local name = b and b.name or "It"
+    local name = b and b.name or T("It")
     local Ga = { X = Gr.X, Y = Gr.Y, Z = Gr.Z, h = R * 2, foot = 0 }
     if Sounds then
       local C = Sounds.CATCH
       if once("seThrow", M.fly) then Rd.se(C.throw) end
       if once("seOpen", M.open) then Rd.se(C.open) end
       if once("seSuck", M.suck) then Rd.se(C.suck) end
-      if once("seClose", M.close + T.CLOSE * 0.6) then Rd.se(C.close) end
+      if once("seClose", M.close + TH.CLOSE * 0.6) then Rd.se(C.close) end
       if once("seLand", M.land) then Rd.se(C.land) end
-      for k = 1, T.CHECKS do
-        if once("seWob" .. k, M.check + (k - 1) * T.CHECK) then Rd.se(C.wobble) end
+      for k = 1, TH.CHECKS do
+        if once("seWob" .. k, M.check + (k - 1) * TH.CHECK) then Rd.se(C.wobble) end
       end
       if th.caught and once("seClick", M.done) then
         Rd.se(C.click)
@@ -2681,10 +2686,10 @@ return function(mod, deps)
         Scene.shake(0.12, 0.4)
       end
     end
-    if once("closed", M.close + T.CLOSE * 0.6) and Fx then
+    if once("closed", M.close + TH.CLOSE * 0.6) and Fx then
       Fx.flash({ 1, 0.6, 0.2 }, 0.45, 0.3, r.t)
     end
-    if once("fall", M.fall) and Scene then Scene.shot("catch", T.FALL) end
+    if once("fall", M.fall) and Scene then Scene.shot("catch", TH.FALL) end
     if once("land", M.land) then
       -- it lands: the ground thrown up round it
       if Fx then
@@ -2758,9 +2763,9 @@ return function(mod, deps)
           if p then p.grow = 0 end
         end
       end
-      if once("say", M.gotcha + 0.3) then Rd.say(("Gotcha! %s was caught!"):format(name)) end
+      if once("say", M.gotcha + 0.3) then Rd.say(T("Gotcha! %s was caught!", name)) end
     elseif once("burst", M.done) then
-      Rd.say(("Oh no! %s broke free!"):format(name))
+      Rd.say(T("Oh no! %s broke free!", name))
       th.burstAt = r.t
       if Fx then
         Fx.barrierBreak({ X = Gr.X, Y = Gr.Y, Z = Gr.Z, h = R * 2, foot = 0 }, r.t)
@@ -2778,15 +2783,15 @@ return function(mod, deps)
     end
     local endAt = th.caught and (M.gotcha + 0.3) or M.done
     th.said.out = u >= endAt
-    local holdUntil = endAt + (#(r.say or "") / Rd.MSG.CPS) + 1.2 + (th.caught and 0 or 2.2)
+    local holdUntil = endAt + (Rd.chars(r.say) / Rd.MSG.CPS) + 1.2 + (th.caught and 0 or 2.2)
     if th.caught and th.info and th.info.toPC and u >= holdUntil and not th.said.pc then
       th.said.pc = true
       th.pcAt = u
-      Rd.say(("%s was sent to the PC."):format(name))
+      Rd.say(T("%s was sent to the PC.", name))
     end
     if not th.caught and u >= M.done + 2.0 and not th.said.gone then
       th.said.gone = true
-      Rd.say(("%s disappeared..."):format(name))
+      Rd.say(T("%s disappeared...", name))
       if Sounds then Rd.se(Sounds.CATCH.gone) end
     end
     local doneAt = holdUntil + (th.pcAt and 1.6 or 0)
@@ -2839,15 +2844,15 @@ return function(mod, deps)
     Rd.say(t.text or "")
     if t.kind == "yesno" then
       r.cmd = { menu = "yesno", cursor = 1, chosen = {}, moveList = {
-        { name = "Yes", chip = "", right = "", rgb = { 0.2, 0.75, 0.35 }, live = true, yes = true },
-        { name = "No", chip = "", right = "", rgb = { 0.85, 0.3, 0.3 }, live = true, yes = false },
+        { name = T("Yes"), chip = "", right = "", rgb = { 0.2, 0.75, 0.35 }, live = true, yes = true },
+        { name = T("No"), chip = "", right = "", rgb = { 0.85, 0.3, 0.3 }, live = true, yes = false },
       } }
     end
   end
   function Rd.answer(yes)
     local t = r and r.ask
     if not t then return false end
-    if t.kind == "msg" and r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS < #r.say then return false end
+    if t.kind == "msg" and r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS < Rd.chars(r.say) then return false end
     r.ask, r.say = nil, nil
     if t.cb then t.cb(yes) end
     return true
@@ -3014,7 +3019,7 @@ return function(mod, deps)
       or (input:wasPressed("left") and "left") or (input:wasPressed("right") and "right") or nil
   end
   -- the words in the band typed out (A / a tap goes on only then)
-  local function sayTyped() return r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS >= #r.say end
+  local function sayTyped() return r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS >= Rd.chars(r.say) end
 
   -- ------- the buttons, by phase (data/raid_phases.lua `input`)
   local INPUT = {}
@@ -3274,6 +3279,7 @@ return function(mod, deps)
     if not f then
       local ok, made = pcall(love.graphics.newFont, px)
       f = ok and made or love.graphics.getFont()
+      if ok and deps.cjk then deps.cjk(made, px) end
       fonts[px] = f
     end
     return f
@@ -3301,6 +3307,35 @@ return function(mod, deps)
 
   local bossPic, memberPicsShown = {}, {}
 
+  -- words counted in characters (UTF-8: continuation bytes not counted), the last one's count
+  -- kept, as the band asks every frame
+  local charsOf, charsN = nil, 0
+  function Rd.chars(s)
+    if not s then return 0 end
+    if s ~= charsOf then
+      local n = 0
+      for k = 1, #s do
+        local b = s:byte(k)
+        if b < 128 or b >= 192 then n = n + 1 end
+      end
+      charsOf, charsN = s, n
+    end
+    return charsN
+  end
+  -- the byte where the first n characters of s end
+  function Rd.charsEnd(s, n)
+    if n <= 0 then return 0 end
+    local seen = 0
+    for k = 1, #s do
+      local b = s:byte(k)
+      if b < 128 or b >= 192 then
+        seen = seen + 1
+        if seen > n then return k - 1 end
+      end
+    end
+    return #s
+  end
+
   -- the message band (Sword / Shield's): dark gray across the whole width near the foot, the words
   -- white, typed out at CPS characters a second. Sizes in the screen's height (`h`), the margin in its
   -- width, measured off a 1784 x 998 capture: the band 172 tall with 23 under it, the words' left
@@ -3315,9 +3350,9 @@ return function(mod, deps)
   -- dark track. It shows while the words are about the boss (r.bossShow, eased into r.bossA).
   Rd.BOSS_HUD = { NAME = 0.058, NAME_Y = 0.028, BAR_Y = 0.116, BAR_W = 0.513, BAR_H = 0.008 }
   local STATUS_TAG = {
-    BRN = { "BURNED", { 0.95, 0.45, 0.15 } }, PAR = { "PARALYZED", { 0.85, 0.7, 0.1 } },
-    PSN = { "POISONED", { 0.6, 0.3, 0.75 } }, TOX = { "POISONED", { 0.6, 0.3, 0.75 } },
-    SLP = { "ASLEEP", { 0.55, 0.55, 0.6 } }, FRZ = { "FROZEN", { 0.35, 0.75, 0.9 } },
+    BRN = { T.mark("BURNED"), { 0.95, 0.45, 0.15 } }, PAR = { T.mark("PARALYZED"), { 0.85, 0.7, 0.1 } },
+    PSN = { T.mark("POISONED"), { 0.6, 0.3, 0.75 } }, TOX = { T.mark("POISONED"), { 0.6, 0.3, 0.75 } },
+    SLP = { T.mark("ASLEEP"), { 0.55, 0.55, 0.6 } }, FRZ = { T.mark("FROZEN"), { 0.35, 0.75, 0.9 } },
   }
   local glowOff = { { -2, 0 }, { 2, 0 }, { 0, -2 }, { 0, 2 }, { -1.5, -1.5 }, { 1.5, -1.5 }, { -1.5, 1.5 }, { 1.5, 1.5 } }
   -- part: "top" (the boss's name and bar) or "say" (the words' band at the foot); nil both
@@ -3345,7 +3380,8 @@ return function(mod, deps)
       local st = r.boss and r.boss.status and STATUS_TAG[r.boss.status]
       if st then
         local tf = font(h * 0.02)
-        local tw, th = tf:getWidth(st[1]) + h * 0.03, h * 0.026
+        local word = T(st[1])
+        local tw, th = tf:getWidth(word) + h * 0.03, h * 0.026
         local tx, ty = nx + nw + h * 0.008, ny + f:getHeight() * 0.62 - th / 2
         local c = st[2]
         G.setColor(c[1], c[2], c[3], a)
@@ -3376,7 +3412,7 @@ return function(mod, deps)
           G.setLineWidth(1)
         end
         G.setFont(tf)
-        G.print(st[1], tx + h * 0.024, ty + (th - tf:getHeight()) / 2)
+        G.print(word, tx + h * 0.024, ty + (th - tf:getHeight()) / 2)
       end
       -- the bar: green / yellow / red over a dark track
       local bw, bh = h * B.BAR_W, h * B.BAR_H
@@ -3414,14 +3450,9 @@ return function(mod, deps)
       G.setColor(1, 1, 1, 0.05)
       G.polygon("fill", 0, by, h * 0.055, by, h * 0.022, by + bh, 0, by + bh)
       G.polygon("fill", w - h * 0.05, by, w, by, w, by + bh, w - h * 0.085, by + bh)
+      -- (typed by characters, never cut inside one: Japanese at the same pace as English)
       local n = floor((r.t - (r.sayT or 0)) * M.CPS)
-      -- (never cut inside a character: past any UTF-8 continuation bytes)
-      while n < #r.say and n > 0 do
-        local byte = r.say:byte(n + 1)
-        if byte < 128 or byte >= 192 then break end
-        n = n + 1
-      end
-      local str = n >= #r.say and r.say or r.say:sub(1, n)
+      local str = n >= Rd.chars(r.say) and r.say or r.say:sub(1, Rd.charsEnd(r.say, n))
       local lx = w * M.LEFT
       G.setFont(font(h * M.TEXT))
       G.setColor(1, 1, 1, 1)
@@ -3742,9 +3773,9 @@ return function(mod, deps)
     G.rectangle("fill", 0, h * 0.92, w, h * 0.08)
     -- the black bar and the title tab
     local b = Bosses[r.key]
-    local name = b and b.name or "It"
+    local name = b and b.name or T("It")
     local th = r.throw
-    local title = (th and th.caught) and ("You caught %s!"):format(name) or ("You defeated %s!"):format(name)
+    local title = (th and th.caught) and T("You caught %s!", name) or T("You defeated %s!", name)
     G.setColor(0, 0, 0, a)
     G.rectangle("fill", 0, 0, w, h * 0.06)
     G.polygon("fill", w * 0.43, h * 0.06, w, h * 0.06, w, h * 0.125, w * 0.46, h * 0.125)
@@ -3857,7 +3888,7 @@ return function(mod, deps)
       G.setLineWidth(1)
     end
     G.setColor(onNext and 1 or 0, onNext and 1 or 0, onNext and 1 or 0, a)
-    G.printf("Next", nx, ny + nh / 2 - fR:getHeight() / 2, nw, "center")
+    G.printf(T("Next"), nx, ny + nh / 2 - fR:getHeight() / 2, nw, "center")
     cardWhere.next.x, cardWhere.next.y, cardWhere.next.w, cardWhere.next.h = nx, ny, nw, nh
     G.pop()
   end
