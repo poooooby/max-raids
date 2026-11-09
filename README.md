@@ -68,8 +68,8 @@ you won: Exp. Candies, TMs, berries and more.*
   evolved: as you'd find it at 1★ and 2★, one evolution on at 3★, fully evolved at 4★ and 5★.
 - 🟣 **Purple beams:** the rare beam, about one den in ten: a Gigantamax Pokémon.
 - 📅 **A new raid every day:** each den holds a new Pokémon each day, or sits quiet. A den you've
-  beaten goes quiet until tomorrow. The day turns over at midnight by the same clock as National
-  Dex Gen 3's **Clock Source**: your device's time when it's set to Device, the in-game clock on
+  beaten goes quiet until tomorrow. The day turns over at midnight by the same clock as
+  WoobleDex's **Clock Source**: your device's time when it's set to Device, the in-game clock on
   Ruby, Sapphire and Emerald when it's set to In-game.
 - ⭐ **Harder raids as you go:** the stars follow your Gym Badges as in Sword and Shield: 1★–2★
   with one or two, 1★–3★ with three, 2★–3★ with four, 3★–4★ with five or six, and 3★–5★
@@ -166,7 +166,8 @@ you won: Exp. Candies, TMs, berries and more.*
   cure statuses and confusion, raise a stat in a pinch or restore PP; Focus Band, Quick Claw,
   BrightPowder, King's Rock, Shell Bell, White Herb, Mental Herb and Macho Brace do what they do in
   battle. A berry eaten in a raid is still in your Pokémon's hands afterward.
-- 🎨 **And looks the part:** a multi-hit move lands every blow, the HP bar dropping with each; Fly and
+- 🎨 **And looks the part:** a multi-hit move lands its blows one at a time, each with its own hit
+  and the HP bar dropping, then says how many times it hit; Fly and
   Bounce take your Pokémon up out of sight, Dig and Dive into the ground or the water; draining
   moves pull their light back. Pixel art slashes, sparks, splashes and critical hits burst on the
   target in the move's colours, and sleep, burns, poison, paralysis, freezing, confusion and love
