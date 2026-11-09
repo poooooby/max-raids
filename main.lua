@@ -195,7 +195,14 @@ return function(mod)
   local Layer = { isMenu = true }
   function Layer.handleInput(input) if Raid then Raid.input(input) end end
   function Layer.update(dt)
-    if Raid then Raid.update(dt) end
+    if Raid then
+      -- (a fault in the raid closes it, back to the field, rather than leaving the player stuck)
+      local ok, err = pcall(Raid.update, dt)
+      if not ok then
+        mod.log:warn("the raid failed and was closed (please report this with the log): %s", tostring(err))
+        pcall(Raid.close)
+      end
+    end
     -- (the second screen's frame: drawn here, outside any draw)
     if Screen2 then
       local ok, err = pcall(Screen2.update)

@@ -1869,7 +1869,7 @@ function Sim:g3After(ev, att, def, mv, landed)
   if g == "ROLLOUT" then
     if not landed then att.lock = nil
     elseif not att.lock then att.lock = { mv = mv, rollout = 2 }
-    else
+    elseif att.lock.rollout then
       att.lock.rollout = att.lock.rollout + 1
       if att.lock.rollout > 5 then att.lock = nil end
     end

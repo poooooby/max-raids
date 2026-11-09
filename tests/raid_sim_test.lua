@@ -1688,6 +1688,14 @@ do
   b2.lastMove = b2.moves[1]
   local ev = s2:turn({ { move = 1 } })
   check(not b2.disabled and has(ev, "failed"), "Disable fails on the Dynamaxed boss")
+  -- Encore onto Rollout: the encored Rollout lands under the encore's lock
+  local boss3 = battler("Boss", 5000, 200, { g3("Encore", "ENCORE") }, true)
+  local m3 = battler("M1", 100, 10, { g3("Rollout", "ROLLOUT", { power = 30 }) })
+  m3.lastMove = m3.moves[1]
+  local s3 = Sim.new{ boss = boss3, members = { m3 }, adapter = adapter(), rng = rngOf(5) }
+  local ok3, err3 = pcall(function() s3:turn({ { move = 1 } }) end)
+  check(ok3, "Encore onto Rollout: the turn runs (" .. tostring(err3) .. ")")
+  check(ok3 and boss3.mon.hp < 5000 and m3.lock ~= nil, "...Rollout strikes, the member still locked")
 end
 
 -- Perish Song spares the Dynamaxed boss; Destiny Bond does nothing to it; Yawn; Charge; Spite

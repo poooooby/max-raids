@@ -62,3 +62,4 @@ tests/drivers/move_effects_probe.lua
 tests/drivers/held_items_probe.lua
 tests/drivers/looks_probe.lua
 tests/drivers/looks_audit.lua
+tests/drivers/loss_probe.lua

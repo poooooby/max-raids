@@ -814,7 +814,11 @@ return function(mod, deps)
         Rd.startCommand(true)
       end
     end
-    if r.phase == "battle" then Rd.playEvents() end
+    if r.phase == "battle" then
+      Rd.playEvents()
+      -- (a lost raid's last words close it)
+      if not r then return end
+    end
     if r.phase == "blown" and r.t - (r.blownT or r.t) >= Rd.BLOWN.S then
       Rd.close()
       return
