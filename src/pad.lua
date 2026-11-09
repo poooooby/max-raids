@@ -914,7 +914,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- A touch screen: no button shows a selection; one held under a finger is pressed in - lower, its
   -- shadow gone, a dark inner edge along its top - and letting go on it picks it. The cursor (on the
   -- top left at first) shows only once the D-pad moves it; a tap then moves it like a press.
-  --   Pad.drawSecond(G, w, h, r, held) ; Pad.hitSecond(x, y) -> an id as Pad.hit's, or nil
+  --   Pad.drawSecond(G, w, h, r, held) ; Pad.hitSecond(x, y) -> an id as Pad.hit's, or "panel"
 
   local sWhere = { cells = {}, back = {}, dynamax = {} }
   Pad.sWhere = sWhere
@@ -1417,7 +1417,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     for _, t in ipairs(sWhere.cells) do
       if inRect(x, y, t) then return t.id end
     end
-    return nil
+    -- (off the buttons: still a press, for what goes on at any press - the words, the card)
+    return "panel"
   end
 
   return Pad

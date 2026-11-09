@@ -63,3 +63,4 @@ tests/drivers/held_items_probe.lua
 tests/drivers/looks_probe.lua
 tests/drivers/looks_audit.lua
 tests/drivers/loss_probe.lua
+tests/raid_phases_test.lua

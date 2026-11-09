@@ -64,6 +64,7 @@ return function(mod)
   local Gmax = loadSibling(mod, "data/raid_gmax.lua")
   local MaxPower = loadSibling(mod, "data/raid_maxpower.lua")
   local TeamMoves = loadSibling(mod, "data/raid_team_moves.lua")
+  local Phases = loadSibling(mod, "data/raid_phases.lua")
   local MusicData = loadSibling(mod, "data/raid_music.lua")
   local makeMusic = loadSibling(mod, "src/raid_music.lua")
   local HD = loadSibling(mod, "src/hd.lua")
@@ -231,7 +232,7 @@ return function(mod)
     end
   end
 
-  Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD,
+  Raid = makeRaid(mod, { N = N, Bosses = Bosses, Sprites = Sprites, Scene = Scene, Pad = Pad, HD = HD, Phases = Phases,
     BattlerHud = BattlerHud, Battle = Battle, Sim = type(Sim) == "table" and Sim or nil, Gmax = Gmax, TeamMoves = TeamMoves,
     Rewards = Rewards, Fx = makeFx and makeFx({ Scene = Scene, Sheets = PixelFx,
       read = function(path) return mod:read(path) end }) or nil, MoveFx = MoveFx, Sounds = Sounds,

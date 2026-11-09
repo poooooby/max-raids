@@ -487,6 +487,56 @@ return function(mod, deps)
   function Rd.active() return r ~= nil end
   function Rd.current() return r end
 
+  -- ------- the raid's phases and menus (data/raid_phases.lua): Rd.go and Rd.setMenu are the only
+  -- ways either changes; each change is checked against the data's `to` (a move it does not list is
+  -- logged, never refused) and kept in r.trail, the last TRAIL_N changes, for Rd.state() and drivers
+
+  local Phases = deps.Phases or { PHASES = {}, MENUS = {} }
+  Rd.PHASES, Rd.MENUS = Phases.PHASES, Phases.MENUS
+  Rd.TRAIL_N = 16
+  local NO_ROW = {}
+  -- the current phase's row (an empty one between raids or for a phase the data lacks)
+  local function phaseRow() return r and Rd.PHASES[r.phase or ""] or NO_ROW end
+  Rd.phaseRow = phaseRow
+  local function remember(kind, from, to)
+    local tr = r.trail
+    if not tr then tr = {}; r.trail = tr end
+    if #tr >= Rd.TRAIL_N then table.remove(tr, 1) end
+    tr[#tr + 1] = { t = r.t or 0, kind = kind, from = from, to = to }
+  end
+  function Rd.go(to)
+    if not r then return false end
+    local from = r.phase
+    if from == to then return true end
+    local row = from and Rd.PHASES[from]
+    if not Rd.PHASES[to] then
+      mod.log:warn("raid phase %q is not in data/raid_phases.lua; add it there", tostring(to))
+    elseif row and not (row.to and row.to[to]) then
+      mod.log:warn("raid phase %s -> %s is not listed in data/raid_phases.lua; add it to %s.to if it is meant",
+        tostring(from), tostring(to), tostring(from))
+    end
+    r.phase, r.phaseT = to, r.t or 0
+    remember("phase", from, to)
+    -- (the catch's menu is done with once it is left: nothing after it reads a stale one)
+    if from == "catch" and r.cmd and (r.cmd.menu == "catchq" or r.cmd.menu == "ballbox") then r.cmd = nil end
+    return true
+  end
+  -- the command menu (r.cmd.menu) set, its cursor with it; the menu it came from kept for Back
+  function Rd.setMenu(menu, cursor)
+    local c = r and r.cmd
+    if not c then return false end
+    if not Rd.MENUS[menu] then
+      mod.log:warn("raid menu %q is not in data/raid_phases.lua; add it there", tostring(menu))
+    end
+    if c.menu ~= menu then
+      c.from = c.menu
+      remember("menu", c.menu, menu)
+    end
+    c.menu = menu
+    if cursor then c.cursor = cursor end
+    return true
+  end
+
   -- the boss's music: the first of these the game has
   Rd.SONGS = { "MUS_VS_RAYQUAZA", "MUS_VS_MEWTWO", "MUS_VS_REGI", "MUS_VS_LEGEND", "MUS_RG_VS_LEGEND", "MUS_VS_CHAMPION" }
   local function playSong(names)
@@ -537,7 +587,8 @@ return function(mod, deps)
   -- the raid itself begins: the intro from the close-up on the party
   local function begin(members)
     if Scene and Scene.resetEffects then Scene.resetEffects() end
-    r.phase, r.t, r.members, r.cues, r.hud = "intro", 0, members, {}, 0
+    r.t, r.members, r.cues, r.hud = 0, members, {}, 0
+    Rd.go("intro")
     r.say = nil
     setupBattle(members)
     -- (the sounds to bake ahead: the list grows by the four who went in, Rd.stepWarm)
@@ -596,7 +647,8 @@ return function(mod, deps)
     if r then return false, "busy" end
     if type(den) ~= "table" then return false, "no den" end
     if not Den then return false, "no den screen" end
-    r = { phase = "den", den = den, key = den.active and not den.done and den.boss or nil, t = 0, cues = {}, hud = 0 }
+    r = { den = den, key = den.active and not den.done and den.boss or nil, t = 0, cues = {}, hud = 0 }
+    Rd.go("den")
     Den.open(r)
     if r.key and not Rd.load(r.key) then r.key = nil end
     -- (what the den holds of itself, for putting a Dynamax Crystal away again)
@@ -715,18 +767,20 @@ return function(mod, deps)
   function Rd.askLeave()
     if not (r and r.phase == "command") then return false end
     local back = r.cmd
-    r.phase = "leaveq"
+    Rd.go("leaveq")
     Rd.ask({ kind = "yesno", text = "Leave the den? It will be spent for the day.", cb = function(yes)
       if not (r and r.phase == "leaveq") then return end
       if yes then return Rd.blowOut() end
-      r.phase, r.cmd, r.say = "command", back, nil
+      r.cmd, r.say = back, nil
+      Rd.go("command")
     end })
     r.cmd.cursor = 2
     return true
   end
   function Rd.blowOut()
     if not r then return false end
-    r.phase, r.blownT = "blown", r.t
+    r.blownT = r.t
+    Rd.go("blown")
     Rd.say("You were blown out of the den!")
     if Scene then
       Scene.shake(Rd.BLOWN.SHAKE, Rd.BLOWN.S)
@@ -897,7 +951,7 @@ return function(mod, deps)
     if Fx and Fx.settle and r then Fx.settle(r.t) end
     if not r then return false end
     r.turn = (r.turn or 0) + 1
-    r.phase = "command"
+    Rd.go("command")
     r.cmd = { chosen = {}, cursor = 1, menu = "main" }
     if r.sim and not r.sim.field then r.fieldShown = nil end
     -- (the turn's guards and protections are down: the turn is over)
@@ -1239,7 +1293,7 @@ return function(mod, deps)
     r.events = r.sim:turn(choices)
     r.evI, r.evT, r.evDur = 0, r.t, 0
     r.bossShow, r.rows = false, {}
-    r.phase = "battle"
+    Rd.go("battle")
     return true
   end
 
@@ -1320,7 +1374,7 @@ return function(mod, deps)
     return t
   end
   function Rd.teamState()
-    if not r or r.phase == "rewards" or r.phase == "catch" or r.phase == "throw" or r.phase == "after" or r.throw then return nil end
+    if not r or not phaseRow().team or r.throw then return nil end
     local T = teamState
     for k = #T.team, 1, -1 do T.team[k] = nil end
     for k = #T.protect, 1, -1 do T.protect[k] = nil end
@@ -1389,7 +1443,8 @@ return function(mod, deps)
   -- EXTRA_S: the warm-up's time a frame added to the engine's own (Warm.BUDGET, 2 ms) in those
   -- phases, so the list is through by the first turn; none in a frame after one over SLOW_FRAME_S,
   -- nor for REST_S after an extra that ran over twice its time (a piece of a bake took longer).
-  Rd.WARM = { PHASES = { den = true, intro = true, command = true }, EXTRA_S = 0.004,
+  -- (the phases it runs in: data/raid_phases.lua `warm`)
+  Rd.WARM = { EXTRA_S = 0.004,
     SLOW_FRAME_S = 1 / 50, REST_S = 0.5, DROP_FRAMES = 22050 }
   local kept = {}   -- the SE's number -> { src, mono }
   local ModAudio = engine("src.core.game3.mod_audio")
@@ -1575,7 +1630,7 @@ return function(mod, deps)
   -- job on the same warm-up), one at a time
   function Rd.stepWarm()
     if not (r and Audio and Audio.prewarmSe and Warm and SeIds and SeIds.resolve) then return end
-    if not Rd.WARM.PHASES[r.phase or ""] then return end
+    if not phaseRow().warm then return end
     local w = r.warm
     if not w then
       w = warmList()
@@ -1713,8 +1768,8 @@ return function(mod, deps)
     end
   end
   if Fx and Scene then
-    Scene.onBack = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "back", r.t) end end
-    Scene.onMid = function(G2) if r and r.phase ~= "rewards" then Fx.drawLayer(G2, "mid", r.t) end end
+    Scene.onBack = function(G2) if r and phaseRow().fx then Fx.drawLayer(G2, "back", r.t) end end
+    Scene.onMid = function(G2) if r and phaseRow().fx then Fx.drawLayer(G2, "mid", r.t) end end
   end
 
   -- a look made for the whole party, for a move with one target (a Max Move): a wave of water / fire /
@@ -2220,7 +2275,7 @@ return function(mod, deps)
   -- Don't Catch; Catch opens the ball box - the ball's name, how many, left / right through every ball
   -- the bag holds, its description, Use. No chance is shown.
   function Rd.startCatch()
-    r.phase = "catch"
+    Rd.go("catch")
     -- (the battle's last words have had their time: the choice comes up at once, its taps taken)
     r.say = nil
     r.events, r.rows, r.bossShow = nil, {}, true
@@ -2290,7 +2345,7 @@ return function(mod, deps)
       r.shiny, r.boss and r.boss.solo == true)
     r.throw = { t0 = r.t, caught = caught, info = type(info) == "table" and info or nil, ball = ball,
       rgb = BALL_RGB[ball.key] or BALL_RGB.ITEM_POKE_BALL, said = {}, cues = {}, acc = 0 }
-    r.phase = "throw"
+    Rd.go("throw")
     r.say = nil
     -- (behind the party, the ball held up toward the boss)
     if Scene then Scene.shot("field", 0.5) end
@@ -2732,7 +2787,7 @@ return function(mod, deps)
 
   -- the rewards, given (src/rewards.lua), then shown on a card until A or a tap
   function Rd.startRewards()
-    r.phase = "rewards"
+    Rd.go("rewards")
     r.say = nil
     r.shrink = r.throw and r.throw.caught and 0 or r.shrink
     local ok, out = true, r.given
@@ -2751,7 +2806,7 @@ return function(mod, deps)
   -- Next on the card: the end card (the den once more, the circle closing), then what follows
   function Rd.endRewards()
     if not (r and r.phase == "rewards") or r.t - (r.rewardsT or 0) < 0.5 then return false end
-    r.phase = "outro"
+    Rd.go("outro")
     r.outroT = r.t
     r.say = nil
     r.bossGone = true
@@ -2790,7 +2845,7 @@ return function(mod, deps)
   end
 
   function Rd.startAfter()
-    r.phase = "after"
+    Rd.go("after")
     r.say = nil
     local q = {}
     for _, m in ipairs(r.members) do
@@ -2917,71 +2972,111 @@ return function(mod, deps)
     uiTick(before)
     return res
   end
-  function inputInner(input)
-    if not r or r.summary or r.aside then return end
-    if r.skipInput then r.skipInput = nil; return end
-    if r.phase == "den" then
-      -- (the press that opened the den is still down on its first frames: not a choice)
-      if r.t < Rd.DEN_ARM_S or not Den or r.starting then return end
-      Den.input(r, input)
+  -- what holds presses back: for any source, the game's own screen over the raid (its summary, an
+  -- evolution, the PC: r.summary / r.aside); for the buttons also the press that closed one
+  -- (r.skipInput, taken by the buttons' next frame - only they clear it, so only they wait on it)
+  function Rd.blocked(source)
+    if not r then return true end
+    if r.summary or r.aside then return true end
+    if source == "input" and r.skipInput then
+      r.skipInput = nil
+      return true
+    end
+    return false
+  end
+
+  -- a press: the D-pad's direction, if any
+  local function dirOf(input)
+    return (input:wasPressed("up") and "up") or (input:wasPressed("down") and "down")
+      or (input:wasPressed("left") and "left") or (input:wasPressed("right") and "right") or nil
+  end
+  -- the words in the band typed out (A / a tap goes on only then)
+  local function sayTyped() return r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS >= #r.say end
+
+  -- ------- the buttons, by phase (data/raid_phases.lua `input`)
+  local INPUT = {}
+  function INPUT.den(input)
+    -- (the press that opened the den is still down on its first frames: not a choice)
+    if r.t < Rd.DEN_ARM_S or not Den or r.starting then return end
+    Den.input(r, input)
+  end
+  function INPUT.command(input)
+    if not Pad then return end
+    local moves = r.cmd.menu ~= "main"
+    local n = moves and max(1, #(r.cmd.moveList or {})) or #Pad.ITEMS
+    -- (on the second screen the D-pad moves by where the buttons are: Pad.secondMove)
+    local spatial = deps.padOnSecond() and Pad.secondMove
+    local dir = dirOf(input)
+    -- (whom: the four across, or two by two on the second screen, the boss above them)
+    -- (the D-pad on the second screen shows the cursor there from then on)
+    if dir and spatial then r.padHi = true end
+    if dir and r.cmd.menu == "target" and Pad.targetMove then
+      r.cmd.cursor = Pad.targetMove(r.cmd.moveList, r.cmd.cursor, dir, spatial and true or false)
+    elseif dir and spatial then r.cmd.cursor = Pad.secondMove(r.cmd.menu, r.cmd.cursor, n, dir)
+    elseif dir == "up" then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
+    elseif dir == "down" then r.cmd.cursor = r.cmd.cursor % n + 1
+    -- (SELECT or R on the move list: DYNAMAX)
+    elseif moves and (input:wasPressed("select") or input:wasPressed("r")) then Rd.choose("dynamax")
+    elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
+    elseif input:wasPressed("b") then Rd.back() end
+  end
+  function INPUT.catch(input)
+    if r.say then
+      if input:wasPressed("a") or input:wasPressed("b") then Rd.catchSayDone() end
       return
     end
-    if r.phase == "command" and Pad then
-      local moves = r.cmd.menu ~= "main"
-      local n = moves and max(1, #(r.cmd.moveList or {})) or #Pad.ITEMS
-      -- (on the second screen the D-pad moves by where the buttons are: Pad.secondMove)
-      local spatial = deps.padOnSecond() and Pad.secondMove
-      local dir = (input:wasPressed("up") and "up") or (input:wasPressed("down") and "down")
-        or (input:wasPressed("left") and "left") or (input:wasPressed("right") and "right") or nil
-      -- (whom: the four across, or two by two on the second screen, the boss above them)
-      -- (the D-pad on the second screen shows the cursor there from then on)
-      if dir and spatial then r.padHi = true end
-      if dir and r.cmd.menu == "target" and Pad.targetMove then
-        r.cmd.cursor = Pad.targetMove(r.cmd.moveList, r.cmd.cursor, dir, spatial and true or false)
-      elseif dir and spatial then r.cmd.cursor = Pad.secondMove(r.cmd.menu, r.cmd.cursor, n, dir)
-      elseif dir == "up" then r.cmd.cursor = (r.cmd.cursor - 2) % n + 1
-      elseif dir == "down" then r.cmd.cursor = r.cmd.cursor % n + 1
-      -- (SELECT or R on the move list: DYNAMAX)
-      elseif moves and (input:wasPressed("select") or input:wasPressed("r")) then Rd.choose("dynamax")
-      elseif input:wasPressed("a") then Rd.choose(moves and ("move" .. r.cmd.cursor) or Pad.ITEMS[r.cmd.cursor].id)
-      elseif input:wasPressed("b") then Rd.back() end
-    elseif r.phase == "catch" and r.say then
-      if input:wasPressed("a") or input:wasPressed("b") then Rd.catchSayDone() end
-    elseif r.phase == "catch" then
-      if deps.padOnSecond() and (input:wasPressed("up") or input:wasPressed("down") or input:wasPressed("left")
-        or input:wasPressed("right")) then r.padHi = true end
-      if r.cmd.menu == "catchq" then
-        if input:wasPressed("up") or input:wasPressed("down") then r.cmd.cursor = 3 - r.cmd.cursor
-        elseif input:wasPressed("a") then Rd.catchChoose(r.cmd.cursor == 1 and "catch" or "leave")
-        elseif input:wasPressed("b") then r.cmd.cursor = 2 end
-      else
-        if input:wasPressed("left") then Rd.catchBall(-1)
-        elseif input:wasPressed("right") then Rd.catchBall(1)
-        elseif input:wasPressed("a") then Rd.pickBall()
-        elseif input:wasPressed("b") then Rd.catchBack() end
-      end
-    elseif r.phase == "rewards" then
-      local onNext = r.rw and r.rewards and r.rw.cursor > #(r.rewards.items or {})
-      if input:wasPressed("up") then Rd.cardMove(-1)
-      elseif input:wasPressed("down") then Rd.cardMove(1)
-      elseif input:wasPressed("a") then
-        if onNext or not r.rw then Rd.endRewards() else Rd.cardMove(1) end
-      elseif input:wasPressed("b") then Rd.cardMove(99) end
-    elseif (r.phase == "after" or r.phase == "leaveq") and r.ask then
-      if r.ask.kind == "yesno" then
-        -- (Yes / No side by side on the second screen: left / right there)
-        local across = deps.padOnSecond() and (input:wasPressed("left") or input:wasPressed("right"))
-        if deps.padOnSecond() and (across or input:wasPressed("up") or input:wasPressed("down")) then r.padHi = true end
-        if input:wasPressed("up") or input:wasPressed("down") or across then r.cmd.cursor = 3 - r.cmd.cursor
-        elseif input:wasPressed("a") then Rd.answer(r.cmd.cursor == 1)
-        elseif input:wasPressed("b") then Rd.answer(false) end
-      elseif input:wasPressed("a") or input:wasPressed("b") then
-        Rd.answer()
-      end
-    elseif r.phase == "battle" and input:wasPressed("a") then
-      -- A hurries the words: once typed, on to the next
-      if r.say and (r.t - (r.sayT or 0)) * Rd.MSG.CPS >= #r.say then Rd.playEvents(true) end
+    if deps.padOnSecond() and dirOf(input) then r.padHi = true end
+    if r.cmd.menu == "catchq" then
+      if input:wasPressed("up") or input:wasPressed("down") then r.cmd.cursor = 3 - r.cmd.cursor
+      elseif input:wasPressed("a") then Rd.catchChoose(r.cmd.cursor == 1 and "catch" or "leave")
+      elseif input:wasPressed("b") then r.cmd.cursor = 2 end
+    else
+      if input:wasPressed("left") then Rd.catchBall(-1)
+      elseif input:wasPressed("right") then Rd.catchBall(1)
+      elseif input:wasPressed("a") then Rd.pickBall()
+      elseif input:wasPressed("b") then Rd.catchBack() end
     end
+  end
+  function INPUT.rewards(input)
+    local onNext = r.rw and r.rewards and r.rw.cursor > #(r.rewards.items or {})
+    if input:wasPressed("up") then Rd.cardMove(-1)
+    elseif input:wasPressed("down") then Rd.cardMove(1)
+    elseif input:wasPressed("a") then
+      if onNext or not r.rw then Rd.endRewards() else Rd.cardMove(1) end
+    elseif input:wasPressed("b") then Rd.cardMove(99) end
+  end
+  -- a question in the band (Leave the den?, the after-raid steps' words and Yes / No)
+  function INPUT.ask(input)
+    if not r.ask then return end
+    if r.ask.kind == "yesno" then
+      -- (Yes / No side by side on the second screen: left / right there)
+      local across = deps.padOnSecond() and (input:wasPressed("left") or input:wasPressed("right"))
+      if deps.padOnSecond() and (across or input:wasPressed("up") or input:wasPressed("down")) then r.padHi = true end
+      if input:wasPressed("up") or input:wasPressed("down") or across then r.cmd.cursor = 3 - r.cmd.cursor
+      elseif input:wasPressed("a") then Rd.answer(r.cmd.cursor == 1)
+      elseif input:wasPressed("b") then Rd.answer(false) end
+    elseif input:wasPressed("a") or input:wasPressed("b") then
+      Rd.answer()
+    end
+  end
+  INPUT.leaveq, INPUT.after = INPUT.ask, INPUT.ask
+  function INPUT.battle(input)
+    -- A hurries the words: once typed, on to the next
+    if input:wasPressed("a") and sayTyped() then Rd.playEvents(true) end
+  end
+  Rd.INPUT = INPUT
+
+  local inputInner
+  function Rd.input(input)
+    local before = uiKey()
+    local res = inputInner(input)
+    uiTick(before)
+    return res
+  end
+  function inputInner(input)
+    if Rd.blocked("input") then return end
+    local h = INPUT[r.phase]
+    if h then h(input) end
   end
 
   local function inRect(x, y, t) return t and t.w and x >= t.x and x <= t.x + t.w and y >= t.y and y <= t.y + t.h end
@@ -2991,56 +3086,54 @@ return function(mod, deps)
     return { x = ev.x, y = ev.y - dy, phase = ev.phase, id = ev.id, source = ev.source }
   end
 
-  -- a pointer on the window (input.pointer): true when the den screen or the pad took it
-  local pointerInner
-  function Rd.pointer(ev)
-    local before = uiKey()
-    local res = pointerInner(ev)
-    uiTick(before)
-    return res
+  -- ------- taps and clicks on the main screen, by phase (data/raid_phases.lua `pointer`); each gets
+  -- the event in its UI's own space and returns true when the raid took it
+  local POINTER = {}
+  function POINTER.den(ev)
+    if r.t >= Rd.DEN_ARM_S and Den and not r.starting then Den.pointer(r, ev) end
+    return true
   end
-  function pointerInner(ev)
-    -- (on a portrait screen the UI's pieces are shifted down: the event moved back into their space)
-    local foot = r and evAt(ev, r.uiBand) or ev
-    local mid = r and evAt(ev, r.uiCard) or ev
-    if r and r.phase == "den" then
-      if r.t >= Rd.DEN_ARM_S and Den and not r.starting then Den.pointer(r, mid) end
-      return true
-    end
-    ev = (r and r.phase == "rewards") and mid or foot
-    if r and r.phase == "rewards" then
-      local W = Rd.cardWhere
-      if inRect(ev.x, ev.y, W.next) then
-        Rd.cardMove(99)
-        if ev.phase == "released" then Rd.endRewards() end
-      else
-        for _, row in ipairs(W.rows) do
-          if inRect(ev.x, ev.y, row) and r.rw then r.rw.cursor = row.i end
-        end
+  function POINTER.rewards(ev)
+    local W = Rd.cardWhere
+    if inRect(ev.x, ev.y, W.next) then
+      Rd.cardMove(99)
+      if ev.phase == "released" then Rd.endRewards() end
+    else
+      for _, row in ipairs(W.rows) do
+        if inRect(ev.x, ev.y, row) and r.rw then r.rw.cursor = row.i end
       end
-      return true
     end
-    if r and (r.phase == "outro" or r.phase == "blown") then return true end
-    if r and (r.phase == "after" or r.phase == "leaveq") then
-      if r.summary or r.aside then return false end
-      if r.ask and r.ask.kind == "yesno" and Pad then
-        local hit = Pad.hit(ev.x, ev.y, "yesno")
-        local slot = hit and tonumber(hit:match("^move(%d)$") or "")
-        if slot then r.cmd.cursor = slot end
-        if ev.phase == "released" then
-          if slot then Rd.answer(slot == 1) elseif hit == "back" then Rd.answer(false) end
-        end
-      elseif ev.phase == "released" then
-        Rd.answer()
+    return true
+  end
+  -- (taken and let be: nothing to press while the raid ends)
+  function POINTER.outro() return true end
+  POINTER.blown = POINTER.outro
+  function POINTER.ask(ev)
+    if r.ask and r.ask.kind == "yesno" and Pad then
+      local hit = Pad.hit(ev.x, ev.y, "yesno")
+      local slot = hit and tonumber(hit:match("^move(%d)$") or "")
+      if slot then r.cmd.cursor = slot end
+      if ev.phase == "released" then
+        if slot then Rd.answer(slot == 1) elseif hit == "back" then Rd.answer(false) end
       end
-      return true
+    elseif ev.phase == "released" then
+      Rd.answer()
     end
-    if r and r.phase == "catch" then
-      -- (the pad on the second screen: the main screen's taps only put the catch's words away)
-      if deps.padOnSecond() and not r.say then return false end
-      return Rd.catchPointer(ev)
-    end
-    if not (r and Pad) or deps.padOnSecond() or r.phase ~= "command" or r.say or r.summary then return false end
+    return true
+  end
+  POINTER.leaveq, POINTER.after = POINTER.ask, POINTER.ask
+  function POINTER.catch(ev)
+    -- (the pad on the second screen: the main screen's taps only put the catch's words away)
+    if deps.padOnSecond() and not r.say then return false end
+    return Rd.catchPointer(ev)
+  end
+  -- a tap hurries the words as A does: once typed, on to the next
+  function POINTER.battle(ev)
+    if ev.phase == "released" and sayTyped() then Rd.playEvents(true) end
+    return true
+  end
+  function POINTER.command(ev)
+    if not Pad or deps.padOnSecond() or r.say then return false end
     local hit = Pad.hit(ev.x, ev.y, r.cmd.menu)
     if hit and hit ~= "panel" then
       -- a press moves the selection onto the pill; letting go picks it
@@ -3055,35 +3148,97 @@ return function(mod, deps)
     end
     return hit ~= nil
   end
+  Rd.POINTER = POINTER
 
-  -- a press on the second screen's pad (src/screen2.lua): down puts the selection on it, up picks
-  function Rd.secondPress(id, released)
-    if not (r and id) then return end
+  -- a pointer on the window (input.pointer): true when the den screen or the pad took it
+  local pointerInner
+  function Rd.pointer(ev)
     local before = uiKey()
-    local slot = tonumber(id:match("^move(%d)$") or "")
-    if r.phase == "command" and r.cmd and not r.say and not r.summary then
+    local res = pointerInner(ev)
+    uiTick(before)
+    return res
+  end
+  function pointerInner(ev)
+    if not r then return false end
+    -- (a screen of the game's over the raid has the taps)
+    if Rd.blocked("pointer") then return false end
+    local h = POINTER[r.phase]
+    if not h then return false end
+    -- (on a portrait screen the UI's pieces are shifted down: the event moved back into their
+    -- space - the den screen's and the card's box in the middle, the rest at the foot)
+    local card = r.phase == "den" or r.phase == "rewards"
+    return h(evAt(ev, card and r.uiCard or r.uiBand)) and true or false
+  end
+
+  -- ------- presses on the second screen's pad (src/screen2.lua), by phase (data/raid_phases.lua
+  -- `second`): down puts the selection on a button, up picks it; "panel" is a press off the buttons
+  local SECOND = {}
+  function SECOND.command(id, released, slot)
+    if r.say or not r.cmd then return end
+    if slot then r.cmd.cursor = slot end
+    if r.cmd.menu == "main" then
+      for i, item in ipairs(Pad.ITEMS) do if item.id == id then r.cmd.cursor = i end end
+    end
+    if released and id ~= "panel" then Rd.choose(id) end
+  end
+  function SECOND.ask(id, released, slot)
+    if not r.ask then return end
+    if r.ask.kind == "yesno" then
       if slot then r.cmd.cursor = slot end
-      if r.cmd.menu == "main" then
-        for i, item in ipairs(Pad.ITEMS) do if item.id == id then r.cmd.cursor = i end end
+      if released then
+        if slot then Rd.answer(slot == 1) elseif id == "back" then Rd.answer(false) end
       end
-      if released then Rd.choose(id) end
-    elseif (r.phase == "after" or r.phase == "leaveq") and r.ask and r.ask.kind == "yesno" and slot then
-      r.cmd.cursor = slot
-      if released then Rd.answer(slot == 1) end
-    elseif r.phase == "catch" and r.say then
+    elseif released then
+      -- (words to read: a press anywhere goes on)
+      Rd.answer()
+    end
+  end
+  SECOND.leaveq, SECOND.after = SECOND.ask, SECOND.ask
+  function SECOND.catch(id, released)
+    if r.say then
       if released then Rd.catchSayDone() end
-    elseif r.phase == "catch" and r.cmd and not r.say then
-      -- the catch on the second screen: Catch / Don't Catch, then the ball box
-      if r.cmd.menu == "catchq" then
-        if id == "catch" then r.cmd.cursor = 1 elseif id == "leave" then r.cmd.cursor = 2 end
-        if released and (id == "catch" or id == "leave") then Rd.catchChoose(id) end
-      elseif released then
-        if id == "left" then Rd.catchBall(-1)
-        elseif id == "right" then Rd.catchBall(1)
-        elseif id == "use" then Rd.pickBall()
-        elseif id == "back" then Rd.catchBack() end
+      return
+    end
+    if not r.cmd then return end
+    -- the catch on the second screen: Catch / Don't Catch, then the ball box
+    if r.cmd.menu == "catchq" then
+      if id == "catch" then r.cmd.cursor = 1 elseif id == "leave" then r.cmd.cursor = 2 end
+      if released and (id == "catch" or id == "leave") then Rd.catchChoose(id) end
+    elseif released then
+      if id == "left" then Rd.catchBall(-1)
+      elseif id == "right" then Rd.catchBall(1)
+      elseif id == "use" then Rd.pickBall()
+      elseif id == "back" then Rd.catchBack() end
+    end
+  end
+  -- a press hurries the words as A does
+  function SECOND.battle(_, released)
+    if released and sayTyped() then Rd.playEvents(true) end
+  end
+  -- a press goes on from the rewards card as A on Next does
+  function SECOND.rewards(_, released)
+    if released then Rd.endRewards() end
+  end
+  Rd.SECOND = SECOND
+
+  -- the handlers against data/raid_phases.lua: a phase handled here and not marked there (or the
+  -- other way) is logged at load
+  for name, row in pairs(Rd.PHASES) do
+    for _, k in ipairs({ "input", "pointer", "second" }) do
+      local have = ({ input = INPUT, pointer = POINTER, second = SECOND })[k][name] ~= nil
+      if have ~= (row[k] == true) then
+        mod.log:warn("raid phase %s: %s is %s in data/raid_phases.lua but %s in src/raid.lua", name, k,
+          tostring(row[k] == true), have and "handled" or "not handled")
       end
     end
+  end
+
+  function Rd.secondPress(id, released)
+    if not (r and id) or Rd.blocked("second") then return end
+    local h = SECOND[r.phase]
+    if not h then return end
+    local before = uiKey()
+    h(id, released, tonumber(id:match("^move(%d)$") or ""))
     uiTick(before)
   end
 
@@ -3149,7 +3304,7 @@ return function(mod, deps)
     local a = (r.hud or 0) * (r.bossA or 1)
     if part == "say" then a = 0 end
     -- (no boss block once it is in the ball or gone, nor over the rewards and what follows)
-    if r.phase == "rewards" or r.phase == "after" or r.phase == "throw" or r.phase == "outro" then a = 0 end
+    if not phaseRow().hud then a = 0 end
     if a > 0.01 then
       local B = Rd.BOSS_HUD
       local f = font(h * B.NAME)
@@ -3346,12 +3501,12 @@ return function(mod, deps)
     end
     if Fx then
       local b = r.boss
-      Fx.setLasting(r.phase ~= "rewards" and r.fieldShown or nil, b and placeOf(b) or nil,
+      Fx.setLasting(phaseRow().fx and r.fieldShown or nil, b and placeOf(b) or nil,
         b and (b.veil or 0) > 0 and not r.throw, b and not r.throw and b.shieldShown or nil, r.t)
       if Fx.setTeam then Fx.setTeam(Rd.teamState(), r.t) end
     end
     if Scene then Scene.draw(G, 0, 0, w, h, r.t, img and not r.bossGone and bossPic or nil, memberPicsShown) end
-    if Fx and r.phase ~= "rewards" then
+    if Fx and phaseRow().fx then
       local LB = Scene and Scene.lastBoss
       Fx.drawMoves(G, r.t)
       Fx.draw(G, w, h, r.t)
