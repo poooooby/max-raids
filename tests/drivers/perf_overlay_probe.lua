@@ -1,4 +1,4 @@
--- Driver: PERFORMANCE - the option shows the engine's frame profiler (its F3 overlay) while a den is
+-- Driver: PERF.OVERLAY - the option shows the engine's frame profiler (its F3 overlay) while a den is
 -- open, with the raid's parts as sections, the slowest frames listed at the top right with what the
 -- raid was doing; put away when the den closes, and with the option off. A raid opened (its first
 -- frame, the den built, is a slow one), a turn played, the slowest frames logged.
@@ -43,10 +43,10 @@ local function body(game, log)
   check(FP.enabled ~= true, "off by default: no overlay")
   setOption(true)
   U.wait(5)
-  check(FP.enabled ~= true, "PERFORMANCE on, on the field: no overlay")
+  check(FP.enabled ~= true, "PERF.OVERLAY on, on the field: no overlay")
   R.openDen({ x = 1, y = 1, active = true, stars = 4, boss = os.getenv("PROBE_BOSS") or "CHARIZARD_4", day = 0 })
   U.wait(5)
-  check(FP.enabled == true, "PERFORMANCE on, the den screen: the overlay shown")
+  check(FP.enabled == true, "PERF.OVERLAY on, the den screen: the overlay shown")
   R.close()
   U.wait(5)
   check(FP.enabled == false, "the den closed: the overlay put away")
@@ -93,7 +93,7 @@ local function body(game, log)
   check(raidSpike, "a slow frame labelled with the raid's doings")
   setOption(false)
   U.wait(5)
-  check(FP.enabled == false, "PERFORMANCE off in a raid: the overlay put away")
+  check(FP.enabled == false, "PERF.OVERLAY off in a raid: the overlay put away")
   X.close()
   U.wait(20)
   log(("%d failures"):format(fails))

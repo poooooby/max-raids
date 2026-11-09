@@ -230,7 +230,7 @@ you won: Exp. Candies, TMs, berries and more.*
 | RAID DIFFICULTY | SOLO (default): the bosses are tougher and hit harder, since you bring four Pokémon of your own instead of getting three helpers, and every catch succeeds. SWORD / SHIELD: the games' own bosses and catch chances. |
 | MOVE INFO | How each move does on the boss, under its button. BASIC (default): "Super effective", "Not very effective" or "No effect". FULL: 4x, 2x, 1/2x, 1/4x or 0x. OFF: nothing shown. |
 | RAID DENS | ON (default): dens appear on the routes. OFF: none appear. |
-| PERFORMANCE | OFF (default). ON: while you're in a den, frame times show on screen, with the raid's parts and its slowest moments at the top right. For reporting slowdowns: a screenshot during a raid shows what was slow. |
+| PERF.OVERLAY | OFF (default). ON: while you're in a den, frame times show on screen, with the raid's parts and its slowest moments at the top right. For reporting slowdowns: a screenshot during a raid shows what was slow. |
 
 ## 🎮 Controls
 

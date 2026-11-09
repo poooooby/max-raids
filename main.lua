@@ -55,7 +55,7 @@ return function(mod)
     { key = "dens", label = "RAID DENS", type = "toggle", default = true },
     -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
     -- raid was doing, shown while a den is open: for reporting slowdowns
-    { key = "perf_overlay", label = "PERFORMANCE", type = "toggle", default = false },
+    { key = "perf_overlay", label = "PERF.OVERLAY", type = "toggle", default = false },
   })
 
   local N = loadSibling(mod, "data/raid_rules.lua")
@@ -296,7 +296,7 @@ return function(mod)
     end
   end
 
-  -- ------- PERFORMANCE: the engine's frame profiler (its F3 overlay) shown, the raid's parts timed
+  -- ------- PERF.OVERLAY: the engine's frame profiler (its F3 overlay) shown, the raid's parts timed
   -- as its sections (a push / pop that returns at once while it is off), the raid's doings added to
   -- its slow-frame label, and the slowest frames listed at the top right
   local okFP, FP = pcall(require, "src.core.FrameProfiler")
@@ -375,7 +375,7 @@ return function(mod)
   mod.hooks:wrap("render.hud", function(next, game, viewport)
     lastGame = game or lastGame
     local res = next(game, viewport)
-    -- (PERFORMANCE: the engine's overlay up while a den is open - the den screen through the
+    -- (PERF.OVERLAY: the engine's overlay up while a den is open - the den screen through the
     -- rewards -, put away when it closes; each den's numbers and slowest frames begin afresh)
     if FP then
       local want = mod.options:get("perf_overlay") == true and Raid.active() == true
