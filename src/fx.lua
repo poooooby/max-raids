@@ -1034,17 +1034,60 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     powder = { 1.1, 0.6 }, self = { 0.9, nil }, drain = { 1.3, 0.3 }, spikes = { 0.9, 0.42 }, multi = { 0.35, 0.18 },
   }
   Fx.GMAX_K = 1.35          -- a G-Max move plays this much longer
-  local SHOT_GAP = 0.09     -- between the shots of a volley
+  -- a multi-hit move's blows: one at a time, each its own shot or strike landing, then this pause
+  -- before the next sets off
+  Fx.MULTI_GAP = 0.38
   local moves = {}
+
+  -- the blows a look lands: a multi strike's n (3 when not given), a volley's n shots, else one
+  local function blowsOf(spec)
+    local kind = spec[1] or "slam"
+    if kind == "multi" then return spec.n or 3 end
+    if kind == "shot" then return spec.n or 1 end
+    return 1
+  end
+  Fx.blowsOf = blowsOf
+
+  -- when the k-th blow lands, seconds after the look starts (x GMAX_K for a G-Max move): a strike
+  -- lands STRIKE after it sets off, a shot flies its impact time; the next sets off after the pause
+  local STRIKE = Fx.KIND.multi[2]
+  function Fx.blowAt(spec, k, big)
+    local kind = spec[1] or "slam"
+    local K = Fx.KIND[kind] or Fx.KIND.slam
+    local mult = big and Fx.GMAX_K or 1
+    if kind == "multi" then return (STRIKE + (k - 1) * (K[1] + Fx.MULTI_GAP)) * mult end
+    if kind == "shot" then return (K[2] + (k - 1) * (K[2] + Fx.MULTI_GAP)) * mult end
+    return (K[2] or K[1]) * mult
+  end
+  -- when the k-th blow sets off (a shot leaving its user, a strike's wind-up)
+  function Fx.launchAt(spec, k, big)
+    local kind = spec[1] or "slam"
+    local K = Fx.KIND[kind] or Fx.KIND.slam
+    local mult = big and Fx.GMAX_K or 1
+    if kind == "multi" then return Fx.blowAt(spec, k, big) - STRIKE * mult end
+    if kind == "shot" then return Fx.blowAt(spec, k, big) - K[2] * mult end
+    return 0
+  end
+  -- a look's whole length: its last blow and what follows it
+  function Fx.lengthOf(spec, big)
+    local kind = spec[1] or "slam"
+    local key = (kind == "drop" and spec.shape == "slab") and "slab" or kind
+    local K = Fx.KIND[key] or Fx.KIND.slam
+    local mult = big and Fx.GMAX_K or 1
+    local n = blowsOf(spec)
+    if kind == "multi" then return Fx.blowAt(spec, n, big) + (K[1] - STRIKE + 0.2) * mult end
+    if kind == "shot" and n > 1 then return Fx.blowAt(spec, n, big) + (K[1] - K[2]) * mult end
+    return K[1] * mult
+  end
 
   function Fx.move(spec, typeName, from, targets, now, big)
     local kind = spec[1] or "slam"
     local key = (kind == "drop" and spec.shape == "slab") and "slab" or kind
     local K = Fx.KIND[key] or Fx.KIND.slam
     local len, impact = K[1], K[2]
-    if kind == "multi" then
-      local n = spec.n or 3
-      len, impact = K[1] * n + 0.2, K[2]
+    if kind == "multi" or (kind == "shot" and blowsOf(spec) > 1) then
+      -- (lengths in the G-Max scale already: undone below)
+      len = Fx.lengthOf(spec, big) / (big and Fx.GMAX_K or 1)
     end
     local k = big and Fx.GMAX_K or 1
     seedN = seedN + 1
@@ -1060,18 +1103,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- shot, else its impact
   function Fx.lastHit(spec, big)
     local kind = spec[1] or "slam"
+    if kind == "multi" or kind == "shot" then return Fx.blowAt(spec, blowsOf(spec), big) end
     local key = (kind == "drop" and spec.shape == "slab") and "slab" or kind
     local K = Fx.KIND[key] or Fx.KIND.slam
-    local k = big and Fx.GMAX_K or 1
-    local n = spec.n or (kind == "multi" and 3 or 1)
-    if kind == "multi" then
-      local len = (K[1] * n + 0.2) * k
-      return (n - 1) / n * len * 0.85 + len * 0.05 + 0.1
-    elseif kind == "shot" and n > 1 then
-      local imp = K[2] * k
-      return (n - 1) * SHOT_GAP + max(0.15, imp - (n - 1) * SHOT_GAP)
-    end
-    return (K[2] or K[1]) * k
+    return (K[2] or K[1]) * (big and Fx.GMAX_K or 1)
   end
 
   -- a target takes the blow: its type's hit, a flash, the raid's impact
@@ -1261,14 +1296,14 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       end
     elseif kind == "shot" then
       local n = spec.n or 1
-      local fly = max(0.15, imp - (n - 1) * SHOT_GAP)
+      local fly = max(0.15, imp)
       for ti, T in ipairs(m.targets) do
         for k = 1, n do
-          local g = (t - (k - 1) * SHOT_GAP) / fly
+          local g = (t - Fx.launchAt(spec, k, m.gmax)) / fly
           if g >= 1 and not m.landed[ti * 100 + k] then
             -- (each hit of a multi-hit move takes its own share of the bar)
             if T.hps then T.hp = T.hps[k] or T.hp end
-            landOnce(m, ti * 100 + k, T, 1 / sqrt(n), now)
+            landOnce(m, ti * 100 + k, T, n > 1 and 0.75 or 1, now)
           elseif g > 0 and tick then
             local x, y, z = shotPos(m, T, g, k)
             local sh = spec.shape or "ball"
@@ -1344,7 +1379,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     elseif kind == "slam" or kind == "multi" then
       local n = kind == "multi" and (spec.n or 3) or 1
       for k = 1, n do
-        local at = kind == "multi" and ((k - 1) / n * m.len * 0.85 + m.len * 0.05 + 0.1) or imp
+        local at = kind == "multi" and Fx.blowAt(spec, k, m.gmax) or imp
         for ti, T in ipairs(m.targets) do
           if t >= at - 0.14 and not m.landed["l" .. ti .. k] then
             m.landed["l" .. ti .. k] = true
@@ -1528,11 +1563,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     local spec = m.spec
     local n = spec.n or 1
     local imp = m.impact or m.len
-    local fly = max(0.15, imp - (n - 1) * SHOT_GAP)
+    local fly = max(0.15, imp)
     local sh = spec.shape or "ball"
     for _, T in ipairs(m.targets) do
       for k = 1, n do
-        local g = (t - (k - 1) * SHOT_GAP) / fly
+        local g = (t - Fx.launchAt(spec, k, m.gmax)) / fly
         if g > 0 and g < 1 then
           local X, Y, Z = shotPos(m, T, g, k)
           if layerOf(Z) == layer then

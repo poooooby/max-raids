@@ -2432,6 +2432,9 @@ function Sim:use(ev, att, mv, targets, ally, locked)
           nHits = #beat
         end
         local g3power = self:g3Power(att, def, mv)
+        -- (a multi-hit move: its words after its blows - "Hit n times!", then a critical hit, then how
+        -- it did - so the blows play one after another)
+        local later = nHits > 1 and {} or nil
         for n = 1, nHits do
           if not alive(def) or self.over then break end
           -- (Triple Kick: each kick checks its accuracy again, and hits harder)
@@ -2505,11 +2508,16 @@ function Sim:use(ev, att, mv, targets, ally, locked)
             ev[#ev + 1] = { kind = "side", side = sideKey(def), what = "endured", up = true, who = def,
               text = banded or self:tword("endured", nil, def) or T("%s endured the hit!", def.name) }
           end
-          if info.critical then ev[#ev + 1] = { kind = "crit", target = def, text = T("A critical hit!") } end
+          if info.critical then
+            local e1 = { kind = "crit", target = def, text = T("A critical hit!") }
+            if not later then ev[#ev + 1] = e1 elseif not later.crit then later.crit = e1 end
+          end
           if n == 1 then
-            if mv.side and mv.side.ohko then ev[#ev + 1] = { kind = "effect", eff = 1, target = def, text = T("It's a one-hit KO!") }
-            elseif eff > 1 then ev[#ev + 1] = { kind = "effect", eff = eff, target = def, text = T("It's super effective!") }
-            elseif eff < 1 then ev[#ev + 1] = { kind = "effect", eff = eff, target = def, text = T("It's not very effective...") } end
+            local e1
+            if mv.side and mv.side.ohko then e1 = { kind = "effect", eff = 1, target = def, text = T("It's a one-hit KO!") }
+            elseif eff > 1 then e1 = { kind = "effect", eff = eff, target = def, text = T("It's super effective!") }
+            elseif eff < 1 then e1 = { kind = "effect", eff = eff, target = def, text = T("It's not very effective...") } end
+            if e1 and later then later.effect = e1 elseif e1 then ev[#ev + 1] = e1 end
           end
           if alive(def) then
             -- (Rage builds)
@@ -2542,6 +2550,10 @@ function Sim:use(ev, att, mv, targets, ally, locked)
         if not self.over then self:g3After(ev, att, def, mv, landed > 0) end
         if landed > 1 and not self.over then
           ev[#ev + 1] = { kind = "hits", target = def, n = landed, text = T("Hit %d times!", landed) }
+        end
+        if later and not self.over then
+          if later.crit then ev[#ev + 1] = later.crit end
+          if later.effect then ev[#ev + 1] = later.effect end
         end
       end
     end

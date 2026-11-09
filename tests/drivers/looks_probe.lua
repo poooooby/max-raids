@@ -74,7 +74,8 @@ local function body(game, log)
   local blows = {}
   local realImpact = Fx.onImpact
   Fx.onImpact = function(T, p, ...)
-    blows[#blows + 1] = { who = T.b and T.b.name or "?", hp = T.hp }
+    local c = R.current()
+    blows[#blows + 1] = { who = T.b and T.b.name or "?", hp = T.hp, t = c and c.t }
     return realImpact(T, p, ...)
   end
   local plan = { 1, 2, nil, 3, 4 }
@@ -89,6 +90,9 @@ local function body(game, log)
     local e = cur.events and cur.events[cur.evI]
     if e and e ~= seenEv then
       seenEv = e
+      if os.getenv("PROBE_TRACE") then
+        log(("  t=%.2f ev %s %s dur %.2f say %s"):format(cur.t, e.kind, tostring(e.text), cur.evDur or -1, tostring(cur.say)))
+      end
       if e.kind == "use" and cur.anim then
         local a = cur.anim
         looks[#looks + 1] = { who = e.who.name, move = e.move and e.move.key, kind = a.spec[1], n = a.spec.n,
@@ -97,6 +101,7 @@ local function body(game, log)
           tostring(a.spec[1]), tostring(a.spec.n), tostring(a.last)))
       elseif e.kind == "hits" then
         log(("turn %d: %s"):format(turn, e.text))
+        if looks[#looks] then looks[#looks].hits = e.text end
       elseif e.kind == "status" and e.charge then
         log(("turn %d: charge %s semi=%s"):format(turn, e.text, tostring(e.semi)))
       end
@@ -105,6 +110,10 @@ local function body(game, log)
       local u = R.memberAway(m1)
       if u > awayMax then awayMax = u end
       if u >= 1 and not awayShot then awayShot = true; U.wait(10); shot("l02_flown") end
+    end
+    -- the words "Hit n times!" on screen, and when
+    if cur.say and cur.say:match("^Hit %d+ times!$") and looks[#looks] and not looks[#looks].saidT then
+      looks[#looks].saidT = cur.t
     end
     if cur.phase == "command" and cur.cmd and cur.cmd.actor and not cur.say then
       if cur.cmd.menu == "main" then R.choose("fight")
@@ -147,6 +156,17 @@ local function body(game, log)
       local down = #bs >= 2
       for k = 2, #bs do down = down and (tonumber(bs[k].hp) or 0) < (tonumber(bs[k - 1].hp) or 0) end
       check(L.n and L.n >= 2 and #bs == L.n and down, L.move .. ": a blow per hit, the bar lower at each")
+      -- one at a time: a pause between the blows
+      local gaps, apart = {}, #bs >= 2
+      for k = 2, #bs do
+        local gap = (bs[k].t or 0) - (bs[k - 1].t or 0)
+        gaps[#gaps + 1] = ("%.2f"):format(gap)
+        apart = apart and gap >= Fx.MULTI_GAP
+      end
+      check(apart, L.move .. ": the blows apart (" .. table.concat(gaps, ", ") .. " s, at least " .. Fx.MULTI_GAP .. ")")
+      local last = bs[#bs] and bs[#bs].t
+      check(L.saidT and last and L.saidT >= last, L.move .. ": \"" .. tostring(L.hits) .. "\" shown after the last blow ("
+        .. tostring(L.saidT and last and ("%.2f s after"):format(L.saidT - last)) .. ")")
     end
     if L.move == "SWORDS_DANCE" then check(L.kind == "self", "Swords Dance: an aura round its user") end
     if L.move == "GIGA_DRAIN" then check(L.kind == "drain", "Giga Drain: its orbs drawn back") end

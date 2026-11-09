@@ -1287,7 +1287,7 @@ return function(mod, deps)
   -- ------- the turn: the simulation runs it at once; its events then play one by one - the words
   -- typed in the band, the camera on whoever moves, the bars draining as each hit lands
 
-  Rd.EVENT = { HOLD_S = 0.7, DAMAGE_S = 0.65, HP_S = 0.6, CAM_S = 0.5, FADE = 10 }
+  Rd.EVENT = { HOLD_S = 0.7, DAMAGE_S = 0.65, QUICK_S = 0.05, HP_S = 0.6, CAM_S = 0.5, FADE = 10 }
   local function memberIndex(b)
     for i, m in ipairs(r.members) do if m.b == b then return i end end
     return nil
@@ -1905,12 +1905,24 @@ return function(mod, deps)
     local most = 0
     for _, t in ipairs(targets) do most = max(most, t.hps and #t.hps or 0) end
     spec = Rd.manyHits(spec, most)
+    -- (its bar stepped down blow by blow in the look: each hit's own event then passes at once, so
+    -- "Hit n times!" follows the last blow)
+    if most > 1 then
+      for j = r.evI + 1, #(r.events or {}) do
+        local x = r.events[j]
+        if x.kind == "use" or x.kind == "over" then break end
+        if x.kind == "damage" and x.looked then x.quick = true end
+      end
+    end
     local words = Rd.chars(e.text) / Rd.MSG.CPS + 0.25
     local gmax = mv and mv.isGmax and not mv.guard
     local at = r.t + words + (gmax and Rd.GMAX_CHARGE_S or 0)
     local K = Fx.KIND[(spec[1] == "drop" and spec.shape == "slab") and "slab" or spec[1]] or Fx.KIND.slam
     local len = K[1] * (gmax and Fx.GMAX_K or 1)
-    if spec[1] == "multi" then len = K[1] * (spec.n or 3) + 0.2 end
+    -- (a multi-hit move: its blows one at a time, a pause between: the look lasts to the last)
+    if Fx.lengthOf and (spec[1] == "multi" or (spec[1] == "shot" and (spec.n or 1) > 1)) then
+      len = Fx.lengthOf(spec, gmax)
+    end
     r.anim = { at = at, spec = spec, user = e.who, targets = targets, type = mv and mv.typeName or "NORMAL",
       gmax = gmax, chargeAt = gmax and (r.t + words) or nil, len = len,
       impact = K[2] and K[2] * (gmax and Fx.GMAX_K or 1) or len,
@@ -1954,6 +1966,13 @@ return function(mod, deps)
       end
       if from then Fx.move(a.spec, a.type, from, tg, r.t, a.gmax) end
       if Sounds then Rd.se(Sounds.moveSe(a.spec, a.type)) end
+      a.blow = 1
+    end
+    -- a multi-hit move's next blows: each sets off with its own sound
+    if a.started and Fx.blowsOf and a.blow and a.blow < Fx.blowsOf(a.spec)
+        and r.t >= a.at + Fx.launchAt(a.spec, a.blow + 1, a.gmax) then
+      a.blow = a.blow + 1
+      if Sounds then Rd.se(Sounds.moveSe(a.spec, a.type)) end
     end
     -- the boss rears and lunges into its strikes
     r.lunge, r.jump = 0, 0
@@ -1984,7 +2003,10 @@ return function(mod, deps)
     end
     local K = Fx.KIND[(spec[1] == "drop" and spec.shape == "slab") and "slab" or spec[1]] or Fx.KIND.slam
     local len = K[1] * (gmax and Fx.GMAX_K or 1)
-    if spec[1] == "multi" then len = K[1] * (spec.n or 3) + 0.2 end
+    -- (a multi-hit move: its blows one at a time, a pause between: the look lasts to the last)
+    if Fx.lengthOf and (spec[1] == "multi" or (spec[1] == "shot" and (spec.n or 1) > 1)) then
+      len = Fx.lengthOf(spec, gmax)
+    end
     r.anim = { at = r.t + (gmax and Rd.GMAX_CHARGE_S or 0), spec = spec, user = battler(user), targets = targets,
       type = typeName or "NORMAL", gmax = gmax, chargeAt = gmax and r.t or nil, len = len,
       impact = K[2] and K[2] * (gmax and Fx.GMAX_K or 1) or len }
@@ -2252,7 +2274,7 @@ return function(mod, deps)
     else
       -- (a hit lands with no words: the band steps aside while the bar drains)
       r.say = nil
-      r.evDur = E.DAMAGE_S
+      r.evDur = e.quick and E.QUICK_S or E.DAMAGE_S
     end
   end
 

@@ -1160,6 +1160,23 @@ do
   check(s.over == "win" and count(ev, "damage") == 2, "the boss falls on the second blow of a string")
 end
 
+-- a multi-hit move's words come after its blows: "Hit n times!" first, then how it did
+do
+  local s = duel(mv("Double Kick", { power = 30, side = { hits = 2 } }), { adapter = { eff = { Boss = 2 } } })
+  local ev = s:turn({ { move = 1 } })
+  local order = {}
+  for _, e in ipairs(ev) do
+    if e.kind == "damage" or e.kind == "hits" or e.kind == "effect" then order[#order + 1] = e.kind end
+  end
+  check(table.concat(order, ",") == "damage,damage,hits,effect", "multi-hit: the blows, then Hit n times!, then super effective (" .. table.concat(order, ",") .. ")")
+  -- a single blow keeps its words right after it
+  s = duel(mv("Tackle", { power = 30 }), { adapter = { eff = { Boss = 2 } } })
+  ev = s:turn({ { move = 1 } })
+  order = {}
+  for _, e in ipairs(ev) do if e.kind == "damage" or e.kind == "effect" then order[#order + 1] = e.kind end end
+  check(table.concat(order, ",") == "damage,effect", "a single blow: its effectiveness right after it")
+end
+
 -- Hyper Beam: recharge next turn; the member does not choose it
 do
   local s, boss, m = duel(mv("Hyper Beam", { power = 150, side = { recharge = true } }))
