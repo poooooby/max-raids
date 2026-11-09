@@ -1188,7 +1188,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         local fc = font(rowH * 0.13)
         G.setFont(fc)
         G.setColor(0.8, 0.8, 0.85, 1)
-        G.printf("\195\151" .. tostring(bl.n or 0) .. ("   %d of %d"):format(c.ball or 1, #balls), px, gy + rowH * 0.78, pw2, "center")
+        G.printf("\195\151" .. tostring(bl.n or 0), px, gy + rowH * 0.78, pw2, "center")
         -- its words
         local dy = gy + rowH + pad * 0.6
         local dh = gh * 0.3
