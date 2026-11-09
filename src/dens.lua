@@ -170,6 +170,10 @@ return function(mod, deps)
     return den
   end
 
+  -- a den's day, in one place: quiet (not active), live (active, its raid still to come) or done
+  -- (won or left by Run: spent until the next roll)
+  function Dn.isLive(den) return den and den.active == true and not den.done or false end
+
   -- ------- the engine's side (guarded: headless loads skip it)
 
   -- an engine module (found ones kept: a mod's require makes garbage each call)
@@ -389,7 +393,7 @@ return function(mod, deps)
   end
 
   local function spriteFor(den)
-    return (den.active and not den.done) and Dn.SPRITE.active or Dn.SPRITE.spent
+    return Dn.isLive(den) and Dn.SPRITE.active or Dn.SPRITE.spent
   end
   Dn.spriteFor = spriteFor
 
@@ -455,6 +459,9 @@ return function(mod, deps)
     -- the shake: px across / up, swings, frames a swing (60 a second)
     SHAKE = { X = 3, Y = 4, SWINGS = 40, FRAMES = 3 }, SE = "SE_M_EARTHQUAKE",
     WAIT_S = 0.6,   -- outdoors this long first (the warp's fade over)
+    -- a watchdog: the shake past SHAKE_MAX_S goes on to the words; the words' box gone this long
+    -- without their script ending, the awakening ends (the player never left held)
+    SHAKE_MAX_S = 4, QUIET_MAX_S = 3,
     WORDS = {
       "A powerful force shakes the region...",
       "Pillars of light are rising from\nPOKéMON DENS along the routes!",
@@ -486,8 +493,29 @@ return function(mod, deps)
 
   -- each field step: the awakening, when it is due (the first badge, outdoors, the field free)
   local outsideFor = 0
+  local watch = nil   -- the awakening under way: { stage = "shake" | "words", t, quiet, words, finish }
+  -- the awakening's watchdog, each field step while it runs
+  local function watchAwaken(dt)
+    local w = watch
+    if not w then return end
+    local A = Dn.AWAKEN
+    w.t = w.t + dt
+    if w.stage == "shake" and w.t > A.SHAKE_MAX_S then
+      mod.log:warn("dens: the awakening's shake did not finish; going on to its words")
+      w.words()
+    elseif w.stage == "words" then
+      local Message = engine("src.ui.game3.message")
+      local open = Message and Message.isOpen and Message.isOpen()
+      w.quiet = open and 0 or (w.quiet + dt)
+      if w.quiet > A.QUIET_MAX_S then
+        mod.log:warn("dens: the awakening's words never ended; the player let go")
+        w.finish()
+      end
+    end
+  end
   function Dn.stepAwaken(dt)
-    if Dn.awake() or Dn.awakening or mod.options:get("dens") == false then return end
+    if Dn.awakening then watchAwaken(dt or 1 / 60); return end
+    if Dn.awake() or mod.options:get("dens") == false then return end
     local M = engine("src.core.game3.map")
     local mapId = M and M.current
     local def = M and M.currentDef and M.currentDef()
@@ -506,16 +534,34 @@ return function(mod, deps)
     local Task = engine("src.core.game3.task")
     local Audio = engine("src.core.game3.audio")
     local A = Dn.AWAKEN
+    if Field and Field.lock then
+      local okL, err = pcall(Field.lock, "max_raids_awaken")
+      if not okL then
+        mod.log:warn("dens: the awakening could not hold the player (%s); the dens wake quietly", tostring(err))
+        mod.save:set("densAwake", true)
+        Dn.pending = true
+        if onDone then onDone() end
+        return true
+      end
+    end
     Dn.awakening = true
-    if Field and Field.lock then Field.lock("max_raids_awaken") end
+    local finished = false
     local function finish()
+      if finished then return end
+      finished, watch = true, nil
+      if FieldView then FieldView.cameraPanX, FieldView.cameraPanY = 0, 0 end
       mod.save:set("densAwake", true)
       Dn.awakening = false
       if Field and Field.unlock then pcall(Field.unlock, "max_raids_awaken") end
       Dn.pending = true
       if onDone then onDone() end
     end
+    local spoken = false
     local function words()
+      if spoken then return end
+      spoken = true
+      if watch then watch.stage, watch.quiet = "words", 0 end
+      if FieldView then FieldView.cameraPanX, FieldView.cameraPanY = 0, 0 end
       local rows = {}
       for _, t in ipairs(A.WORDS) do rows[#rows + 1] = { "text", t } end
       local ok, err = mod.world:queueScript(rows, { onDone = function() finish() end })
@@ -524,12 +570,15 @@ return function(mod, deps)
         finish()
       end
     end
+    watch = { stage = "shake", t = 0, quiet = 0, words = words, finish = finish }
     if Audio and Audio.playSe then pcall(Audio.playSe, A.SE) end
     if not (FieldView and Task and Task.spawn) then words(); return true end
     local S = A.SHAKE
     local frame, left, cx, cy = 0, S.SWINGS, S.X, S.Y
     Task.spawn(function()
       frame = frame + 1
+      -- (the watchdog went on without it)
+      if spoken then return true end
       if frame % S.FRAMES == 0 then
         left = left - 1
         cx, cy = -cx, -cy
@@ -701,7 +750,7 @@ return function(mod, deps)
           end
           for k = j + 1, n do actors[k] = nil end
           for i, den in ipairs(list) do
-            if den.active and not den.done then
+            if Dn.isLive(den) then
               actors[#actors + 1] = beamActor(mapId, den, i)
             end
           end

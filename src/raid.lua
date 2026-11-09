@@ -1700,7 +1700,10 @@ return function(mod, deps)
     if not r then return nil end
     local e = r.events and r.evI and r.events[r.evI]
     local mv = e and e.move
-    return ("raid %s%s%s%s"):format(tostring(r.phase),
+    -- (a change of phase or menu in the last second: what it came from)
+    local last = r.trail and r.trail[#r.trail]
+    local moved = last and (r.t or 0) - last.t < 1 and (" from " .. tostring(last.from)) or ""
+    return ("raid %s%s%s%s%s"):format(tostring(r.phase), moved,
       e and (" " .. tostring(e.kind)) or "",
       type(mv) == "table" and mv.name and (" " .. tostring(mv.name)) or "",
       r.lastSe and (" se " .. tostring(r.lastSe)) or "")
@@ -3910,6 +3913,10 @@ return function(mod, deps)
     view.cardCursor = r and r.rw and r.rw.cursor or nil
     view.ask = r and r.ask and r.ask.kind or nil
     view.aside = r and r.aside or nil
+    -- (when the phase began, on the raid's clock; the last Rd.TRAIL_N phase and menu changes,
+    -- { t, kind = "phase" | "menu", from, to }, oldest first - the raid's own list: read it, never change it)
+    view.phaseT = r and r.phaseT or nil
+    view.trail = r and r.trail or nil
     return view
   end
 

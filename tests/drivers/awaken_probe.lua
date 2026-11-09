@@ -148,6 +148,24 @@ local function body(game, log)
     check(list ~= nil and #list > 0, "awake: the route has its dens")
     shot("a06_route_awake")
   end
+
+  -- the watchdog: a shake whose task never runs goes on to the words, and the player is let go
+  do
+    local Task = require("src.core.game3.task")
+    local spawn = Task.spawn
+    Task.spawn = function() end
+    Dn.setAwake(false)
+    check(Dn.awaken(), "watchdog: an awakening begun with its shake stalled")
+    Task.spawn = spawn
+    local Field = require("src.core.game3.field")
+    check(Field.isLocked(), "watchdog: the player held meanwhile")
+    waitFor(function() return Message.isOpen() end, 600)
+    check(Message.isOpen(), "watchdog: past " .. Dn.AWAKEN.SHAKE_MAX_S .. " s the words come all the same")
+    check((FieldView.cameraPanX or 0) == 0 and (FieldView.cameraPanY or 0) == 0, "watchdog: the camera centred")
+    for _ = 1, 80 do if Message.isOpen() then U.tap(game, "a"); U.wait(20) end end
+    waitFor(function() return Dn.awake() and not Dn.awakening end, 300)
+    check(Dn.awake() and not Dn.awakening and not Field.isLocked(), "watchdog: awake, the player free")
+  end
   Dn.setAwake(was)
   log(("%d failures"):format(fails))
 end

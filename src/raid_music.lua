@@ -103,7 +103,9 @@ return function(mod, deps)
     if cur and cur.name == name then cur.to = 1; return true end
     local v = open(name)
     if not v then return false end
-    if not cur and not old then quietGame() end
+    -- (no track of ours current: the game's music may be back - the last raid's close restored it
+    -- while that track still faded - so it is quieted again)
+    if not cur then quietGame() end
     if old then release(old) end
     if cur then cur.to = 0; old = cur end
     cur = v

@@ -72,6 +72,13 @@ local function body(game, log)
     shot(at[2])
   end
   check(X.state().phase == "command", "the intro hands over to the commands")
+  do
+    -- the trail of phase changes: the last one intro -> command, when the phase began
+    local tr = X.state().trail or {}
+    local last = tr[#tr]
+    check(last and last.kind == "phase" and last.from == "intro" and last.to == "command" and X.state().phaseT == last.t,
+      ("the trail ends intro -> command at phaseT (%s)"):format(last and (tostring(last.from) .. " -> " .. tostring(last.to)) or "empty"))
+  end
   -- the engine's touch pad stands down while the raid's pad is on the main screen
   local okTC, TC = pcall(require, "src.core.TouchControls")
   if okTC and type(TC) == "table" then

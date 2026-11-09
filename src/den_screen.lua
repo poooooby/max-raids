@@ -98,7 +98,8 @@ return function(mod, deps)
       if #r.slots >= 4 then break end
       if canFight(row.mon) then r.slots[#r.slots + 1] = row end
     end
-    r.cursor, r.denMenu, r.denParty = 1, nil, nil
+    -- (a quiet den: on EXIT, its only button)
+    r.cursor, r.denMenu, r.denParty = r.key and 1 or 6, nil, nil
   end
 
   function Den.members(r)
@@ -215,7 +216,8 @@ return function(mod, deps)
     end
     local c = r.cursor or 1
     local crystal = crystalShown(r)
-    if c == 7 and not crystal then c = 5 end
+    -- (the crystal's pill gone from under the cursor: START)
+    if c == 7 and not crystal then c = 5; r.cursor = 5 end
     if pressed("up") then r.cursor = (c == 5 and crystal) and 7 or UP[c]
     elseif pressed("down") then r.cursor = ((c == 3 or c == 4) and crystal) and 7 or DOWN[c]
     elseif pressed("left") or pressed("right") then r.cursor = SIDE[c]
