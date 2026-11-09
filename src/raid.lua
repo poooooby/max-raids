@@ -1039,7 +1039,8 @@ return function(mod, deps)
   local function nextOrFight()
     local c = r.cmd
     local nxt = nextActor(c.actor + 1)
-    c.cursor, c.menu, c.item, c.dmax, c.moveSlot, c.allPick = 1, "main", nil, nil, nil, nil
+    c.item, c.dmax, c.moveSlot, c.allPick = nil, nil, nil, nil
+    Rd.setMenu("main", 1)
     if nxt then
       c.actor = nxt
       toMember(nxt)
@@ -1053,17 +1054,20 @@ return function(mod, deps)
   -- pouch, then whom to use it on. In a list menu "moveN" is its N-th row.
   function Rd.choose(id)
     if not (r and r.phase == "command" and r.cmd.actor) or r.summary then return false end
+    -- (only what the menu shown offers: data/raid_phases.lua MENUS)
+    local M = Rd.MENUS[r.cmd.menu]
+    if M and not (M.ids[id] or (M.slots and type(id) == "string" and id:match("^move%d$"))) then return false end
     if id == "run" then return Rd.askLeave() end
     if id == "pokemon" then return Rd.summary() end
     local c = r.cmd
     if id == "fight" then
-      c.menu, c.cursor = "moves", 1
+      Rd.setMenu("moves", 1)
       Rd.moveList()
       return true
     end
     if id == "bag" then
       if bagEmpty() then return false end
-      c.menu, c.cursor = "items", 1
+      Rd.setMenu("items", 1)
       Rd.moveList()
       return true
     end
@@ -1081,7 +1085,8 @@ return function(mod, deps)
     local row = c.moveList and c.moveList[slot]
     if not row or row.live == false then return false end
     if c.menu == "items" then
-      c.item, c.menu, c.cursor = row.id, "target", 1
+      c.item = row.id
+      Rd.setMenu("target", 1)
       Rd.moveList()
       return true
     elseif c.menu == "target" then
@@ -1106,7 +1111,8 @@ return function(mod, deps)
     -- Life Dew on the team): the four shown, the arrow on each it reaches, a press confirms
     local area = Rd.areaOf(mv)
     if (area or (mv.team and mv.team.ally)) and not Rd.maxShown() then
-      c.moveSlot, c.allPick, c.menu, c.cursor = slot, area, "target", 1
+      c.moveSlot, c.allPick = slot, area
+      Rd.setMenu("target", 1)
       Rd.moveList()
       for i, row2 in ipairs(c.moveList) do
         if row2.live ~= false then c.cursor = i; break end
@@ -2311,7 +2317,7 @@ return function(mod, deps)
         return false
       end
       r.say = nil
-      r.cmd.menu = "ballbox"
+      Rd.setMenu("ballbox")
       return true
     end
     return Rd.startRewards()
@@ -2325,7 +2331,7 @@ return function(mod, deps)
     return true
   end
   function Rd.catchBack()
-    if r and r.phase == "catch" and r.cmd.menu == "ballbox" then r.cmd.menu = "catchq"; return true end
+    if r and r.phase == "catch" and r.cmd.menu == "ballbox" then return Rd.setMenu("catchq") end
     return false
   end
   function Rd.catchBall(d)
@@ -2930,25 +2936,37 @@ return function(mod, deps)
   -- back: from the moves to the commands, else to the member before, its pick undone
   function Rd.back()
     if not (r and r.phase == "command" and r.cmd.actor) then return false end
-    if r.cmd.menu == "target" then
-      if r.cmd.moveSlot then
-        r.cmd.menu, r.cmd.cursor, r.cmd.moveSlot, r.cmd.allPick = "moves", r.cmd.moveSlot, nil, nil
-      else
-        r.cmd.menu, r.cmd.cursor, r.cmd.item = "items", 1, nil
-      end
+    local c = r.cmd
+    local M = Rd.MENUS[c.menu]
+    local to = M and M.back
+    -- (the target screen: back to the moves or the pouch it was opened from)
+    if to == "from" then
+      to = (c.from == "moves" or c.from == "items") and c.from or (c.moveSlot and "moves" or "items")
+    end
+    if to == "moves" then
+      local slot = c.moveSlot
+      c.moveSlot, c.allPick = nil, nil
+      Rd.setMenu("moves", slot or 1)
       Rd.moveList()
       return true
-    end
-    if r.cmd.menu == "moves" or r.cmd.menu == "items" then
-      r.cmd.menu, r.cmd.cursor, r.cmd.dmax = "main", 1, nil
+    elseif to == "items" then
+      c.item = nil
+      Rd.setMenu("items", 1)
+      Rd.moveList()
       return true
-    end
-    for i = r.cmd.actor - 1, 1, -1 do
-      if canAct(i) then
-        r.cmd.chosen[i] = nil
-        r.cmd.actor, r.cmd.cursor, r.cmd.menu = i, 1, "main"
-        toMember(i)
-        return true
+    elseif to == "main" then
+      c.dmax = nil
+      return Rd.setMenu("main", 1)
+    elseif to == "member" then
+      -- (the member before: its pick undone)
+      for i = c.actor - 1, 1, -1 do
+        if canAct(i) then
+          c.chosen[i] = nil
+          c.actor = i
+          Rd.setMenu("main", 1)
+          toMember(i)
+          return true
+        end
       end
     end
     return false
