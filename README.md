@@ -229,6 +229,13 @@ you won: Exp. Candies, TMs, berries and more.*
   pictures are loaded while the screen is black after Start, so a raid plays without stutters on
   older phones and handhelds.
 
+### For Other Mods
+
+- 🧩 **Raids from other mods:** other mods can add raids of their own: a den anywhere they like with
+  its own beam, any Pokémon (or their own animated art) at the stars, level and moves they choose,
+  and their own rewards, or a raid that starts from their own events. Mod makers: see
+  [the Raid API](docs/RAID_API.md).
+
 ## ⚙️ Options
 
 | Option | What it does |

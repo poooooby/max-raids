@@ -397,21 +397,161 @@ return function(mod, deps)
     return false
   end
 
+  -- (another mod's den may name its own sprites: { active, spent })
   local function spriteFor(den)
+    local own = den.sprite
+    if type(own) == "table" then
+      if Dn.isLive(den) then return own.active or Dn.SPRITE.active end
+      return own.spent or own.active or Dn.SPRITE.spent
+    end
     return Dn.isLive(den) and Dn.SPRITE.active or Dn.SPRITE.spent
   end
   Dn.spriteFor = spriteFor
 
-  -- the current map's dens: chosen (once), rolled for today, spawned (again after a load); true when
-  -- done, false when there is nothing to do here, nil to try again (the field not running yet)
+  -- ------- another mod's dens (src/raid_api.lua): a place of its choosing on any map, its own beam
+  -- and boss. Registered each boot and held here; each one's day saved under "extDens"[key] =
+  -- { day, done, boss } (the boss only when its mod's function chose it for the day)
+  local extMaps, extByKey, extSpawned = {}, {}, {}
+  local function extSaved()
+    local all = mod.save:get("extDens")
+    return type(all) == "table" and all or {}
+  end
+  local function extStore(den)
+    local all = extSaved()
+    all[den.ext.key] = { day = den.day, done = den.done and true or nil, boss = den.rolled and den.boss or nil }
+    mod.save:set("extDens", all)
+  end
+  local function extDespawn(key)
+    local id = extSpawned[key]
+    extSpawned[key] = nil
+    if id and mod.world and mod.world.removeRuntimeNpc then pcall(mod.world.removeRuntimeNpc, mod.world, id) end
+  end
+  function Dn.removeExt(key)
+    local den = extByKey[key]
+    if not den then return false end
+    extByKey[key] = nil
+    local list = extMaps[den.map] or {}
+    for i = #list, 1, -1 do if list[i] == den then table.remove(list, i) end end
+    extDespawn(key)
+    return true
+  end
+  -- den = { map, x, y, active, boss | bossFn(ctx) -> key, beamStyle | false, sprite, refresh "daily" |
+  -- "never", awake, ext = { key, mod, den, rewards, onEnd } }; its saved day taken up again
+  function Dn.addExt(den)
+    local key = den.ext.key
+    Dn.removeExt(key)
+    local st = extSaved()[key]
+    if type(st) == "table" then
+      den.day, den.done = st.day, st.done == true or nil
+      if den.bossFn and type(st.boss) == "string" then den.boss, den.rolled = st.boss, true end
+    end
+    extByKey[key] = den
+    extMaps[den.map] = extMaps[den.map] or {}
+    table.insert(extMaps[den.map], den)
+    Dn.pending = true
+    return den
+  end
+  function Dn.extDen(key) return extByKey[key] end
+  -- a change from its mod (active, boss, beam, sprite, rewards, onEnd; done = false: live again now)
+  function Dn.updateExt(key, patch)
+    local den = extByKey[key]
+    if not den then return false end
+    for k, v in pairs(patch) do
+      if k == "rewards" or k == "onEnd" then den.ext[k] = v
+      elseif k == "done" then den.done = v and true or nil
+      else den[k] = v end
+    end
+    if patch.done ~= nil or patch.boss ~= nil then
+      if patch.boss ~= nil then den.rolled = nil end
+      extStore(den)
+    end
+    Dn.pending = true
+    return true
+  end
+
+  -- a cell another mod's den may stand on: in the map, walkable or water, no warp, no object
+  local function extCellOk(x, y)
+    local C = engine("src.core.game3.collision")
+    if not C then return true end
+    if C.inBounds and not C.inBounds(x, y) then return false end
+    if not (C.isWalkable(x, y) or (C.isWater and C.isWater(x, y))) then return false end
+    if C.warpAt and C.warpAt(x, y) then return false end
+    local Objects = engine("src.core.game3.objects")
+    if Objects and Objects.at and Objects.at(x, y) then return false end
+    return true
+  end
+
+  -- the map's dens from other mods: their day (a new day: live again, and their mod's function asked
+  -- for the day's boss - "never": once), spawned (again after a load), hidden while one asks for the
+  -- awakening and it has not come
+  local function ensureExt(mapId)
+    local list = extMaps[mapId]
+    if not (list and #list > 0) then return false end
+    local today = Dn.today()
+    local retry = false
+    for i, den in ipairs(list) do
+      local key = den.ext.key
+      local fresh = den.day == nil or (den.refresh ~= "never" and den.day ~= today)
+      if fresh then den.day, den.done = today, nil end
+      -- (its mod's function asked for the day's boss: on a new day, or when the one it chose is no
+      -- longer known - a boss its function made, not yet made again since the game started)
+      local ask = den.bossFn and ((fresh and (den.refresh ~= "never" or not den.rolled))
+        or not (type(den.boss) == "string" and Bosses[den.boss]))
+      if ask then
+        local badges = Dn.badges()
+        local rnd = Dn.rng(seedOf(tostring(trainerId()) .. ":" .. key .. ":" .. tostring(today)))
+        local ctx = { day = today, badges = badges, stars = Dn.starsFor(badges), map = mapId, rng = rnd }
+        local ok, k = pcall(den.bossFn, ctx)
+        if ok and type(k) == "string" then den.boss, den.rolled = k, true
+        elseif not ok then mod.log:warn("den %s: its boss function failed: %s", key, tostring(k)) end
+      end
+      if fresh or ask then extStore(den) end
+      local id = extSpawned[key]
+      if den.awake and not Dn.awake() then
+        if id then extDespawn(key) end
+      elseif not (id and alive(mapId, id)) then
+        if not extCellOk(den.x, den.y) then
+          if not den.warned then
+            den.warned = true
+            mod.log:warn("den %s: no place for it at %s (%d, %d): a walkable or water cell with no warp or object is needed",
+              key, mapId, den.x, den.y)
+          end
+        else
+          local newId, why = mod.world:spawnNpc(mapId, { x = den.x, y = den.y, sprite = spriteFor(den),
+            movement = "MOVEMENT_TYPE_FACE_DOWN", facing = "down" })
+          if newId then extSpawned[key] = newId
+          elseif tostring(why):find("overworld", 1, true) then retry = true
+          else mod.log:warn("den %s (#%d on %s) not placed: %s", key, i, mapId, tostring(why)) end
+        end
+      else
+        local h = mod.world:npc(mapId, id)
+        if h and h.setAppearance then pcall(h.setAppearance, h, spriteFor(den)) end
+      end
+    end
+    if retry then return nil end
+    return true
+  end
+
+  -- the current map's dens: ours on a route (once the region has awoken) and other mods' on any map,
+  -- all of them only while RAID DENS is on; true when done, false when there is nothing to do here,
+  -- nil to try again (the field not running yet)
+  local ensureRoute
   function Dn.ensure()
     if mod.options:get("dens") == false then return false end
-    -- (none until the region has awoken: the first badge, then Dn.awaken's shake and words)
-    if not Dn.awake() then return false end
     local M = engine("src.core.game3.map")
     local mapId = M and M.current
     local def = M and M.currentDef and M.currentDef()
-    if not (mapId and def and isRoute(mapId, def)) then return false end
+    if not (mapId and def) then return false end
+    -- (ours none until the region has awoken: the first badge, then Dn.awaken's shake and words)
+    local a = false
+    if Dn.awake() and isRoute(mapId, def) then a = ensureRoute(mapId, def) end
+    local b = ensureExt(mapId)
+    if a == nil or b == nil then return nil end
+    return (a or b) and true or false
+  end
+
+  -- a route's own dens: chosen (once), rolled for today, spawned (again after a load)
+  ensureRoute = function(mapId, def)
     local all = saved()
     local list = all[mapId]
     -- (placed under older rules: chosen again under these)
@@ -605,12 +745,18 @@ return function(mod, deps)
   -- a den done (won, or the day's raid used): its look turns quiet
   function Dn.finish(den)
     den.done = true
-    mod.save:set("dens", saved())
+    -- (another mod's den: its own saved day; one opened for a single raid: nothing to keep)
+    if den.ext and den.ext.key and extByKey[den.ext.key] == den then extStore(den)
+    elseif den.transient then return
+    else mod.save:set("dens", saved()) end
     Dn.ensure()
   end
 
   -- the den an object id belongs to
   function Dn.byObject(id)
+    for key, oid in pairs(extSpawned) do
+      if oid == id and extByKey[key] then return extByKey[key], extByKey[key].map, key end
+    end
     for mapId, ids in pairs(spawned) do
       for i, oid in pairs(ids) do
         if oid == id then
@@ -640,6 +786,7 @@ return function(mod, deps)
   -- ------- the beam over an active den: a field actor (drawn in the field's own pass, world px)
 
   local beams = {}
+  local NONE = {}
   -- the beam's columns: a unit-square strip fading in over its foot's FOOT px (out of the pit), whole
   -- up to FADE of its height and fading out to its top (vertex colours; the draw's colour tints
   -- it). Made once, at the first draw
@@ -664,8 +811,17 @@ return function(mod, deps)
       G.rectangle("fill", x, y, w, h)
     end
   end
-  local function beamActor(mapId, den, i)
-    local key = mapId .. ":" .. i
+  -- the beams' looks: red (a Dynamax Pokemon), purple (the rare beam, a Gigantamax one); another
+  -- mod's den its own (src/raid_api.lua: these fields, over red's). color the glow, core the column's
+  -- heart, spark the sparks rising in it; height px, width a factor on the glow's, sparks how many,
+  -- flicker how much it flickers (0 steady)
+  Dn.BEAM_STYLE = {
+    red = { color = { 1, 0.2, 0.35 }, core = { 1, 0.92, 0.95 }, spark = { 1, 0.95, 0.95 }, height = 160, width = 1,
+      sparks = 10, flicker = 1 },
+    purple = { color = { 0.8, 0.35, 1 }, core = { 1, 0.92, 0.95 }, spark = { 1, 0.95, 0.95 }, height = 160, width = 1,
+      sparks = 10, flicker = 1 },
+  }
+  local function beamActor(key, den, i)
     local a = beams[key]
     if not a then
       a = { kind = "max_raids_beam", i = 92000 + i, elevation = 3, oamPriority = 1 }
@@ -673,39 +829,44 @@ return function(mod, deps)
         local G = love and love.graphics
         if not G then return end
         Dn.beamDraws = (Dn.beamDraws or 0) + 1
+        local st = self.style
         local t = love.timer and love.timer.getTime() or 0
         local x = floor(self.x + 8 - camX)
         -- from inside the pit, the tile's middle
         local y = floor(self.y + 8 - camY)
-        -- (red: a Dynamax Pokemon; purple: the rare beam, a Gigantamax one)
-        local hot = not self.rare
-        local cr, cg, cb = hot and 1 or 0.8, hot and 0.2 or 0.35, hot and 0.35 or 1
+        local c, core, sp = st.color, st.core, st.spark
         local pr, pg, pb, pa = G.getColor()
-        local hgt = Dn.BEAM.H
+        local hgt = st.height
         -- a soft glow round the column, then its body, then a white-hot core, flickering; each
         -- fades out toward its top
-        local flick = 0.85 + 0.15 * math.sin(t * 9)
+        local flick = 1 - 0.15 * st.flicker + 0.15 * st.flicker * math.sin(t * 9)
         for k = 0, 3 do
-          local w = 9 - k * 2 + math.sin(t * 5 + k) * 0.5
-          G.setColor(cr, cg, cb, (0.14 + 0.1 * k) * flick)
+          local w = (9 - k * 2 + math.sin(t * 5 + k) * 0.5) * st.width
+          G.setColor(c[1], c[2], c[3], (0.14 + 0.1 * k) * flick)
           beamColumn(G, x - w, y - hgt, w * 2, hgt)
         end
-        G.setColor(1, 0.92, 0.95, 0.85 * flick)
-        beamColumn(G, x - 1, y - hgt, 2, hgt)
+        G.setColor(core[1], core[2], core[3], 0.85 * flick)
+        beamColumn(G, x - st.width, y - hgt, 2 * st.width, hgt)
         -- sparks rising in it
-        for k = 1, 10 do
+        for k = 1, st.sparks do
           local u = (t * 0.35 + k * 0.137) % 1
-          G.setColor(1, 0.95, 0.95, 0.8 * (1 - u))
-          G.rectangle("fill", x - 4 + ((k * 37) % 9), y - u * hgt, 1, 2)
+          G.setColor(sp[1], sp[2], sp[3], 0.8 * (1 - u))
+          G.rectangle("fill", x - floor(4 * st.width) + ((k * 37) % floor(9 * st.width + 0.5)), y - u * hgt, 1, 2)
         end
         G.setColor(pr, pg, pb, pa)
       end
       beams[key] = a
     end
     a.x, a.y, a.sortY, a.stars = den.x * 16, den.y * 16, den.y * 16 + 15.5, den.stars
-    -- (a den rolled before beams told the two apart: by its boss)
-    a.rare = den.rare
-    if a.rare == nil then a.rare = not (type(den.boss) == "string" and den.boss:sub(1, 5) == "DYNA:") end
+    if den.beamStyle then
+      a.style = den.beamStyle
+    else
+      -- (a den rolled before beams told the two apart: by its boss)
+      local rare = den.rare
+      if rare == nil then rare = not (type(den.boss) == "string" and den.boss:sub(1, 5) == "DYNA:") end
+      a.style = rare and Dn.BEAM_STYLE.purple or Dn.BEAM_STYLE.red
+    end
+    a.rare = a.style == Dn.BEAM_STYLE.purple
     return a
   end
 
@@ -731,8 +892,10 @@ return function(mod, deps)
         -- (require, not package.loaded: a mod's package.loaded is not the engine's)
         local M = engine("src.core.game3.map")
         local mapId = M and M.current
-        local list = mapId and spawned[mapId] and saved()[mapId]
-        if list and type(actors) == "table" then
+        local list = mapId and spawned[mapId] and saved()[mapId] or nil
+        local ext = mapId and extMaps[mapId] or nil
+        if ext and #ext == 0 then ext = nil end
+        if (list or ext) and type(actors) == "table" then
           -- the engine's grass cover over an object's lower half: never over a den, whose
           -- sprite fills its tile
           local n = #actors
@@ -742,8 +905,14 @@ return function(mod, deps)
             local keep = true
             if type(a) == "table" and a.kind == "field_effect_npc_grass" and a.x and a.y then
               local cx, cy = floor(a.x / 16), floor(a.y / 16)
-              for _, den in ipairs(list) do
+              for _, den in ipairs(list or NONE) do
                 if den.x == cx and den.y == cy then
+                  keep = false
+                  break
+                end
+              end
+              for _, den in ipairs(keep and ext or NONE) do
+                if den.x == cx and den.y == cy and extSpawned[den.ext.key] then
                   keep = false
                   break
                 end
@@ -755,9 +924,15 @@ return function(mod, deps)
             end
           end
           for k = j + 1, n do actors[k] = nil end
-          for i, den in ipairs(list) do
+          for i, den in ipairs(list or NONE) do
             if Dn.isLive(den) then
-              actors[#actors + 1] = beamActor(mapId, den, i)
+              actors[#actors + 1] = beamActor(mapId .. ":" .. i, den, i)
+            end
+          end
+          -- (another mod's: beam = false draws none)
+          for i, den in ipairs(ext or NONE) do
+            if den.beamStyle ~= false and Dn.isLive(den) and extSpawned[den.ext.key] then
+              actors[#actors + 1] = beamActor("x:" .. den.ext.key, den, 500 + i)
             end
           end
         end

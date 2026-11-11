@@ -80,11 +80,13 @@ return function(mod, deps)
   end
 
   -- a picture of the mod's: the Image, and (keep = true) its ImageData too, for measuring
-  local function imageOf(path, keep)
+  -- (read: another mod's reader for its own files - src/raid_api.lua's art)
+  local function imageOf(path, keep, read)
     if not (love and love.graphics and mod.read) then return nil end
     local data
     local ok, img = pcall(function()
-      local bytes = mod:read(path)
+      local bytes
+      if read then bytes = read(path) else bytes = mod:read(path) end
       if not bytes then return nil end
       data = love.image.newImageData(love.filesystem.newFileData(bytes, path:match("[^/]+$")))
       local i = love.graphics.newImage(data)
@@ -140,7 +142,13 @@ return function(mod, deps)
       Rd.stepBossPic()
       return loaded.sheet and loaded or nil
     end
-    local sheet, data = imageOf("assets/bosses/" .. key .. ((shiny and sp.shiny) and "_shiny" or "") .. ".png", true)
+    -- (another mod's own sheet, read from its files; one of the pack's forms under its own key)
+    local sheet, data
+    if sp.art then
+      sheet, data = imageOf((shiny and sp.shinySheet) or sp.sheet, true, sp.read)
+    else
+      sheet, data = imageOf("assets/bosses/" .. (b.form or key) .. ((shiny and sp.shiny) and "_shiny" or "") .. ".png", true)
+    end
     if not sheet then return nil end
     -- its feet and width from the first frame (the pad stands it there)
     local box = data and boxOf(data, 0, 0, sp.cell, sp.cell) or { 0, 0, sp.cell, sp.cell }
@@ -151,7 +159,8 @@ return function(mod, deps)
       local c, r0 = (i - 1) % sp.cols, floor((i - 1) / sp.cols)
       quads[i] = love.graphics.newQuad(c * sp.cell, r0 * sp.cell, sp.cell, sp.cell, sw, sh)
     end
-    loaded = { key = key, shiny = shiny == true, sheet = sheet, quads = quads, cell = sp.cell, sp = sp, b = b, box = box }
+    loaded = { key = key, shiny = shiny == true, sheet = sheet, quads = quads, cell = sp.cell, sp = sp, b = b, box = box,
+      redCloud = sp.redCloud }
     return loaded
   end
   function Rd.loadedKey() return loaded and loaded.key or nil end
@@ -206,10 +215,14 @@ return function(mod, deps)
   function Rd.cry(key)
     local L = Rd.load(key)
     if L and L.dyna then return Rd.bigCry(L.slot) end
+    -- (another mod's art: its own cry, else its species' as a Dynamax Pokemon's)
+    if L and L.sp.art and not L.sp.cryPath then return Rd.bigCry(L.sp.slot) end
     if not (L and L.sp.cry and love and love.audio and love.sound) then return false end
     if not L.cry then
       local ok, sd = pcall(function()
-        local bytes = mod:read("assets/bosses/cries/" .. key .. ".ogg")
+        local bytes
+        if L.sp.art then bytes = L.sp.read(L.sp.cryPath)
+        else bytes = mod:read("assets/bosses/cries/" .. (L.b.form or key) .. ".ogg") end
         return bytes and love.sound.newSoundData(love.filesystem.newFileData(bytes, key .. ".ogg"))
       end)
       if not (ok and sd) then return false end
@@ -350,7 +363,9 @@ return function(mod, deps)
   -- own (assets/bosses/icons/<KEY>.png, two 64 x 64 frames; its shiny one for a shiny boss), else
   -- the game's icon of its species; false when there is none
   local function bossIconOf(r)
-    if not (r.key and Bosses and Bosses[r.key]) or (Bosses[r.key] and Bosses[r.key].dyna) then
+    local sp = r.key and Sprites[r.key]
+    local art = type(sp) == "table" and sp.art
+    if not (r.key and Bosses and Bosses[r.key]) or (Bosses[r.key] and Bosses[r.key].dyna) or (art and not sp.iconPath) then
       if Pokemon and Pokemon.monIcon and r.boss and r.boss.mon then
         local ok, ic = pcall(Pokemon.monIcon, r.boss.mon)
         if ok and type(ic) == "table" then return ic end
@@ -358,8 +373,11 @@ return function(mod, deps)
       return false
     end
     local ok, ic = pcall(function()
-      local bytes = mod:read("assets/bosses/icons/" .. r.key .. (r.shiny and "_shiny" or "") .. ".png")
-        or mod:read("assets/bosses/icons/" .. r.key .. ".png")
+      -- (another mod's art its own icon; one of the pack's forms under its own key)
+      local form = Bosses[r.key].form or r.key
+      local bytes = art and sp.read(sp.iconPath)
+        or mod:read("assets/bosses/icons/" .. form .. (r.shiny and "_shiny" or "") .. ".png")
+        or mod:read("assets/bosses/icons/" .. form .. ".png")
       if not bytes then return nil end
       local img = love.graphics.newImage(love.image.newImageData(love.filesystem.newFileData(bytes, "icon.png")))
       img:setFilter("nearest", "nearest")
@@ -567,11 +585,17 @@ return function(mod, deps)
     local rng = function(lo, hi) return gen and gen:random(lo, hi) or math.random(lo, hi) end
     r.rng = rng
     r.boss = Battle.boss(r.key, rng)
+    local rec = Bosses[r.key] or {}
+    -- (a legendary key opened without the den screen is one all the same)
+    r.legend = r.legend or rec.legend or nil
     -- shiny? 1 in 4096, a Dynamax Crystal's legendary raid 1 in 300 (shown from the start: its shiny
-    -- sheet, sparkling as it appears)
+    -- sheet, sparkling as it appears); another mod's boss may fix it or give its own odds
     local SH = R.SHINY or { ODDS = 4096, ADVENTURE = 300 }
     local odds = r.legend and SH.ADVENTURE or SH.ODDS
-    if Rd.FORCE_SHINY ~= nil then r.shiny = Rd.FORCE_SHINY else r.shiny = rng(1, odds) == 1 end
+    if type(rec.shiny) == "number" and rec.shiny >= 1 then odds = floor(rec.shiny) end
+    if Rd.FORCE_SHINY ~= nil then r.shiny = Rd.FORCE_SHINY
+    elseif type(rec.shiny) == "boolean" then r.shiny = rec.shiny
+    else r.shiny = rng(1, odds) == 1 end
     Rd.shinyKey = r.shiny and r.key or nil
     if r.boss then r.boss.shiny = r.shiny end
     local list = {}
@@ -585,7 +609,12 @@ return function(mod, deps)
     if not r.boss then return end
     r.boss.dispHp, r.boss.dispTarget = r.boss.mon.hp, r.boss.mon.hp
     r.adapter = Battle.adapter(rng)
-    r.sim = Sim.new{ boss = r.boss, members = list, adapter = r.adapter, rng = rng, rules = R,
+    -- (another mod's boss may set its own turns and knock-outs)
+    local rules = R
+    if tonumber(rec.turns) or tonumber(rec.faints) then
+      rules = setmetatable({ TURNS = tonumber(rec.turns) or R.TURNS, FAINTS = tonumber(rec.faints) or R.FAINTS }, { __index = R })
+    end
+    r.sim = Sim.new{ boss = r.boss, members = list, adapter = r.adapter, rng = rng, rules = rules,
       words = deps.Gmax and deps.Gmax.WORDS or nil, teamWords = deps.TeamMoves }
   end
 
@@ -593,9 +622,14 @@ return function(mod, deps)
   local function begin(members)
     if Scene and Scene.resetEffects then Scene.resetEffects() end
     r.t, r.members, r.cues, r.hud = 0, members, {}, 0
+    -- (another mod's raid: its rewards and its ending, unless a Dynamax Crystal put a legend in its
+    -- boss's place)
+    if r.ext and r.denKey and r.key ~= r.denKey then r.ext = nil end
+    r.rewardsSpec = r.ext and r.ext.rewards or nil
     Rd.go("intro")
     r.say = nil
     setupBattle(members)
+    if deps.onRaidStart then pcall(deps.onRaidStart, Rd.endInfo(), r.ext) end
     -- (the sounds to bake ahead: the list grows by the four who went in, Rd.stepWarm)
     if Scene then
       Scene.setTime(0)
@@ -611,6 +645,7 @@ return function(mod, deps)
     if not Rd.boss(key) then return false, "unknown boss" end
     if not Rd.load(key) then return false, "no pictures" end
     r = { key = key, den = opts and opts.den }
+    r.ext = opts and (opts.ext or (opts.den and opts.den.ext)) or nil
     if Fx then Fx.clear() end
     begin((opts and opts.members) or Rd.lineup())
     if deps.onOpen then deps.onOpen(r) end
@@ -633,6 +668,12 @@ return function(mod, deps)
     key = key or (r and r.key)
     legend = legend == nil and r and r.legend or legend
     local basic = type(key) ~= "string" or (key:match("^DYNA:") ~= nil and not legend)
+    -- (another mod's boss names its set: "basic", "max", or "legend" - the Max set, the legend's battle)
+    local own = type(key) == "string" and Bosses[key] and Bosses[key].music or nil
+    if own then
+      basic = own == "basic"
+      if own == "legend" then legend = true end
+    end
     local set = basic and "basic" or "max"
     if what == "den" then return set .. "_adventure" end
     if what == "capture" then return set .. "_capture" end
@@ -652,7 +693,7 @@ return function(mod, deps)
     if r then return false, "busy" end
     if type(den) ~= "table" then return false, "no den" end
     if not Den then return false, "no den screen" end
-    r = { den = den, key = den.active and not den.done and den.boss or nil, t = 0, cues = {}, hud = 0 }
+    r = { den = den, key = den.active and not den.done and den.boss or nil, t = 0, cues = {}, hud = 0, ext = den.ext }
     Rd.go("den")
     Den.open(r)
     if r.key and not Rd.load(r.key) then r.key = nil end
@@ -745,8 +786,33 @@ return function(mod, deps)
     r.fadeIn = Rd.DEN_FADE.IN
   end
 
+  -- what a raid came to, for another mod (src/raid_api.lua's onEnd, the raid_start / raid_end
+  -- events): outcome "win" | "faints" | "storm" | "fled" (nil while it runs; "closed" when it ended
+  -- otherwise), whether the boss was caught and the Pokemon given, the rewards' rows
+  function Rd.endInfo()
+    if not r then return nil end
+    local th = r.throw
+    local ext = r.ext
+    local items = {}
+    for i, it in ipairs(r.rewards and r.rewards.items or (r.given and r.given.items) or {}) do
+      items[i] = { id = it.id, n = it.n, name = it.name, money = it.money }
+    end
+    return {
+      key = r.key, outcome = r.outcome, caught = th and th.caught == true or false,
+      mon = th and th.caught and th.info and th.info.mon or nil, shiny = r.shiny == true,
+      turns = r.sim and r.sim.turnNo or nil, faints = r.sim and r.sim.faints or nil, items = items,
+      mod = ext and ext.mod or nil, den = ext and ext.den or nil,
+    }
+  end
+
   function Rd.close()
     if not r then return false end
+    if deps.onRaidEnd and r.members then
+      -- (a raid that began: its ending told, once)
+      if r.outcome == nil then r.outcome = "closed" end
+      local ok, info = pcall(Rd.endInfo)
+      if ok and info then pcall(deps.onRaidEnd, info, r.ext) end
+    end
     r = nil
     Rd.shinyKey = nil
     if Fx then Fx.clear() end
@@ -792,6 +858,7 @@ return function(mod, deps)
       if Scene.kick then Scene.kick(6, 0.6) end
     end
     if Sounds then Rd.se(Sounds.SHAPE.wind) end
+    r.outcome = "fled"
     if deps.onEnd then pcall(deps.onEnd, r.den, "fled", r) end
     return true
   end
@@ -2281,6 +2348,7 @@ return function(mod, deps)
   -- the end of the raid's last words: the den's outcome (deps.onEnd), then back to the field
   local function finish()
     local outcome = r.sim and r.sim.over
+    r.outcome = outcome
     if deps.onEnd then pcall(deps.onEnd, r.den, outcome, r) end
     if outcome == "win" and Rewards then return Rd.startCatch() end
     Rd.close()
@@ -2332,6 +2400,9 @@ return function(mod, deps)
     else
       mod.log:warn("raid rewards failed: %s", tostring(given))
     end
+    -- (another mod's boss that cannot be caught: on to the rewards card)
+    local rec = Bosses[r.key]
+    if rec and rec.catch == false then return Rd.startRewards() end
     if Scene then Scene.shot("field", 0.8) end
     Rd.music("capture")
     if #balls == 0 then r.cmd.cursor = 2 end
@@ -3564,8 +3635,8 @@ return function(mod, deps)
       bossPic.shrink = r.throw and (r.shrink or 1) or 1
       bossPic.lunge = r.lunge or 0
       bossPic.jump = r.jump or 0
-      -- (a Gigantamax boss: its cloud lit pinker)
-      bossPic.gmax = not loaded.dyna or nil
+      -- (a Gigantamax boss: its cloud lit pinker; another mod's art may ask for the red one)
+      bossPic.gmax = not (loaded.dyna or loaded.redCloud) or nil
     end
     for i = 1, 4 do
       local m = r.members[i]

@@ -158,6 +158,65 @@ return function(mod, deps)
     return true
   end
 
+  -- the caught Pokemon given a nature (0-24) and / or an ability slot (0 / 1) its boss's record
+  -- fixes, with the raid's gender and shininess: a personality searched for whose low half gives the
+  -- gender byte and the ability bit, whose high half the shininess, and whose whole the nature
+  function Rw.shapePersonality(mon, species, gender, nature, abilityBit, shiny, rng)
+    local bit = rawget(_G, "bit") or (pcall(require, "bit") and require("bit")) or nil
+    if not (bit and Pokemon and Pokemon.gender and type(mon) == "table") then return false end
+    local full = (tonumber(mon.otId) or tonumber(mon.trainerId) or 0) % 4294967296
+    local tid = full % 65536
+    local sid = (tonumber(mon.otSecretId) or math.floor(full / 65536)) % 65536
+    local ts = bit.bxor(tid, sid)
+    local start = rng and rng(0, 65535) or 0
+    for step = 0, 65535 do
+      local lo = (start + step) % 65536
+      local fits = abilityBit == nil or lo % 2 == abilityBit
+      if fits and (gender == "M" or gender == "F") then
+        local ok, g = pcall(Pokemon.gender, species, lo)
+        fits = ok and g == gender
+      end
+      if fits then
+        -- (shiny: hi ^ lo ^ the ids under 8; not shiny: at 8 or over)
+        for k = 0, 7 do
+          local hi = bit.band(bit.bxor(bit.bxor(ts, lo), shiny and k or (8 + k * 8)), 65535)
+          local p = hi * 65536 + lo
+          if nature == nil or p % 25 == nature then
+            mon.personality = p
+            mon.isShiny = shiny and true or false
+            if Pokemon.applyStats then pcall(Pokemon.applyStats, mon, session()) end
+            mon.hp = mon.maxHp or mon.hp
+            return true
+          end
+        end
+      end
+    end
+    return false
+  end
+
+  -- an ability's slot (0 / 1) among a species' two, by name ("Pressure", "SWIFT_SWIM"); nil when it
+  -- is neither
+  function Rw.abilitySlot(species, name)
+    if type(name) ~= "string" or not (Pokemon and Pokemon.abilities) then return nil end
+    local want = name:upper():gsub("%s+", "_")
+    local okA, Adapter = pcall(require, "src.core.game3.battle.adapter")
+    local byId = okA and type(Adapter) == "table" and type(Adapter.ABILITY_BY_ID) == "table" and Adapter.ABILITY_BY_ID or {}
+    local ok, pair = pcall(Pokemon.abilities, species)
+    if not ok or type(pair) ~= "table" then return nil end
+    for i = 1, 2 do
+      local id = tonumber(pair[i]) or 0
+      local nm = byId[id]
+      if not nm and id > 0 and Constants and Constants.of then
+        local s = session()
+        local okC, C = pcall(Constants.of, s and s.version or "emerald")
+        local okN, n = pcall(function() return C:name("abilities", id) end)
+        nm = okC and okN and type(n) == "string" and (n:gsub("^ABILITY_", "")) or nil
+      end
+      if id > 0 and nm == want then return i - 1 end
+    end
+    return nil
+  end
+
   function Rw.throw(key, level, ball, rng, ivs, gender, shiny, sure)
     local s = session()
     local b = Bosses[key]
@@ -166,7 +225,7 @@ return function(mod, deps)
     local roll = rng and rng(1, 100) or math.random(1, 100)
     -- (a legendary Pokemon's raid, by a Dynamax Crystal: caught for sure, as the Max Lair's; `sure`:
     -- a raid on RAID DIFFICULTY Solo)
-    if not b.legend and not sure and roll > Rw.chance(b.stars, ball.mult) then return false, "broke free" end
+    if not b.legend and not sure and b.catch ~= "sure" and roll > Rw.chance(b.stars, ball.mult) then return false, "broke free" end
     -- (a Dynamax boss carries its own species, its form among them)
     local species = b.slot or (Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national)))
     species = tonumber(species)
@@ -181,18 +240,27 @@ return function(mod, deps)
       if Pokemon and Pokemon.applyStats then pcall(Pokemon.applyStats, mon, s) end
       mon.hp = mon.maxHp or mon.hp
     end
-    -- (the boss's gender: a personality as near as keeps its nature, ability and shininess)
-    if (gender == "M" or gender == "F") then Rw.keepGender(mon, species, gender) end
-    -- (shiny as the raid's boss was, and only then)
-    Rw.setShiny(mon, shiny == true, rng)
+    local nature = Rw.battle and Rw.battle.natureId and Rw.battle.natureId(b.nature) or nil
+    local abilityBit = b.ability and Rw.abilitySlot(species, b.ability) or nil
+    if nature ~= nil or abilityBit ~= nil then
+      -- (a nature or an ability the boss's record fixes: kept with its gender and shininess)
+      Rw.shapePersonality(mon, species, gender, nature, abilityBit, shiny == true, rng)
+    else
+      -- (the boss's gender: a personality as near as keeps its nature, ability and shininess)
+      if (gender == "M" or gender == "F") then Rw.keepGender(mon, species, gender) end
+      -- (shiny as the raid's boss was, and only then)
+      Rw.setShiny(mon, shiny == true, rng)
+    end
     -- its Dynamax marks, as Sword / Shield's raid catches: a Dynamax Level by the stars, and the
-    -- G-Max Factor from a Gigantamax boss (National Dex's, when it has them)
+    -- G-Max Factor from a Gigantamax boss (National Dex's, when it has them; a record may say)
     local dx = Rw.dynamax()
     if dx then
       local okL, lv = pcall(dx.raidStartLevel, b.stars, rng)
       if okL then pcall(dx.setLevel, mon, lv) end
       local okG, move = pcall(dx.gmaxMoveOf, mon)
-      if not b.dyna and okG and move then pcall(dx.setFactor, mon, true) end
+      local factor = b.gmaxFactor
+      if factor == nil then factor = not b.dyna end
+      if factor and okG and move then pcall(dx.setFactor, mon, true) end
     end
     if Dex and Dex.registerCapture and s.dex then pcall(Dex.registerCapture, s.dex, species, s, mon.personality) end
     local name = b.name
@@ -318,20 +386,60 @@ return function(mod, deps)
     return first
   end
 
-  -- a won raid's rewards, into the bag: r = the raid (key)
+  -- an item's number from a number or a name ("MASTER_BALL", "ITEM_MASTER_BALL", "Master Ball");
+  -- nil when the game has no such item
+  function Rw.itemOf(v)
+    if tonumber(v) then return tonumber(v) > 0 and floor(tonumber(v)) or nil end
+    if type(v) ~= "string" or v == "" then return nil end
+    local up = v:upper():gsub("[%s%-]+", "_"):gsub("[^%w_]", "")
+    return Rw.itemId(up:sub(1, 5) == "ITEM_" and up or "ITEM_" .. up) or Rw.itemId(up)
+  end
+
+  -- another mod's rewards for a raid (src/raid_api.lua: { mode = "add" | "replace", items = { { item,
+  -- n }, ... }, money, roll(ctx) -> rows }) with the tier's roll: the rows { id, n } and the money.
+  -- A row the game has no item for is left out (warn)
+  function Rw.custom(spec, rolled, ctx, warn)
+    local list = {}
+    if spec.mode ~= "replace" then for _, it in ipairs(rolled or {}) do list[#list + 1] = it end end
+    local function take(rows, from)
+      for _, row in ipairs(type(rows) == "table" and rows or {}) do
+        local ref = type(row) == "table" and (row[1] or row.id or row.item) or row
+        local id = Rw.itemOf(ref)
+        local n = type(row) == "table" and floor(tonumber(row[2] or row.n) or 1) or 1
+        if id and n > 0 then list[#list + 1] = { id = id, n = min(n, 999) }
+        elseif warn then warn("raid rewards (%s): the game has no item %s", from, tostring(ref)) end
+      end
+    end
+    take(spec.items, "items")
+    if type(spec.roll) == "function" then
+      local ok, rows = pcall(spec.roll, ctx)
+      if ok then take(rows, "roll") elseif warn then warn("raid rewards: roll failed: %s", tostring(rows)) end
+    end
+    return list, max(0, floor(tonumber(spec.money) or 0))
+  end
+
+  -- a won raid's rewards, into the bag: r = the raid (key; r.rewardsSpec another mod's rewards)
   function Rw.give(r, rng)
     rng = rng or function(lo, hi) return math.random(lo, hi) end
     local s = session()
     local out = { items = {} }
     out.firstWin = countWin(r.key)
-    for _, it in ipairs(Rw.rollItems(r.key, rng)) do
+    local rows, extraMoney = nil, 0
+    if type(r.rewardsSpec) == "table" then
+      local b = Bosses[r.key]
+      local spec = r.rewardsSpec
+      rows, extraMoney = Rw.custom(spec, spec.mode ~= "replace" and Rw.rollItems(r.key, rng) or nil, {
+        key = r.key, stars = b and b.stars, rng = rng, firstWin = out.firstWin,
+        faints = r.sim and r.sim.faints, turns = r.sim and r.sim.turnNo }, function(...) mod.log:warn(...) end)
+    end
+    for _, it in ipairs(rows or Rw.rollItems(r.key, rng)) do
       if s and Bag and Bag.add then
         local ok, placed = pcall(Bag.add, s.bag, it.id, it.n)
         if ok and placed ~= false then out.items[#out.items + 1] = { id = it.id, name = Rw.itemName(it.id), n = it.n } end
       end
     end
-    -- G-Max Gold Rush's coins, picked up (the game's money cap)
-    local coins = r.sim and tonumber(r.sim.money) or 0
+    -- G-Max Gold Rush's coins, picked up (the game's money cap), and another mod's money
+    local coins = (r.sim and tonumber(r.sim.money) or 0) + extraMoney
     if s and coins > 0 then
       local okP, Prize = pcall(require, "src.core.game3.battle.prize")
       local gained = coins

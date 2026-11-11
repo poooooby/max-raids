@@ -203,6 +203,23 @@ do
   check(W.progress.gallery == 10 and W.earned.gallery, "12 bosses: the counter stops at its goal of 10 and is done")
 end
 
+-- ------------------------------------------------------------------ other mods' raids (src/raid_api.lua)
+
+do
+  local W, A = build()
+  A.install()
+  STARS["EXT:story:mewtwo"] = 5
+  STARS["EXT:story:legend_L"] = 5
+  W.store.wins = { ["EXT:story:mewtwo"] = 2, ["EXT:story:legend_L"] = 1 }
+  W.ready()
+  check(W.count("first_raid") == 1 and W.progress.den_delver == 3, "another mod's wins: Raid Rookie and Den Delver count them")
+  check(W.count("giant_slayer") == 0 and (W.progress.gallery or 0) == 0, "...never Giant Slayer or the Gallery")
+  check(W.count("five_star") == 0, "...nor Five-Star General, its 5 stars its mod's")
+  check(W.count("crystal_clear") == 0, "...nor Crystal Clear")
+  A.note("won", { key = "EXT:story:mewtwo", sim = { faints = 0, turnNo = 2 } })
+  check(W.earned.untouched and W.earned.quick_work, "...Untouched and Quick Work as any raid")
+end
+
 -- ------------------------------------------------------------------ a save that is not up yet
 
 do

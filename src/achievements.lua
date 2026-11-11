@@ -143,7 +143,9 @@ return function(mod, deps)
 
   -- ---------------------------------------------------------------- the sweep
 
-  local function isPackKey(key) return type(key) == "string" and key:sub(1, 5) ~= "DYNA:" end
+  -- (another mod's raid, "EXT:<mod>:<name>" - src/raid_api.lua: its wins count toward the totals only)
+  local function isExtKey(key) return type(key) == "string" and key:sub(1, 4) == "EXT:" end
+  local function isPackKey(key) return type(key) == "string" and key:sub(1, 5) ~= "DYNA:" and not isExtKey(key) end
 
   local function winsTable()
     if deps.wins then return deps.wins() or {} end
@@ -159,8 +161,10 @@ return function(mod, deps)
       if n > 0 and type(key) == "string" then
         total = total + n
         if isPackKey(key) then packs = packs + 1 end
-        if (tonumber(deps.stars and deps.stars(key)) or 0) >= 5 then fiveStar = true end
-        if key:sub(-2) == ":L" then crystal = true end
+        if not isExtKey(key) then
+          if (tonumber(deps.stars and deps.stars(key)) or 0) >= 5 then fiveStar = true end
+          if key:sub(-2) == ":L" then crystal = true end
+        end
       end
     end
     if total >= 1 then unlock("first_raid") end

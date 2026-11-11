@@ -126,6 +126,7 @@ return function(mod)
   local makeDen = loadSibling(mod, "src/den_screen.lua")
   local makePick = loadSibling(mod, "src/pc_pick.lua")
   local makeDyna = loadSibling(mod, "src/dyna.lua")
+  local makeApi = loadSibling(mod, "src/raid_api.lua")
   local makeAchievements = loadSibling(mod, "src/achievements.lua")
   local AchievementData = loadSibling(mod, "data/raid_achievements.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
@@ -196,7 +197,20 @@ return function(mod)
       mod.log:warn("the Dynamax dens failed to build: %s", tostring(dy))
     end
   end
-  local BattlerHud = makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil, T = T, cjk = cjk }) or nil
+  -- the raid API (src/raid_api.lua): other mods' bosses, dens and raids; its boss records under
+  -- "EXT:" keys
+  local Api = nil
+  if makeApi then
+    local ok, api = pcall(makeApi, mod, { N = N, Bosses = Bosses, Sprites = Sprites, Dyna = Dyna, Battle = Battle,
+      Rewards = Rewards, Gmax = Gmax })
+    if ok and type(api) == "table" then
+      Api = api
+      Api.install()
+    else
+      mod.log:warn("the raid API failed to build: %s", tostring(api))
+    end
+  end
+  local BattlerHud =makeBattlerHud and makeBattlerHud(mod, { drawPixel = HD and HD.drawPixel or nil, T = T, cjk = cjk }) or nil
   local PadHide = makePadHide and makePadHide(mod) or nil
   -- the den screen's PC: the game's boxes, to choose a Pokemon from
   local Pick = nil
@@ -316,6 +330,9 @@ return function(mod)
       if raid and raid.legend then return end
       if (outcome == "win" or outcome == "fled") and den and Dens and Dens.finish then pcall(Dens.finish, den) end
     end,
+    -- (a raid's start and its end: told to the mod whose raid it was, and as events for any mod)
+    onRaidStart = function(info, ext) if Api then Api.started(info, ext) end end,
+    onRaidEnd = function(info, ext) if Api then Api.ended(info, ext) end end,
     padOnSecond = padOnSecond,
     moveInfo = function() return moveInfoForced or mod.options:get("move_info") end,
     onOpen = function()
@@ -535,8 +552,16 @@ return function(mod)
   end
   mod.exports.dens = Dens
   mod.exports.achievements = Achievements
+  -- the raid API for other mods (docs/RAID_API.md): connect(mod) -> a handle for its bosses, dens
+  -- and raids
+  if Api then
+    Api.dens, Api.raid = Dens, Raid
+    mod.exports.apiVersion = Api.VERSION
+    mod.exports.supports = function(name) return Api.supports(name) end
+    mod.exports.connect = function(m, opts) return Api.connect(m, opts) end
+  end
   mod.exports._test = { scene = Scene, pad = Pad, rules = N, dens = Dens, battlerHud = BattlerHud, battle = Battle, sim = Sim,
-    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna,
+    rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna, api = Api,
     padSecond = function(on) padForced = on end, difficulty = function(v) difficultyForced = v end,
     moveInfo = function(v) moveInfoForced = v end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }

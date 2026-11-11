@@ -420,27 +420,66 @@ return function(mod, deps)
     return R.SOLO
   end
 
+  -- the natures in Gen 3's order (personality % 25): the raised stat is n / 5 and the lowered n % 5,
+  -- over Attack, Defense, Speed, Sp. Atk, Sp. Def (the same one: neutral)
+  Bt.NATURES = { "HARDY", "LONELY", "BRAVE", "ADAMANT", "NAUGHTY", "BOLD", "DOCILE", "RELAXED", "IMPISH", "LAX",
+    "TIMID", "HASTY", "SERIOUS", "JOLLY", "NAIVE", "MODEST", "MILD", "QUIET", "BASHFUL", "RASH",
+    "CALM", "GENTLE", "SASSY", "CAREFUL", "QUIRKY" }
+  Bt.NATURE_STATS = { "atk", "def", "spe", "spa", "spd" }
+  -- a nature's number (0-24) from its name ("Timid", "TIMID") or number; nil when it is neither
+  function Bt.natureId(v)
+    if type(v) == "number" then return (v >= 0 and v <= 24 and v == floor(v)) and v or nil end
+    if type(v) ~= "string" then return nil end
+    local up = v:upper()
+    for i, name in ipairs(Bt.NATURES) do if name == up then return i - 1 end end
+    return nil
+  end
+  -- a stat's nature factor: 1.1 raised, 0.9 lowered, else 1
+  function Bt.natureFactor(id, statKey)
+    if not id then return 1 end
+    local up, down = Bt.NATURE_STATS[floor(id / 5) + 1], Bt.NATURE_STATS[id % 5 + 1]
+    if up == down then return 1 end
+    if statKey == up then return 1.1 end
+    if statKey == down then return 0.9 end
+    return 1
+  end
+
+  -- IVs a boss record fixes: a number for all six, or a table by stat (the rest rolled)
+  local function fixedIvs(ivs, v)
+    if type(v) == "number" then
+      for k in pairs(ivs) do ivs[k] = max(0, min(31, floor(v))) end
+    elseif type(v) == "table" then
+      for k, n in pairs(v) do if ivs[k] ~= nil and tonumber(n) then ivs[k] = max(0, min(31, floor(tonumber(n)))) end end
+    end
+    return ivs
+  end
+
   -- the boss: its base stats (the pack's Giga ones; a Dynamax boss its species') at a level in its
-  -- tier's band, its IVs (Bt.rollIvs) and HP x hpMult (and the difficulty's: Bt.solo)
+  -- tier's band, its IVs (Bt.rollIvs) and HP x hpMult (and the difficulty's: Bt.solo). A record may
+  -- fix its level, IVs, nature, ability, held item and an HP factor of its own (another mod's boss,
+  -- src/raid_api.lua); left out, the tier's
   function Bt.boss(key, rng)
     local b, sp = Bosses[key], Sprites[key]
     if not (b and sp) then return nil end
     local T = R.STARS[b.stars] or R.STARS[1]
-    local level = rng and rng(T.lv[1], T.lv[2]) or T.lv[1]
+    local level = tonumber(b.level) or (rng and rng(T.lv[1], T.lv[2]) or T.lv[1])
     local base = sp.base or {}
-    local ivs = Bt.rollIvs(T.perfect or 0, rng)
+    local ivs = fixedIvs(Bt.rollIvs(T.perfect or 0, rng), b.ivs)
+    local nature = Bt.natureId(b.nature)
+    local function nat(k, v) return nature and floor(v * Bt.natureFactor(nature, k)) or v end
     -- (RAID DIFFICULTY Solo: HP and attacks raised for a team of four of the player's own)
     local solo = Bt.solo()
     local hpK, atkK = 1, 1
     if solo then hpK, atkK = solo.HP_K or 1, solo.ATK_K or 1 end
+    hpK = hpK * (tonumber(b.hp) or 1)
     local hp = floor(stat(base.hp or 80, ivs.hp, level, true) * (T.hpMult or 1) * hpK)
     -- (a Dynamax boss carries its own species: a form is a species of its own)
     local species = b.slot or (Pokemon and Pokemon.speciesFromNational and select(2, pcall(Pokemon.speciesFromNational, b.national))) or nil
     local mon = {
       species = tonumber(species) or 0, speciesId = tonumber(species) or 0, level = level, hp = hp, maxHp = hp,
-      attack = floor(stat(base.atk or 80, ivs.atk, level) * atkK), defense = stat(base.def or 80, ivs.def, level),
-      spAtk = floor(stat(base.spa or 80, ivs.spa, level) * atkK), spDef = stat(base.spd or 80, ivs.spd, level),
-      speed = stat(base.spe or 80, ivs.spe, level),
+      attack = floor(nat("atk", stat(base.atk or 80, ivs.atk, level)) * atkK), defense = nat("def", stat(base.def or 80, ivs.def, level)),
+      spAtk = floor(nat("spa", stat(base.spa or 80, ivs.spa, level)) * atkK), spDef = nat("spd", stat(base.spd or 80, ivs.spd, level)),
+      speed = nat("spe", stat(base.spe or 80, ivs.spe, level)),
       ivs = ivs,
       evs = { hp = 0, atk = 0, def = 0, spe = 0, spa = 0, spd = 0 },
       personality = 0, ability = 0, abilityId = 0, friendship = 255,
@@ -457,6 +496,10 @@ return function(mod, deps)
       name = b.name, boss = true, key = key, moves = {}, solo = solo ~= nil,
     }
     boss.gender = Bt.genderOf(mon.species, gp)
+    -- (a fixed ability, by name: the engine's adapter reads a battler's ability as a name; a held item)
+    if type(b.ability) == "string" and b.ability ~= "" then boss.ability = b.ability:upper():gsub("%s+", "_") end
+    if tonumber(b.item) and tonumber(b.item) > 0 then boss.item, mon.item = tonumber(b.item), tonumber(b.item) end
+    mon.nature = nature
     if b.moves then
       for _, name in ipairs(b.moves) do
         local mv = Bt.move(name, 99, 99)
@@ -598,7 +641,8 @@ return function(mod, deps)
     local A = { rng = rng, st = st }
 
     local function abilityName(b)
-      if not engineAdapter or b.boss then return nil end
+      -- (a boss has none, unless its record names one: Bt.boss)
+      if not engineAdapter or (b.boss and type(b.ability) ~= "string") then return nil end
       local ok, a = pcall(engineAdapter.abilityOf, engineAdapter, b)
       return ok and type(a) == "string" and a:upper():gsub(" ", "_") or nil
     end
