@@ -16,7 +16,7 @@ local function body(game, log)
   end
   local fails = 0
   local function check(ok, what) if not ok then fails = fails + 1 end; log((ok and "ok   " or "FAIL ") .. what) end
-  love.window.setMode(1280, 720, { resizable = true, highdpi = true })
+  love.window.setMode(1280, 720, { resizable = true, highdpi = true, vsync = 0 })
   U.wait(2)
   if not waitFor(function() return game.phase == "boot" and game.boot end, 900) then log("FAIL boot"); return end
   game:_handleBootAction({ action = "new_game", name = "DS", gender = 0 })

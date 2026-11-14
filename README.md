@@ -178,7 +178,8 @@ you won: Exp. Candies, TMs, berries and more.*
 
 ### After the Win
 
-- 🔴 **One throw to catch it:** choose one of your Poké Balls. The Pokémon joins your party, or
+- 🔴 **One throw to catch it:** choose one of your Poké Balls and watch it fly over your team in slow
+  motion, open up and draw the Pokémon in, then slam shut into the ground. The Pokémon joins your party, or
   your PC when the party is full. On Solo difficulty the catch never fails; on Sword / Shield the
   higher its stars, the harder it is to catch. The higher its stars, the better its IVs: one
   perfect IV at 1★, two at 2★, three at 3★, four at 4★ and 5★.

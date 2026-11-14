@@ -21,7 +21,7 @@ return function(mod, deps)
   local Battle, Sim = deps.Battle, deps.Sim
   local R = N.RAID
   local floor, max, min = math.floor, math.max, math.min
-  local sin, cos, pi, sqrt = math.sin, math.cos, math.pi, math.sqrt
+  local sin, cos, pi, sqrt, abs = math.sin, math.cos, math.pi, math.sqrt, math.abs
   -- the words' language (src/i18n.lua; deps.T): English as it is without it
   local function plainWords(s, ...) if select("#", ...) > 0 then return s:format(...) end return s end
   local T = deps.T or setmetatable({ mark = function(s) return s end, c = function(_, s, ...) return plainWords(s, ...) end,
@@ -896,6 +896,10 @@ return function(mod, deps)
     return true
   end
   function Rd.say(text) if r then r.say, r.sayT = text, r.t end end
+  -- the phases with the glow at the boss's feet put away (the catch on: the boss going, or gone), and
+  -- its fade's length
+  Rd.FEET_OFF = { catch = true, throw = true, rewards = true, outro = true, after = true }
+  Rd.FEET_S = 0.4
 
   function Rd.update(dt)
     if not r then return end
@@ -906,6 +910,8 @@ return function(mod, deps)
       r.hitStop = r.hitStop - dt
       dt = dt * 0.06
     end
+    -- the throw's slow motion: the raid's clock slowed while the ball flies over the party into the boss
+    if r.phase == "throw" and r.throw and Rd.throwScale then dt = dt * Rd.throwScale(r.t - r.throw.t0) end
     -- (the raid fading in: its clock held at the intro's start until the black has gone)
     if r.phase == "intro" and (r.fadeIn or 0) > 0 then
       r.fadeIn = max(0, r.fadeIn - dt)
@@ -919,7 +925,14 @@ return function(mod, deps)
       stepStarting()
       if r.phase == "den" then return end
     end
-    if Scene then Scene.setTime(r.t) end
+    if Scene then
+      Scene.setTime(r.t)
+      -- the glow at the boss's feet put away from the catch on (it showed through the ball)
+      local want = Rd.FEET_OFF[r.phase] and 0 or 1
+      local fg = Scene.feetGlow or 1
+      local step = dt / Rd.FEET_S
+      Scene.feetGlow = fg + max(-step, min(step, want - fg))
+    end
     if r.phase == "intro" then
       local I = Rd.INTRO
       if once("reveal", I.REVEAL_AT) and Scene then Scene.shot("reveal", I.REVEAL_S) end
@@ -2357,16 +2370,24 @@ return function(mod, deps)
   -- ------- the catch (Sword / Shield's: one throw after the win, a ball the player picks) and the
   -- rewards card (src/rewards.lua does the giving)
 
-  -- the throw, as Sword / Shield's (Wooble's capture max-catch-reward-screen-end-card.mp4): the giant
-  -- ball held up behind the party (HOLD), hurled in an arc at the boss (FLY), a flash as it reaches it
-  -- (FLASH), it opens (OPEN) and the boss is drawn in on streaks of light (SUCK), shuts (CLOSE), drops
-  -- to the ground (FALL) and lands in a crater of thrown-up rocks (SETTLE), then three checks: each a
-  -- slow wobble round a cone with its button lit (CHECK each). Caught: the button flares, a flash, and
-  -- the giant ball shrinks into the real one (SHRINK), whose button lights green with sparkles
-  -- (GOTCHA). Broken free: it bursts. BALL_M its diameter in metres (a member stands 1.1), SMALL_M the
-  -- real ball's.
-  Rd.THROW = { HOLD = 1.2, FLY = 0.85, FLASH = 0.25, OPEN = 0.3, SUCK = 1.3, CLOSE = 0.25, FALL = 0.55,
-    SETTLE = 0.5, TURN = 0.45, AIM_SPIN = 1.2, AIM_LEAN = 0.15, CHECK = 1.3, CHECKS = 3, LEAN = 0.3, FLARE = 0.35, SHRINK = 0.65, GOTCHA = 1.2,
+  -- the throw, in one motion: the giant ball comes out (APPEAR), is tossed up spinning and turns its
+  -- front to the boss as it falls back (TOSS), is cocked back (COCK) and lobbed (LOB) - over the party
+  -- the raid's clock slows to SLOW (Rd.throwScale), the camera following the ball (CHASE); still flying it opens (OPEN_S of the
+  -- lob), the boss is pulled in on streams of light (SUCK_S on); at the lob's end the clock is back,
+  -- it snaps shut (CLOSE), turns its front to the camera with a hop and slams into the ground
+  -- (SLAM), into a crater of thrown-up rocks (SETTLE), then three checks: each a slow wobble round a
+  -- cone with its button lit (CHECK each). Caught: the button flares, a flash, and the giant ball
+  -- shrinks into the real one (SHRINK), whose button lights green with sparkles (GOTCHA). Broken
+  -- free: it bursts. BALL_M its diameter in metres (a member stands 1.1), SMALL_M the real ball's.
+  -- Lengths in the raid's seconds (the slow stretch runs longer in real time); the _S marks are
+  -- shares of the lob's length.
+  Rd.THROW = { APPEAR = 0.25, TOSS = 0.95, TOSS_H = 1.3, TOSS_SPINS = 1.5, COCK = 0.32,
+    COCK_BACK = { 0.35, -0.35, 0.7 }, LOB = 1.3, LOB_ARC = 3.2, LOB_EASE = 1.7,
+    SLOW_S = 0.22, OPEN_S = 0.5, SUCK_S = 0.56, OPEN = 0.25, CLOSE = 0.08, SLAM = 0.42, SLAM_HOP = 0.25,
+    SLOW = 0.5, SLOW_IN = 0.3,
+    AIM_BIAS = 0.5, AIM_PITCH = 0.3, STREAMS = 16,
+    CHASE = { BACK = 6.0, UP = 1.8, SIDE = 2.0, LOOK_K = 0.5, FOV = 54, IN0 = 0.08, IN1 = 0.32 },
+    SETTLE = 0.5, CHECK = 1.3, CHECKS = 3, LEAN = 0.3, FLARE = 0.35, SHRINK = 0.65, GOTCHA = 1.2,
     BALL_M = 2.2, SMALL_M = 0.4 }
   local BALL_RGB = {
     ITEM_POKE_BALL = { 0.9, 0.15, 0.15 }, ITEM_GREAT_BALL = { 0.2, 0.45, 0.95 }, ITEM_ULTRA_BALL = { 0.95, 0.8, 0.15 },
@@ -2607,18 +2628,20 @@ return function(mod, deps)
     end
   end
 
-  -- the throw's marks (seconds from its start)
+  -- the throw's marks (seconds from its start, the raid's clock; one table, filled again each call)
+  local throwM = {}
   local function throwTimes()
-    local T = Rd.THROW
-    local m = {}
-    m.fly = T.HOLD
-    m.at = m.fly + T.FLY
-    m.open = m.at + T.FLASH
-    m.suck = m.open + T.OPEN
-    m.close = m.suck + T.SUCK
-    m.turn = m.close + T.CLOSE
-    m.fall = m.turn + T.TURN
-    m.land = m.fall + T.FALL
+    local T, m = Rd.THROW, throwM
+    m.appear = 0
+    m.toss = T.APPEAR
+    m.cock = m.toss + T.TOSS
+    m.lob = m.cock + T.COCK
+    m.slow = m.lob + T.LOB * T.SLOW_S
+    m.open = m.lob + T.LOB * T.OPEN_S
+    m.suck = m.lob + T.LOB * T.SUCK_S
+    m.close = m.lob + T.LOB
+    m.slam = m.close
+    m.land = m.slam + T.SLAM
     m.check = m.land + T.SETTLE
     m.done = m.check + T.CHECK * T.CHECKS
     m.shrink = m.done + T.FLARE
@@ -2628,14 +2651,19 @@ return function(mod, deps)
   end
   Rd.throwTimes = throwTimes
 
-  -- the den's places for it (metres): held near the eye, in front of the boss, on the ground
+  -- the den's places for it (metres): H held near the eye, E off the boss's left at its chest (where
+  -- the lob ends: the camera following from its right keeps the boss in view beside it), Gr on the ground in front of its pad; R the ball's radius, bh the boss's height, BM the
+  -- boss's middle (one table each, filled again each call)
+  local placeH, placeE, placeGr, placeBM = {}, {}, {}, {}
   local function throwPlaces()
     local P = Scene and Scene.PAD or { x = 0, z = -9.2, h = 0.2 }
     local bh = (Scene and Scene.MEMBER_H or 1.1) * Rd.sizeOf(r.key)
     local R = Rd.THROW.BALL_M / 2
-    -- (it takes the boss in from off to its side, its mouth turned to it, so the boss stays in view)
-    return { X = -1.7, Y = 1.9, Z = 2.4 }, { X = P.x - bh * 0.42 - R * 1.2, Y = P.h + bh * 0.45, Z = P.z + 3.2 },
-      { X = P.x, Y = R, Z = P.z + 2.2 }, R, bh
+    placeH.X, placeH.Y, placeH.Z = -1.7, 1.9, 2.4
+    placeE.X, placeE.Y, placeE.Z = P.x - bh * 0.38, P.h + bh * 0.42, P.z + 3.0
+    placeGr.X, placeGr.Y, placeGr.Z = P.x, R, P.z + 2.2
+    placeBM.X, placeBM.Y, placeBM.Z = P.x, P.h + bh * 0.45, P.z
+    return placeH, placeE, placeGr, R, bh, placeBM
   end
 
   local function smoothstep(e0, e1, x)
@@ -2643,47 +2671,105 @@ return function(mod, deps)
     return t * t * (3 - 2 * t)
   end
 
-  -- where the ball is now and how it stands: X, Y, Z (its middle), radius (m), and its pose
+  -- the raid's clock while the ball flies (eased down to SLOW over the slow stretch, full speed again
+  -- the moment it snaps shut)
+  function Rd.throwScale(u)
+    local T, M = Rd.THROW, throwTimes()
+    if u < M.slow or u >= M.close then return 1 end
+    return 1 - (1 - T.SLOW) * smoothstep(M.slow, M.slow + T.SLOW_IN, u)
+  end
+
+  -- the ball's front turned on the boss from (X, Y, Z), as the camera sees it: its spin (a little
+  -- toward the eye, AIM_BIAS, so the opening reads), and the lean / phi that tip its mouth up at it
+  local function aimAt(X, Y, Z, BM)
+    local T = Rd.THROW
+    if not (Scene and Scene.viewDir) then return pi - T.AIM_BIAS, 0, 0 end
+    local vx, vy, vz = Scene.viewDir(BM.X - X, BM.Y - Y, BM.Z - Z)
+    -- (0 .. 2 pi: the boss is ahead of it, so its angle stays near pi and never wraps; the bias always
+    -- the same way round, so the ball keeps to one side)
+    local s = math.atan2(vx, vz)
+    if s < 0 then s = s + 2 * pi end
+    s = s - T.AIM_BIAS
+    local pitch = min(T.AIM_PITCH, max(0, math.atan2(vy, sqrt(vx * vx + vz * vz))))
+    local cs = cos(s)
+    return s, pitch * abs(cs), cs < 0 and pi / 2 or -pi / 2
+  end
+
+  local function easeOutBack(v)
+    local c1 = 1.70158
+    local c3 = c1 + 1
+    return 1 + c3 * (v - 1) ^ 3 + c1 * (v - 1) ^ 2
+  end
+
+  -- where the ball is now and how it stands: X, Y, Z (its middle), radius (m), and its pose (one table,
+  -- filled again each call)
+  local ballPose = {}
+  local GOTCHA_RGB = { 0.35, 1, 0.45 }
   function Rd.ballNow(u)
     local T, M = Rd.THROW, throwTimes()
-    local H, B, Gr, R = throwPlaces()
-    local o = { dyna = 1, open = 0, lean = 0, phi = 0, spin = 0, button = 0, bright = 0 }
+    local H, E, Gr, R, _, BM = throwPlaces()
+    local o = ballPose
+    o.dyna, o.open, o.lean, o.phi, o.spin, o.button, o.bright, o.inner = 1, 0, 0, 0, 0, 0, 0, 0
+    o.anchor, o.buttonRGB, o.alpha, o.now, o.rgb = nil, nil, nil, nil, nil
     local X, Y, Z, rad = H.X, H.Y, H.Z, R
-    if u < M.fly then
-      -- held up: a slow bob, turning a little
-      Y = H.Y + 0.08 * sin(u * 3)
-      o.spin = -0.6 + 0.15 * sin(u * 1.7)
-      o.lean = 0.25
-      o.phi = 2.4
-    elseif u < M.at then
-      local f = (u - M.fly) / T.FLY
-      local e = f * f * (3 - 2 * f)
-      X, Y, Z = H.X + (B.X - H.X) * e, H.Y + (B.Y - H.Y) * e + 2.8 * sin(pi * e), H.Z + (B.Z - H.Z) * e
-      -- tumbling on its way, coming round to aim its mouth at the boss as it arrives
-      local aim = smoothstep(0.55, 1, f)
-      o.spin = (-0.6 + f * 7) * (1 - aim) + T.AIM_SPIN * aim
-      o.lean = 0.25 * (1 - aim) + T.AIM_LEAN * aim
-      o.phi = 2.4 * (1 - aim) + pi * aim
-    elseif u < M.fall then
-      -- side on to the boss, its mouth toward it: open, the boss drawn in, shut; then it turns in the
-      -- air to face the camera
-      X, Y, Z = B.X, B.Y, B.Z
-      if u < M.suck then o.open = (u - M.open) / T.OPEN
-      elseif u < M.close then o.open = 1
-      else o.open = 1 - (u - M.close) / T.CLOSE end
-      o.open = max(0, min(1, o.open))
-      o.bright = u < M.open and (1 - (u - M.at) / T.FLASH) * 0.6 or 0
-      -- (upright, its front - where it opens - turned to the boss; the lid lifts up and back)
-      local turn = u >= M.turn and smoothstep(0, 1, (u - M.turn) / T.TURN) or 0
-      o.spin = T.AIM_SPIN * (1 - turn)
-      o.lean = T.AIM_LEAN * (1 - turn)
-      o.phi = pi
-      Y = B.Y + 0.25 * sin(turn * pi)
+    local CB = T.COCK_BACK
+    if u < M.lob then
+      local aim, al, ap = aimAt(X, Y, Z, BM)
+      if u < M.toss then
+        -- out: it pops into being, a flash on it
+        local v = max(0, u / T.APPEAR)
+        rad = R * (0.4 + 0.6 * easeOutBack(v))
+        o.bright = 0.6 * (1 - v)
+        o.spin = aim + T.TOSS_SPINS * 2 * pi
+        o.lean, o.phi = 0.35, 0
+      elseif u < M.cock then
+        -- tossed up, tumbling, coming round to face the boss as it falls back into the hand
+        local v = (u - M.toss) / T.TOSS
+        local w = 1 - v
+        Y = H.Y + T.TOSS_H * 16 * v * v * w * w
+        o.spin = aim + T.TOSS_SPINS * 2 * pi * w * w
+        local settle = smoothstep(0.45, 1, v)
+        o.lean = 0.35 * w * w * (1 - settle) + al * settle
+        o.phi = v * 9 * (1 - settle) + ap * settle
+      else
+        -- cocked back, its front held on the boss
+        local e = smoothstep(0, 1, (u - M.cock) / T.COCK)
+        X, Y, Z = H.X + CB[1] * e, H.Y + CB[2] * e, H.Z + CB[3] * e
+        aim, al, ap = aimAt(X, Y, Z, BM)
+        o.spin = aim + 0.25 * sin(pi * e)
+        o.lean, o.phi = al, ap
+      end
+    elseif u < M.close then
+      -- the lob: an arc from the hand to the boss's chest, high over the party (its top a third of the
+      -- way along, level at its end), fast out of the hand and easing; its front on the boss all along
+      local f = (u - M.lob) / T.LOB
+      local s = 1 - (1 - f) ^ T.LOB_EASE
+      local CX, CY, CZ = H.X + CB[1], H.Y + CB[2], H.Z + CB[3]
+      local bump = 6.75 * s * (1 - s) * (1 - s)
+      X, Y, Z = CX + (E.X - CX) * s, CY + (E.Y - CY) * s + T.LOB_ARC * bump, CZ + (E.Z - CZ) * s
+      o.spin, o.lean, o.phi = aimAt(X, Y, Z, BM)
+      -- open, the boss's light filling it
+      o.open = smoothstep(M.open, M.open + T.OPEN, u)
+      o.inner = smoothstep(M.open, M.suck, u)
     elseif u < M.land then
-      -- the drop: straight down, faster and faster, onto the ground in front of the pad
-      local f = (u - M.fall) / T.FALL
-      local ff = f * f * f
-      X, Y, Z = B.X + (Gr.X - B.X) * f, B.Y + (Gr.Y - B.Y) * ff, B.Z + (Gr.Z - B.Z) * f
+      -- snapped shut, a hop as its front comes round to the camera, then down onto the ground
+      local v = (u - M.slam) / T.SLAM
+      local sh = min(1, (u - M.slam) / T.CLOSE)
+      o.open = 1 - sh * sh
+      o.inner = 1 - sh
+      o.bright = 2 * (1 - sh) * sh
+      local aim, al, ap = aimAt(E.X, E.Y, E.Z, BM)
+      local turn = smoothstep(0.08, 0.55, v)
+      -- (the short way round to 0)
+      while aim > pi do aim = aim - 2 * pi end
+      while aim < -pi do aim = aim + 2 * pi end
+      o.spin = aim * (1 - turn)
+      o.lean, o.phi = al * (1 - turn), ap
+      local m = smoothstep(0, 1, v)
+      X, Z = E.X + (Gr.X - E.X) * m, E.Z + (Gr.Z - E.Z) * m
+      local top = E.Y + T.SLAM_HOP
+      if v < 0.3 then Y = E.Y + T.SLAM_HOP * sin(pi / 2 * v / 0.3)
+      else Y = top - (top - Gr.Y) * ((v - 0.3) / 0.7) ^ 2.6 end
     else
       -- (on the ground: its foot stays put, the ball turns about it - an inverted cone)
       o.anchor = true
@@ -2721,11 +2807,31 @@ return function(mod, deps)
           -- caught: the real ball's button glowing green
           local g = (u - M.gotcha) / T.GOTCHA
           o.button = (g > 0 and g < 1) and sin(g * pi) or 0
-          o.buttonRGB = { 0.35, 1, 0.45 }
+          o.buttonRGB = GOTCHA_RGB
         end
       end
     end
     return X, Y, Z, rad, o
+  end
+
+  -- the camera following the ball through the lob: from the field shot onto a pose behind it and to
+  -- its side, looking past it to the boss (one table, the scene copies it)
+  local chasePose = { eye = { 0, 0, 0 }, look = { 0, 0, 0 }, fov = 50 }
+  local function chaseShot(u, X, Y, Z, BM)
+    local T, M = Rd.THROW, throwTimes()
+    local C = T.CHASE
+    local F = Scene.SHOTS.field
+    local w = smoothstep(C.IN0, C.IN1, (u - M.lob) / T.LOB)
+    local e, l = chasePose.eye, chasePose.look
+    e[1] = F.eye[1] + (X + C.SIDE - F.eye[1]) * w
+    e[2] = F.eye[2] + (Y + C.UP - F.eye[2]) * w
+    e[3] = F.eye[3] + (Z + C.BACK - F.eye[3]) * w
+    local lx, ly, lz = X + (BM.X - X) * C.LOOK_K, Y + (BM.Y - Y) * C.LOOK_K, Z + (BM.Z - Z) * C.LOOK_K
+    l[1] = F.look[1] + (lx - F.look[1]) * w
+    l[2] = F.look[2] + (ly - F.look[2]) * w
+    l[3] = F.look[3] + (lz - F.look[3]) * w
+    chasePose.fov = F.fov + (C.FOV - F.fov) * w
+    Scene.shot(chasePose, 0)
   end
 
   -- the throw's timeline (update step): cues for the camera, effects and words; the outcome
@@ -2733,25 +2839,26 @@ return function(mod, deps)
     local TH, th = Rd.THROW, r.throw
     local u = r.t - th.t0
     local M = throwTimes()
-    local H, B, Gr, R, bh = throwPlaces()
+    local _, _, Gr, R, bh, BM = throwPlaces()
     local function once(k, at)
       if th.cues[k] or u < at then return false end
       th.cues[k] = true
       return true
     end
-    -- the boss: drawn in through the open ball
+    -- the boss: drawn in through the open ball, all in by the time it shuts
+    local inBy = M.close - 0.05 * TH.LOB
     if u < M.suck then r.shrink = 1
-    elseif u < M.close then r.shrink = 1 - (u - M.suck) / TH.SUCK
+    elseif u < inBy then r.shrink = 1 - smoothstep(M.suck, inBy, u)
     else r.shrink = 0 end
     local b = Bosses[r.key]
     local name = b and b.name or T("It")
-    local Ga = { X = Gr.X, Y = Gr.Y, Z = Gr.Z, h = R * 2, foot = 0 }
+    local X, Y, Z = Rd.ballNow(u)
     if Sounds then
       local C = Sounds.CATCH
-      if once("seThrow", M.fly) then Rd.se(C.throw) end
+      if once("seThrow", M.lob) then Rd.se(C.throw) end
       if once("seOpen", M.open) then Rd.se(C.open) end
       if once("seSuck", M.suck) then Rd.se(C.suck) end
-      if once("seClose", M.close + TH.CLOSE * 0.6) then Rd.se(C.close) end
+      if once("seClose", M.close) then Rd.se(C.close) end
       if once("seLand", M.land) then Rd.se(C.land) end
       for k = 1, TH.CHECKS do
         if once("seWob" .. k, M.check + (k - 1) * TH.CHECK) then Rd.se(C.wobble) end
@@ -2766,23 +2873,21 @@ return function(mod, deps)
       if not th.caught and once("seBurst", M.done) then Rd.se(C.burst) end
       if th.caught and once("seFanfare", M.gotcha) then Rd.caughtFanfare() end
     end
-    if once("at", M.at) then
-      -- it reaches the boss: a flash, the camera close on it
-      if Fx then
-        Fx.flash({ 1, 0.85, 1 }, 0.7, 0.35, r.t)
-        Fx.emit("light", B.X, B.Y, B.Z + 1, 0, 0, 0, 0.5, bh * 2, 1, 0.4, 0.8, 0.6)
-      end
-      if Scene then
-        local P = Scene.PAD
-        Scene.shot({ eye = { B.X - 0.4, B.Y - 0.3, B.Z + 5.4 }, look = { P.x - bh * 0.08, B.Y + bh * 0.08, P.z },
-          fov = 60 }, 0.15)
-        Scene.shake(0.12, 0.4)
-      end
+    if once("appear", 0) and Fx then
+      -- out it comes: a burst of light where it pops into being
+      Fx.emit("light", X, Y, Z + 0.3, 0, 0, 0, 0.35, R * 3, 1, 0.35, 0.75, 0.7)
     end
-    if once("closed", M.close + TH.CLOSE * 0.6) and Fx then
+    -- the camera with the ball through the lob; at the snap, down to the ground in front of the pad
+    if Scene and u >= M.lob and u < M.close then chaseShot(u, X, Y, Z, BM) end
+    if once("snap", M.close) and Scene then Scene.shot("catch", TH.SLAM) end
+    if once("open", M.open) and Fx then
+      Fx.emit("light", X, Y, Z + 0.3, 0, 0, 0, 0.4, R * 3.5, 1, 0.45, 0.85, 0.6)
+      if Scene then Scene.shake(0.06, 0.5) end
+    end
+    if once("closed", M.close + TH.CLOSE) and Fx then
       Fx.flash({ 1, 0.6, 0.2 }, 0.45, 0.3, r.t)
+      if Scene then Scene.shake(0.1, 0.3) end
     end
-    if once("fall", M.fall) and Scene then Scene.shot("catch", TH.FALL) end
     if once("land", M.land) then
       -- it lands: the ground thrown up round it
       if Fx then
@@ -2817,26 +2922,17 @@ return function(mod, deps)
           seed = j * 3.7 }
       end
     end
-    -- the energy streaming off its sides while it is giant, the light drawn in from the boss
+    -- the light drawn in from the boss while it goes in
     if Fx then
       th.acc = th.acc + max(0, r.t - (th.lastT or r.t)) * 40
       th.lastT = r.t
-      local X, Y, Z, rad, o = Rd.ballNow(u)
       while th.acc >= 1 do
         th.acc = th.acc - 1
-        if o.dyna > 0.5 and u < M.small then
-          local side = (th.acc * 7919 % 2 < 1) and -1 or 1
-          local jx = (math.random() - 0.5) * 0.4
-          Fx.emit("wisp", X + side * rad * 0.95, Y + (math.random() - 0.3) * rad * 0.8, Z + 0.3,
-            side * (0.6 + math.random()), 0.6 + math.random(), jx, 0.7, rad * 0.22, 1, 0.25, 0.7, 0.55)
-          Fx.emit("ember", X + side * rad, Y + (math.random() - 0.5) * rad, Z + 0.3, side * 1.5, 1.2, 0, 0.6,
-            0.05, 1, 0.4, 0.85, 1)
-        end
         if u >= M.suck and u < M.close then
-          -- streaks of light from the boss into the ball
-          local bx = B.X + (math.random() - 0.5) * bh * 0.8
-          local by = B.Y + (math.random() - 0.5) * bh * 0.9
-          local p = Fx.emit("inspark", bx, by, B.Z - 0.8, 0, 0, 0, 1.2, 0.06, 1, 0.45, 0.75, 1)
+          -- sparks of light from the boss into the ball
+          local bx = BM.X + (math.random() - 0.5) * bh * 0.8 * r.shrink
+          local by = BM.Y + (math.random() - 0.5) * bh * 0.9 * r.shrink
+          local p = Fx.emit("inspark", bx, by, BM.Z + 0.8, 0, 0, 0, 1.2, 0.06, 1, 0.45, 0.75, 1)
           if p then p.home = { X = X, Y = Y, Z = Z + 0.2 } end
         end
       end
@@ -2869,10 +2965,11 @@ return function(mod, deps)
         Scene.shake(0.25, 0.5)
       end
     end
-    local _ = Ga
+    -- broken free: out of the ball at full size, then fading away
     if th.burstAt then
       local v = r.t - th.burstAt
-      r.shrink = v < 0.4 and (v / 0.4) or max(0, 1 - (v - 1.6) / 0.6)
+      r.shrink = min(1, v / 0.4)
+      r.bossFade = v < 1.6 and 1 or max(0, 1 - (v - 1.6) / 0.6)
     end
     local endAt = th.caught and (M.gotcha + 0.3) or M.done
     th.said.out = u >= endAt
@@ -3627,12 +3724,19 @@ return function(mod, deps)
       G.rectangle("fill", 0, 0, w, h)
     end
   end
-  function Rd.drawMain(G, w, h)
+  -- the den itself: the boss's and the members' pictures as they are now, what lasts on the field,
+  -- and the scene (the sky, the 3D, the boss, the four)
+  local function drawWorld(G, w, h)
     local img, q = Rd.frameAt(r.key, r.t)
     if img and loaded then
       bossPic.image, bossPic.quad, bossPic.box, bossPic.size = img, q, loaded.box, Rd.sizeOf(r.key)
-      -- (drawn into the ball once thrown at: caught, or broken free and gone)
+      -- (drawn into the ball once thrown at: caught, or broken free and gone - pulled toward it)
       bossPic.shrink = r.throw and (r.shrink or 1) or 1
+      bossPic.suckX, bossPic.suckY, bossPic.suckZ = nil, nil, nil
+      if r.throw and bossPic.shrink < 1 then
+        bossPic.suckX, bossPic.suckY, bossPic.suckZ = Rd.ballNow(r.t - r.throw.t0)
+      end
+      bossPic.alpha = r.bossFade or 1
       bossPic.lunge = r.lunge or 0
       bossPic.jump = r.jump or 0
       -- (a Gigantamax boss: its cloud lit pinker; another mod's art may ask for the red one)
@@ -3653,8 +3757,11 @@ return function(mod, deps)
       if Fx.setTeam then Fx.setTeam(Rd.teamState(), r.t) end
     end
     if Scene then Scene.draw(G, 0, 0, w, h, r.t, img and not r.bossGone and bossPic or nil, memberPicsShown) end
+  end
+
+  function Rd.drawMain(G, w, h)
+    drawWorld(G, w, h)
     if Fx and phaseRow().fx then
-      local LB = Scene and Scene.lastBoss
       Fx.drawMoves(G, r.t)
       Fx.draw(G, w, h, r.t)
     end
@@ -3724,31 +3831,61 @@ return function(mod, deps)
       local fx, fy, fk = Fx.P(X, 0, Z)
       if fx then x, y, k = fx + ux * rad * fk, fy - uy * rad * fk, fk end
     end
-    if th.rocks then
-      for _, rk in ipairs(th.rocks) do if rk.Z < Z then Fx.rock(G, rk.X, 0, rk.Z, rk.size, rk.seed) end end
-    end
-    if u >= M.suck and u < M.close + 0.1 then
-      -- the boss drawn in: streaks from its body to the ball
-      local LB = Scene and Scene.lastBoss
-      if LB and x then
-        G.setBlendMode("add")
-        local f = (u - M.suck) / Rd.THROW.SUCK
-        for j = 1, 14 do
-          local sx = LB.x + (((j * 37) % 11) / 10 - 0.5) * LB.h * 0.7
-          local sy = LB.y + (((j * 53) % 13) / 12 - 0.5) * LB.h * 0.8
-          local ph = (f * 2.5 + j * 0.13) % 1
-          local mx, my = x + sin(o.spin or 0) * rad * k * 0.6, y
-          local hx, hy = sx + (mx - sx) * ph, sy + (my - sy) * ph
-          local tx, ty = sx + (mx - sx) * max(0, ph - 0.35), sy + (my - sy) * max(0, ph - 0.35)
-          G.setLineWidth(max(1, rad * k * 0.06 * (1 - ph * 0.5)))
-          G.setColor(1, 0.45 + 0.4 * ((j % 3) / 2), 0.8, 0.75)
-          G.line(tx, ty, hx, hy)
-        end
-        G.setBlendMode("alpha")
-        G.setLineWidth(1)
-      end
-    end
+    -- (broken free: the crater's rocks fade with the ball, so none is left over the party)
     local bv = th.burstAt and (r.t - th.burstAt) or nil
+    local rockA = bv and max(0, 1 - bv / 0.3) or 1
+    if th.rocks then
+      for _, rk in ipairs(th.rocks) do if rk.Z < Z then Fx.rock(G, rk.X, 0, rk.Z, rk.size, rk.seed, rockA) end end
+    end
+    if u >= M.suck and u < M.close + 0.1 and x then
+      -- the boss drawn in: streams of light curving from its body (where it is drawn now, pulled
+      -- toward the ball) into the open ball's mouth, flowing along; a swirl round the mouth
+      local LB = Scene and Scene.lastBoss
+      local mx, my = Fx.ballMouth(x, y, rad * k, o)
+      local fade = min(1, (u - M.suck) / 0.06) * (u < M.close and 1 or max(0, 1 - (u - M.close) / 0.1))
+      local f = (u - M.suck) / max(0.01, M.close - M.suck)
+      local lw = rad * k * 0.07
+      G.setBlendMode("add")
+      if LB and LB.x and fade > 0 then
+        local N, SEG = Rd.THROW.STREAMS, 8
+        for j = 1, N do
+          local sx = LB.x + (((j * 37) % 11) / 10 - 0.5) * LB.h * 0.75
+          local sy = LB.y + (((j * 53) % 13) / 12 - 0.5) * LB.h * 0.85
+          local dx, dy = mx - sx, my - sy
+          local len = sqrt(dx * dx + dy * dy) + 1e-3
+          local bow = ((j % 2 == 0) and 1 or -1) * len * (0.16 + 0.12 * ((j * 7) % 5) / 4)
+          local qx, qy = (sx + mx) / 2 - dy / len * bow, (sy + my) / 2 + dx / len * bow
+          local head = (f * 3.2 + j * 0.137) % 1
+          local t0 = max(0, head - 0.42)
+          local px, py
+          local cg = 0.35 + 0.45 * ((j % 3) / 2)
+          for sg = 0, SEG do
+            local t = t0 + (head - t0) * sg / SEG
+            local a, b, c = (1 - t) * (1 - t), 2 * (1 - t) * t, t * t
+            local nx, ny = a * sx + b * qx + c * mx, a * sy + b * qy + c * my
+            if px then
+              local along = sg / SEG
+              G.setLineWidth(max(1, lw * (1 - t * 0.6) * (0.35 + 0.65 * along)))
+              G.setColor(1, cg, 0.8, 0.8 * along * fade)
+              G.line(px, py, nx, ny)
+            end
+            px, py = nx, ny
+          end
+          G.setColor(1, 0.9, 0.97, 0.9 * fade)
+          G.circle("fill", px, py, max(1, lw * 0.55), 8)
+        end
+      end
+      -- the swirl at its mouth, turning in
+      G.setLineWidth(max(1, lw * 0.7))
+      for j = 0, 2 do
+        local rr = rad * k * (0.45 + 0.2 * ((f * 4 + j / 3) % 1))
+        local a0 = -r.t * 6 + j * 2.1
+        G.setColor(1, 0.55, 0.9, 0.55 * fade)
+        G.arc("line", "open", mx, my, rr, a0, a0 + 1.7, 14)
+      end
+      G.setBlendMode("alpha")
+      G.setLineWidth(1)
+    end
     if x and not (bv and bv > 0.3) then
       o.now = r.t
       o.rgb = th.rgb
@@ -3762,7 +3899,7 @@ return function(mod, deps)
       Fx.drawBall(G, x, y, rad * k, o)
     end
     if th.rocks then
-      for _, rk in ipairs(th.rocks) do if rk.Z >= Z then Fx.rock(G, rk.X, 0, rk.Z, rk.size, rk.seed) end end
+      for _, rk in ipairs(th.rocks) do if rk.Z >= Z then Fx.rock(G, rk.X, 0, rk.Z, rk.size, rk.seed, rockA) end end
     end
     G.pop()
   end

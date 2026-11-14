@@ -24,7 +24,7 @@ local function body(game, log)
     return pred() and true or false
   end
   local function shot(name) log("shot", name, U.shot(game, dir .. "/" .. name .. ".png") and "ok" or "MISSING") end
-  love.window.setMode(1280, 720, { resizable = true, highdpi = true })
+  love.window.setMode(1280, 720, { resizable = true, highdpi = true, vsync = 0 })
   U.wait(2)
   if not waitFor(function() return game.phase == "boot" and game.boot end, 900) then log("FAIL boot"); return end
   game:_handleBootAction({ action = "new_game", name = "DS", gender = 0 })

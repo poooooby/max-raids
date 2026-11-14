@@ -22,7 +22,7 @@ local function body(game, log)
     log((ok and "ok   " or "FAIL ") .. what)
     return ok
   end
-  love.window.setMode(tonumber(os.getenv("SHOT_W")) or 1280, tonumber(os.getenv("SHOT_H")) or 720, { resizable = true, highdpi = true })
+  love.window.setMode(tonumber(os.getenv("SHOT_W")) or 1280, tonumber(os.getenv("SHOT_H")) or 720, { resizable = true, highdpi = true, vsync = 0 })
   U.wait(2)
   if not waitFor(function() return game.phase == "boot" and game.boot end, 900) then
     log("FAIL boot phase not reached; phase:", game.phase)

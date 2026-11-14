@@ -207,7 +207,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   -- the shaders and textures made ahead (the raid calls it while the screen is black: made at the
   -- first effect they took 120 ms of a frame on a slow device)
   local warmSheets   -- (below: the pixel art sheets)
-  function Fx.warm() shader("fire"); warmSheets(); return true end
+  function Fx.warm()
+    shader("fire")
+    warmSheets()
+    if Fx.warmBall then Fx.warmBall() end
+    return true
+  end
 
   -- real fire in a rect (x, y top-left, w, h); false when the shader is out
   local function fireRect(G2, x, y, w, h, now, seed, alpha, blaze)
@@ -3033,6 +3038,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   --   rgb         the real ball's top colour
   --   button      the button's glow 0..1, buttonRGB its colour
   --   bright      extra light over the energy (a flash)
+  --   inner       0..1 the light inside it while open (the boss's energy going in)
   --   now }
   local BALL_NL, BALL_NJ = 14, 28
   local ballMesh, ballV, ballN = nil, {}, 0
@@ -3076,6 +3082,168 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     return x * B[1] + y * B[4] + z * B[7], x * B[2] + y * B[5] + z * B[8], x * B[3] + y * B[6] + z * B[9]
   end
   local Bf = {}
+  -- the open ball's mouth on screen (its middle, a little to the front): x, y, and how far it faces
+  -- the eye (-1 .. 1)
+  function Fx.ballMouth(cx, cy, rad, o)
+    Bf[1], Bf[2], Bf[3], Bf[4], Bf[5], Bf[6], Bf[7], Bf[8], Bf[9] = ballFrame(o)
+    local x, y = ballPoint(Bf, 0, 0.05, 0.3, false, 0)
+    return cx + x * rad, cy - y * rad, Bf[9]
+  end
+  -- the same ball on the GPU: one static mesh (each face's six corners on the unit sphere, its cell
+  -- and its kind), turned, hinged and lit by a shader - no Lua a vertex. Drawn in three passes: the
+  -- faces turned away (the inside when open), the near ones, then the grid of light added over the
+  -- near side. The Lua mesh above stands in where the shader cannot be made.
+  local BALL_GLSL = ([[
+varying highp vec3 vN;
+varying highp vec2 vUV;
+varying mediump vec3 vFace;
+#ifdef VERTEX
+attribute highp vec3 BallP;    // the corner on the unit sphere (y up its axis, z its front)
+attribute highp vec2 BallUV;   // the corner in cells: theta's row, phi's column
+attribute mediump vec3 BallF;  // the face's checker (0 / 1), band (0 / 1), lid (0 / 1)
+uniform highp vec3 bR;         // the ball's frame in the view: its right, up and front
+uniform highp vec3 bU;
+uniform highp vec3 bF;
+uniform highp vec3 place;      // its middle on screen (x, y) and radius (px)
+uniform highp float hinge;     // the lid swung about its hinge (radians, 0 shut)
+vec4 position(mat4 transform_projection, vec4 vertex_position) {
+  highp vec3 p = BallP;
+  highp vec3 n = BallP;
+  if (BallF.z > 0.5) {
+    highp float c = cos(hinge);
+    highp float s = sin(hinge);
+    highp float zz = p.z + 1.0;
+    p = vec3(p.x, p.y * c - zz * s, p.y * s + zz * c - 1.0);
+    n = vec3(n.x, n.y * c - n.z * s, n.y * s + n.z * c);
+  }
+  highp vec3 v = p.x * bR + p.y * bU + p.z * bF;
+  vN = n.x * bR + n.y * bU + n.z * bF;
+  vUV = BallUV;
+  vFace = BallF;
+  return transform_projection * vec4(place.x + v.x * place.z, place.y - v.y * place.z, 0.0, 1.0);
+}
+#endif
+#ifdef PIXEL
+uniform mediump vec3 top;       // the real ball's top colour
+uniform mediump float dyna;     // 1 the Dynamax energy .. 0 the real ball
+uniform mediump float bright;   // extra light (a flash)
+uniform mediump float alphaOut;
+uniform mediump float pass;     // 0 the far faces, 1 the near, 2 the grid over the near
+uniform mediump float lineW;    // half a grid line's width, in cells
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  highp vec3 n = normalize(vN);
+  bool front = n.z > 0.0;
+  if (front != (pass > 0.5)) discard;
+  if (pass > 1.5) {
+    // the grid of light: every row's edge but the poles, every other column's
+    mediump float fu = abs(fract(vUV.x + 0.5) - 0.5);
+    mediump float lat = (vUV.x > 0.5 && vUV.x < NL_LAST) ? 1.0 - smoothstep(lineW * 0.9, lineW * 1.6, fu) : 0.0;
+    mediump float st = max(0.12, sin(vUV.x * ROW_RAD));
+    mediump float fv = abs(fract(vUV.y * 0.5 + 0.5) - 0.5) * 2.0;
+    mediump float mer = 1.0 - smoothstep(lineW / st * 0.9, lineW / st * 1.6, fv);
+    return vec4(1.0, 0.75, 0.95, 0.55 * dyna * alphaOut * max(lat, mer)) * color;
+  }
+  // the real ball's colours (top, white foot, black band) blended to the energy's (pink, a checker of
+  // light cells, a red band), lit from the upper left, a rim on the near side
+  bool band = vFace.y > 0.5;
+  mediump vec3 c = band ? vec3(0.06, 0.06, 0.08) : (vFace.z > 0.5 ? top : vec3(0.95));
+  mediump vec3 e = band ? vec3(0.9, 0.12, 0.3) : vec3(1.0, 0.38 + 0.25 * vFace.x, 0.78 + 0.12 * vFace.x);
+  c = mix(c, e, dyna);
+  mediump float lam = max(0.0, dot(n, vec3(-0.42, 0.62, 0.66)));
+  mediump float shade = front ? 0.45 + 0.6 * lam : 0.35;
+  mediump float rim = front ? (1.0 - n.z) * (1.0 - n.z) * (0.15 + 0.6 * dyna) : 0.0;
+  if (!front) c *= vec3(0.6, 0.5, 0.6);
+  c = min(c * shade + vec3(rim, rim * 0.6, rim * 0.9) + bright, vec3(1.0));
+  return vec4(c, (1.0 - dyna * 0.35) * alphaOut) * color;
+}
+#endif
+]]):gsub("NL_LAST", ("%.1f"):format(BALL_NL - 0.5)):gsub("ROW_RAD", ("%.7f"):format(pi / BALL_NL))
+  local ballGpu = { mesh = nil, shader = nil, failed = false, sent = {}, vR = { 0, 0, 0 }, vU = { 0, 0, 0 },
+    vF = { 0, 0, 0 }, vPlace = { 0, 0, 0 }, vTop = { 0, 0, 0 } }
+  -- the mesh and the shader, made once (Fx.warm makes them ahead); false where they cannot be
+  local function ballGpuReady()
+    if ballGpu.failed or not G then return false end
+    if ballGpu.mesh then return true end
+    local ok = pcall(function()
+      local v = {}
+      for i = 0, BALL_NL - 1 do
+        local t0, t1 = i / BALL_NL * pi, (i + 1) / BALL_NL * pi
+        local tm = (t0 + t1) / 2
+        local band = abs(tm - pi / 2) < 0.13 and 1 or 0
+        local lid = i < BALL_NL / 2 and 1 or 0
+        for j = 0, BALL_NJ - 1 do
+          local p0, p1 = j / BALL_NJ * 2 * pi, (j + 1) / BALL_NJ * 2 * pi
+          local chk = ((i + j) % 2 == 0) and 1 or 0
+          local function corner(t, p, ti, pj)
+            v[#v + 1] = { sin(t) * cos(p), cos(t), sin(t) * sin(p), ti, pj, chk, band, lid }
+          end
+          corner(t0, p0, i, j); corner(t0, p1, i, j + 1); corner(t1, p1, i + 1, j + 1)
+          corner(t0, p0, i, j); corner(t1, p1, i + 1, j + 1); corner(t1, p0, i + 1, j)
+        end
+      end
+      ballGpu.mesh = G.newMesh({ { "BallP", "float", 3 }, { "BallUV", "float", 2 }, { "BallF", "float", 3 } },
+        v, "triangles", "static")
+      ballGpu.shader = G.newShader(BALL_GLSL)
+    end)
+    if not ok then
+      ballGpu.failed, ballGpu.mesh, ballGpu.shader = true, nil, nil
+      return false
+    end
+    return true
+  end
+  function Fx.warmBall() ballGpuReady() end
+  -- a uniform sent only when it changes (a number, or a vec held in a table of its own)
+  local function ballSendN(name, x)
+    if ballGpu.sent[name] == x then return end
+    ballGpu.sent[name] = x
+    ballGpu.shader:send(name, x)
+  end
+  local function ballSendV(name, t, a, b, c)
+    if t[1] == a and t[2] == b and t[3] == c and ballGpu.sent[name] then return end
+    t[1], t[2], t[3] = a, b, c
+    ballGpu.sent[name] = true
+    ballGpu.shader:send(name, t)
+  end
+  -- the ball drawn on the GPU (Bf already its frame); false when it cannot be
+  local function ballGpuPasses(G2, cx, cy, rad, d, open, rgb, bright, aOut)
+    local sh = ballGpu.shader
+    ballSendV("bR", ballGpu.vR, Bf[1], Bf[2], Bf[3])
+    ballSendV("bU", ballGpu.vU, Bf[4], Bf[5], Bf[6])
+    ballSendV("bF", ballGpu.vF, Bf[7], Bf[8], Bf[9])
+    ballSendV("place", ballGpu.vPlace, cx, cy, rad)
+    ballSendN("hinge", -open * 1.25)
+    ballSendV("top", ballGpu.vTop, rgb[1], rgb[2], rgb[3])
+    ballSendN("dyna", d)
+    ballSendN("bright", bright)
+    ballSendN("alphaOut", aOut)
+    -- (a grid line max(1 px, 1.8% of the radius) wide, against a row's height on screen)
+    ballSendN("lineW", max(1, rad * 0.018) / 2 / (rad * pi / BALL_NL))
+    G2.setColor(1, 1, 1, 1)
+    G2.setShader(sh)
+    ballSendN("pass", 0)
+    G2.draw(ballGpu.mesh)
+    ballSendN("pass", 1)
+    G2.draw(ballGpu.mesh)
+    if d > 0.05 then
+      G2.setBlendMode("add")
+      ballSendN("pass", 2)
+      G2.draw(ballGpu.mesh)
+      G2.setBlendMode("alpha")
+    end
+    G2.setShader()
+  end
+  local function ballGpuDraw(G2, cx, cy, rad, d, open, rgb, bright, aOut)
+    if not ballGpuReady() then return false end
+    local ok = pcall(ballGpuPasses, G2, cx, cy, rad, d, open, rgb, bright, aOut)
+    if not ok then
+      G2.setShader()
+      G2.setBlendMode("alpha")
+      ballGpu.failed = true
+      if mod and mod.log then mod.log:warn("the catch's ball shader failed; drawn in Lua") end
+    end
+    return ok
+  end
+
   function Fx.drawBall(G2, cx, cy, rad, o)
     if rad <= 0.5 then return end
     local d = o.dyna or 0
@@ -3089,7 +3257,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       glowAt(G2, cx, cy, rad * 2.1, 1, 0.25, 0.65, 0.45 * d * aOut + 0.35 * (o.bright or 0))
       G2.setBlendMode("alpha")
     end
-    if ballReady() then
+    -- (on the GPU; the Lua mesh where it cannot be)
+    local gpu = ballGpuDraw(G2, cx, cy, rad, d, open, rgb, o.bright or 0, aOut)
+    if not gpu and ballReady() then
       local n = 0
       -- two passes: the faces turned away first (the inside when open), then the near ones
       for pass = 1, 2 do
@@ -3148,12 +3318,22 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         G2.draw(ballMesh)
       end
     end
-    -- the energy's grid: lines of light along the cells' edges, on the near side
+    -- the light inside it while it is open, at its mouth
+    local inner = (o.inner or 0) * open
+    if inner > 0.01 then
+      local mx, my = ballPoint(Bf, 0, 0.05, 0.3, false, 0)
+      local pulse = 0.85 + 0.15 * sin(now * 23)
+      G2.setBlendMode("add")
+      glowAt(G2, cx + mx * rad, cy - my * rad, rad * 1.25, 1, 0.3, 0.7, 0.75 * inner * aOut * pulse)
+      glowAt(G2, cx + mx * rad, cy - my * rad, rad * 0.55, 1, 0.85, 0.95, 0.9 * inner * aOut * pulse)
+      G2.setBlendMode("alpha")
+    end
+    -- the energy's grid: lines of light along the cells' edges, on the near side (the GPU's pass 2)
     if d > 0.05 then
       G2.setBlendMode("add")
       G2.setLineWidth(max(1, rad * 0.018))
       G2.setColor(1, 0.75, 0.95, 0.55 * d * aOut)
-      for i = 1, BALL_NL - 1 do
+      for i = 1, gpu and 0 or BALL_NL - 1 do
         local th = i / BALL_NL * pi
         local lid = i < BALL_NL / 2
         for j = 0, BALL_NJ - 1 do
@@ -3163,7 +3343,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           if az > 0 and bz > 0 then G2.line(cx + ax * rad, cy - ay * rad, cx + bx * rad, cy - by * rad) end
         end
       end
-      for j = 0, BALL_NJ - 1, 2 do
+      for j = 0, gpu and -1 or BALL_NJ - 1, 2 do
         local p = j / BALL_NJ * 2 * pi
         for i = 0, BALL_NL - 1 do
           local t0, t1 = i / BALL_NL * pi, (i + 1) / BALL_NL * pi
@@ -3214,8 +3394,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   end
 
   -- a rock sitting on the ground at (X, Z), size metres across (the crater's ring)
+  -- (a 0..1 its opacity, fading out)
   local rockPts = {}
-  function Fx.rock(G2, X, Y, Z, size, seed)
+  function Fx.rock(G2, X, Y, Z, size, seed, a)
+    a = a or 1
+    if a <= 0.01 then return end
     local x, y, k = P(X, Y + size * 0.3, Z)
     if not x then return end
     local r = size * 0.5 * k
@@ -3227,11 +3410,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       rockPts[q * 2 + 1], rockPts[q * 2 + 2] = x + cos(an) * rr * 1.25, y + sin(an) * rr * flat
     end
     for q = n * 2 + 1, #rockPts do rockPts[q] = nil end
-    G2.setColor(0, 0, 0, 0.3)
+    G2.setColor(0, 0, 0, 0.3 * a)
     G2.ellipse("fill", x, y + r * 0.45, r * 1.35, r * 0.3, 16)
-    G2.setColor(0.34, 0.25, 0.17, 1)
+    G2.setColor(0.34, 0.25, 0.17, a)
     rockPoly(G2, rockPts, max(3, r * 0.6))
-    G2.setColor(0.52, 0.41, 0.29, 0.8)
+    G2.setColor(0.52, 0.41, 0.29, 0.8 * a)
     G2.polygon("fill", rockPts[13], rockPts[14], rockPts[15], rockPts[16], rockPts[17], rockPts[18], x, y - r * 0.05)
   end
 

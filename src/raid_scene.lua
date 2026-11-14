@@ -76,6 +76,11 @@ return function(mod, deps)
     return cam.CX + vx * cam.F / d, cam.CY - vy * cam.F / d, d
   end
   Sc.project = project
+  -- a direction in the world (metres) turned into the camera's: x right, y up, z toward the eye
+  function Sc.viewDir(dx, dy, dz)
+    local m = cam.m
+    return m[1] * dx + m[2] * dy + m[3] * dz, m[5] * dx + m[6] * dy + m[7] * dz, m[9] * dx + m[10] * dy + m[11] * dz
+  end
 
   local function viewMatrix(out)
     local m = cam.m
@@ -190,6 +195,7 @@ return function(mod, deps)
     if Sc._struck then for k in pairs(Sc._struck) do Sc._struck[k] = nil end end
     if Sc._burst then Sc._burst.t0 = nil end
     if Sc._quake then Sc._quake.amp = 0 end
+    Sc.feetGlow = 1
   end
 
   local function copyPose(dst, src)
@@ -1023,10 +1029,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if cx then glow(G2, cx, cy, Rr * cam.F / d * 0.9, Rr * cam.F / d * 0.35, 0.6, 0.2, 0.7, 0.18) end
   end
 
-  -- pink energy pillars rising from the ground round the boss's feet, flickering
+  -- pink energy pillars rising from the ground round the boss's feet, flickering; Sc.feetGlow (0..1,
+  -- the raid's) dims them, the energy pooled under it and the pad's glow together - put away for the
+  -- catch, where they showed through the ball
   Sc.PILLARS = 9
+  Sc.feetGlow = 1
   local function pillars(G2, size, front)
     local PD = Sc.PAD
+    local fg = Sc.feetGlow or 1
+    if fg <= 0.01 then return end
     local h = Sc.MEMBER_H * (size or 3.5)
     for i = 1, Sc.PILLARS do
       local ang = 2 * pi * (i + 0.3 * hash(i, 111)) / Sc.PILLARS
@@ -1035,7 +1046,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         local rr = PD.r * (0.7 + 0.6 * hash(i, 112))
         local x, z = PD.x + rr * cos(ang), PD.z + rr * sin(ang)
         local life = (clock * (0.25 + 0.2 * hash(i, 113)) + hash(i, 114)) % 1
-        local a = sin(life * pi) ^ 2 * (0.55 + 0.45 * sin(clock * 9 + i * 3))
+        local a = sin(life * pi) ^ 2 * (0.55 + 0.45 * sin(clock * 9 + i * 3)) * fg
         local top = h * (0.25 + 0.55 * hash(i, 115)) * (0.6 + 0.4 * sin(life * pi))
         local bx, by, bd = project(x, 0, z)
         local tx, ty = project(x, top, z)
@@ -1056,7 +1067,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local gx, gy, gd = project(PD.x, 0.02, PD.z)
       if gx then
         local R = PD.r * 1.6 * cam.F / gd
-        glow(G2, gx, gy, R, R * 0.25, 1, 0.25, 0.55, 0.55 + 0.1 * sin(clock * 2))
+        glow(G2, gx, gy, R, R * 0.25, 1, 0.25, 0.55, (0.55 + 0.1 * sin(clock * 2)) * fg)
       end
     end
   end
@@ -1202,54 +1213,98 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     -- where it stands on screen, for the raid's throw (its middle and height)
     Sc.lastBoss = Sc.lastBoss or {}
     Sc.lastBoss.x, Sc.lastBoss.y, Sc.lastBoss.h = x, y - bh * k * 0.5, bh * k
-    -- being caught: drawn into the ball (pic.shrink 1 -> 0, about its middle, a red glow)
+    -- fading away (pic.alpha 1 -> 0: gone after breaking free of the ball); its red aura - eight
+    -- copies under the sprite - goes far sooner (faK), so it never shows through the fading sprite
+    local fa = pic.alpha or 1
+    if fa <= 0.01 then return end
+    local faK = fa ^ 6
+    -- being caught: drawn into the ball (pic.shrink 1 -> 0, a red glow) - pulled toward it when the
+    -- raid gives where it is (pic.suckX / Y / Z, metres): its middle carried there as it shrinks,
+    -- stretched along the pull, pink ghosts of it trailing behind
     local shrink = pic.shrink or 1
     if shrink < 1 then
       if shrink <= 0.01 then return end
-      local cy = y - bh * k * 0.5
+      local cx0, cy0 = x, y - bh * k * 0.5
+      local cx, cy = cx0, cy0
+      local e = 1 - shrink
+      local tx, ty
+      if pic.suckX then tx, ty = project(pic.suckX, pic.suckY, pic.suckZ) end
+      local pull = tx and e ^ 1.3 or 0
+      if tx then cx, cy = cx0 + (tx - cx0) * pull, cy0 + (ty - cy0) * pull end
       local ks = k * shrink
+      local ang, st = 0, 1
+      if tx then
+        ang = math.atan2(ty - cy0, tx - cx0)
+        st = 1 + 0.2 * sin(e * pi)
+      end
+      local my = (box[2] + box[4]) / 2
+      Sc.lastBoss.x, Sc.lastBoss.y, Sc.lastBoss.h = cx, cy, bh * ks
       local s = sil()
       if s then
         G2.setShader(s)
-        G2.setColor(1, 0.25, 0.3, 0.85 * shrink)
-        for _, dd in ipairs(OUT) do G2.draw(pic.image, pic.quad, x + dd[1] * 2, cy + dd[2] * 2, 0, ks, ks, ox, (box[2] + box[4]) / 2) end
+        if tx and e > 0.05 then
+          -- the ghosts behind, along the pull, fading
+          G2.setBlendMode("add")
+          for j = 1, 3 do
+            local pj = max(0, e - 0.09 * j) ^ 1.3
+            local kj = k * (1 - max(0, e - 0.09 * j))
+            G2.setColor(1, 0.3, 0.65, 0.3 * shrink * (1 - j / 4) * fa)
+            G2.draw(pic.image, pic.quad, cx0 + (tx - cx0) * pj, cy0 + (ty - cy0) * pj, 0, kj, kj, ox, my)
+          end
+          G2.setBlendMode("alpha")
+        end
+        G2.setColor(1, 0.25, 0.3, 0.85 * shrink * fa)
+        for _, dd in ipairs(OUT) do
+          G2.draw(pic.image, pic.quad, cx + dd[1] * 2, cy + dd[2] * 2, 0, ks, ks, ox, my)
+        end
         G2.setShader()
       end
-      G2.setColor(1, 0.75, 0.75, shrink)
-      drawPixel(pic.image, pic.quad, x, cy, 0, ks, ks, ox, (box[2] + box[4]) / 2)
+      G2.setColor(1, 0.75 + 0.15 * e, 0.75 + 0.2 * e, shrink * fa)
+      if st ~= 1 then
+        -- (stretched along the pull: turned onto it, drawn long, turned back)
+        G2.push()
+        G2.translate(cx, cy)
+        G2.rotate(ang)
+        G2.scale(st, 1 / st)
+        G2.rotate(-ang)
+        drawPixel(pic.image, pic.quad, 0, 0, 0, ks, ks, ox, my)
+        G2.pop()
+      else
+        drawPixel(pic.image, pic.quad, cx, cy, 0, ks, ks, ox, my)
+      end
       G2.setColor(1, 1, 1, 1)
       return
     end
     -- its shadow and the pad's glow under it
     -- (on the ground, smaller while it is in the air)
     local sk = jump > 0 and (1 - 0.35 * jump) or 1
-    G2.setColor(0, 0, 0, 0.45 * sk)
+    G2.setColor(0, 0, 0, 0.45 * sk * fa)
     G2.ellipse("fill", x, groundY, bw * k * 0.42 * sk, bw * k * 0.09 * sk, 32)
-    glow(G2, x, groundY, bw * k * 0.6, bw * k * 0.14, 1, 0.6, 0.35, 0.35)
+    if (Sc.feetGlow or 1) > 0.01 then glow(G2, x, groundY, bw * k * 0.6, bw * k * 0.14, 1, 0.6, 0.35, 0.35 * (Sc.feetGlow or 1) * fa) end
     -- the red aura: a wide dark-red glow pass, then the bright outline, then the sprite
     local s = sil()
     if s then
       G2.setShader(s)
       local o1 = max(1.5, k * 2.2)
       local pulse = 0.7 + 0.3 * sin(t * 4)
-      G2.setColor(0.45, 0.0, 0.02, 0.45 * pulse)
+      G2.setColor(0.45, 0.0, 0.02, 0.45 * pulse * faK)
       for _, dd in ipairs(OUT) do G2.draw(pic.image, pic.quad, x + dd[1] * o1 * 1.8, y + dd[2] * o1 * 1.8, 0, k, k, ox, oy) end
-      G2.setColor(1, 0.12, 0.12, 0.95)
+      G2.setColor(1, 0.12, 0.12, 0.95 * faK)
       for _, dd in ipairs(OUT) do G2.draw(pic.image, pic.quad, x + dd[1] * o1 * 0.6, y + dd[2] * o1 * 0.6, 0, k, k, ox, oy) end
       G2.setShader()
     end
-    G2.setColor(1, 1, 1, 1)
+    G2.setColor(1, 1, 1, fa)
     drawPixel(pic.image, pic.quad, x, y, 0, k * jx, k / jx, ox, oy)
     if white > 0 and s then
       G2.setShader(s)
       G2.setBlendMode("add")
-      G2.setColor(1, 1, 1, 0.55 * white)
+      G2.setColor(1, 1, 1, 0.55 * white * fa)
       G2.draw(pic.image, pic.quad, x, y, 0, k, k, ox, oy)
       G2.setBlendMode("alpha")
       G2.setShader()
     end
     -- the Dynamax cloud circling over its head
-    Sc.dynaCloud(G2, x, y - bh * k, math.min(bw, bh * 1.2) * k, t, 1, pic.gmax)
+    Sc.dynaCloud(G2, x, y - bh * k, math.min(bw, bh * 1.2) * k, t, faK, pic.gmax)
     -- streaks swirling round its body (arcs on an ellipse, each with a fading tail)
     G2.setLineWidth(max(1, k * 1.2))
     local cx, cy = x, y - bh * k * 0.5
@@ -1259,7 +1314,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       for sgm = 0, 9 do
         local a1, a2 = a0 - sgm * 0.09, a0 - (sgm + 1) * 0.09
         local front = sin(a1) > 0
-        G2.setColor(1, 0.1, 0.12, (1 - sgm / 10) * (front and 0.9 or 0.35))
+        G2.setColor(1, 0.1, 0.12, (1 - sgm / 10) * (front and 0.9 or 0.35) * fa)
         G2.line(cx + rx * cos(a1), cy + ry * sin(a1) + (j - 1) * bh * k * 0.18,
           cx + rx * cos(a2), cy + ry * sin(a2) + (j - 1) * bh * k * 0.18)
       end
@@ -1269,7 +1324,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local u = (hash(i, 51) + t * (0.25 + 0.3 * hash(i, 52))) % 1
       local px = x + (hash(i, 53) - 0.5) * bw * k * 1.1
       local py = y - u * bh * k * 1.15
-      G2.setColor(1, 0.25 + 0.3 * hash(i, 54), 0.1, (1 - u) * 0.9)
+      G2.setColor(1, 0.25 + 0.3 * hash(i, 54), 0.1, (1 - u) * 0.9 * fa)
       G2.rectangle("fill", px, py, max(1, k * 1.2), max(1, k * 1.2))
     end
   end

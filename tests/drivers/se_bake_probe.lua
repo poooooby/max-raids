@@ -5,6 +5,8 @@
 
 local function body(game, log)
   local U = require("tests.drivers.util")
+  -- (vsync off: the driver runs as fast as the frames go)
+  if love.window.setVSync then love.window.setVSync(0) end
   for _ = 1, 900 do
     if game.phase == "boot" and game.boot then break end
     U.wait(1)

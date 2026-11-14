@@ -13,7 +13,7 @@ local function body(game, log)
     end
     return pred() and true or false
   end
-  love.window.setMode(tonumber(os.getenv("SHOT_W")) or 1280, tonumber(os.getenv("SHOT_H")) or 720, { resizable = true, highdpi = true })
+  love.window.setMode(tonumber(os.getenv("SHOT_W")) or 1280, tonumber(os.getenv("SHOT_H")) or 720, { resizable = true, highdpi = true, vsync = 0 })
   U.wait(2)
   if not waitFor(function() return game.phase == "boot" and game.boot end, 900) then
     log("FAIL boot phase not reached")
@@ -151,20 +151,78 @@ local function body(game, log)
   check(X.state().phase == "throw", "Use throws it")
   local M = R.throwTimes()
   local t0 = cur.throw.t0
-  local marks = { { 0.6, "c10_hold" }, { M.fly + 0.45, "c11_fly" }, { M.at + 0.08, "c12_flash" }, { M.suck + 0.5, "c13_suck" },
-    { M.close + 0.1, "c14_close" }, { M.turn + 0.25, "c14b_turn" }, { M.fall + 0.3, "c15_fall" }, { M.land + 0.08, "c16_land" }, { M.check + 0.6, "c17_check1" },
+  local TH = R.THROW
+  local midSuck = (M.suck + M.close) / 2
+  local marks = { { 0.1, "c10_appear" }, { M.toss + TH.TOSS * 0.5, "c10b_toss_top" }, { M.cock - 0.05, "c10c_toss_aimed" },
+    { M.cock + TH.COCK * 0.8, "c10d_cock" }, { M.lob + TH.LOB * 0.12, "c11_lob" }, { M.slow + 0.1, "c11b_over_party" },
+    { M.open + TH.OPEN * 0.8, "c12_open" }, { midSuck, "c13_suck" }, { M.close - 0.06, "c13b_suck_late" },
+    { M.close + TH.CLOSE, "c14_snap" }, { M.slam + TH.SLAM * 0.35, "c14b_turn" }, { M.slam + TH.SLAM * 0.8, "c15_slam" },
+    { M.land + 0.08, "c16_land" }, { M.check + 0.6, "c17_check1" },
     { M.check + 1.6, "c18_check2" }, { M.done + 0.25, "c19_flare" }, { M.shrink + 0.35, "c20_shrink" },
     { M.gotcha + 0.5, "c21_gotcha" }, { M.gotcha + 1.6, "c22_words" } }
+  -- the slow motion and the glow at the boss's feet, read at each mark
+  local Sc = X._test.scene
+  local slowChecked = false
+  local function atMark(name, at)
+    local cur = R.current()
+    if not cur then return end
+    local u = (X.state().t or 0) - t0
+    log(("  %s u=%.2f scale=%.2f feet=%.2f shrink=%.2f"):format(name, u, R.throwScale(u), Sc.feetGlow or -1,
+      cur.shrink or -1))
+    if at < M.land then check((Sc.feetGlow or 1) < 0.05, name .. ": the glow at the boss's feet put away") end
+    if name == "c13_suck" then
+      slowChecked = true
+      check(R.throwScale(u) <= R.THROW.SLOW + 0.01, "the clock slowed in the lob")
+    elseif name == "c14_snap" then
+      check((cur.shrink or 1) <= 0.001, "the boss all in by the snap")
+    elseif name == "c15_slam" then
+      check(R.throwScale(u) == 1, "full speed by the slam")
+    end
+  end
   if os.getenv("PROBE_FAIL") == "1" then
     -- broken free: the burst, the boss back, its going
     marks = { { M.check + 0.6, "c17_check1" }, { M.done - 0.1, "f19_last" }, { M.done + 0.05, "f20_burst" },
       { M.done + 0.25, "f21_burst2" }, { M.done + 0.6, "f22_back" }, { M.done + 1.3, "f23_words" },
       { M.done + 2.1, "f24_going" }, { M.done + 2.6, "f25_gone" }, { M.done + 3.6, "f26_disappeared" } }
   end
+  -- the raid's clock against the game's, frame by frame: a driver steps the game 1/60 s a frame
+  -- whatever the frame rate (a remote desktop's 30 fps plays a run at half speed), so the rate in each
+  -- stretch of the throw is its clock's seconds over 1/60 a frame. PROBE_NOSHOTS=1 takes no shots in
+  -- the throw (to watch it run)
+  local rates = { { "toss + cock", 0, M.lob }, { "lob before slowing", M.lob, M.slow },
+    { "slow (full)", M.slow + TH.SLOW_IN, M.close }, { "snap to landing", M.close, M.land }, { "landed", M.land, M.land + 1 } }
+  for _, q in ipairs(rates) do q.du, q.dt = 0, 0 end
+  local lastU
+  local function sample()
+    local u = (X.state().t or 0) - t0
+    if lastU and u > lastU then
+      for _, q in ipairs(rates) do
+        if lastU >= q[2] and u <= q[3] then q.du, q.dt = q.du + (u - lastU), q.dt + 1 / 60 end
+      end
+    end
+    lastU = u
+  end
+  local noShots = os.getenv("PROBE_NOSHOTS") == "1"
   for _, m in ipairs(marks) do
-    waitFor(function() return not R.current() or X.state().phase ~= "throw" or (X.state().t or 0) - t0 >= m[1] end, 8000)
+    waitFor(function()
+      sample()
+      return not R.current() or X.state().phase ~= "throw" or (X.state().t or 0) - t0 >= m[1]
+    end, 8000)
     if X.state().phase ~= "throw" then break end
-    shot(m[2])
+    atMark(m[2], m[1])
+    if not noShots or m[1] >= M.land + 1 then shot(m[2]) end
+    lastU = nil
+  end
+  if os.getenv("PROBE_FAIL") ~= "1" then
+    check(slowChecked, "the slow motion reached")
+    for _, q in ipairs(rates) do
+      local rate = q.dt > 0 and q.du / q.dt or -1
+      log(("  the clock in %-20s %.2fx (%d frames)"):format(q[1], rate, math.floor(q.dt * 60 + 0.5)))
+    end
+    local after = rates[4]
+    check(after.dt > 0 and math.abs(after.du / after.dt - 1) < 0.05, "full speed from the snap to the landing")
+    local slow = rates[3]
+    check(slow.dt > 0 and math.abs(slow.du / slow.dt - TH.SLOW) < 0.05, "the slow stretch at SLOW")
   end
   do
     local A = require("src.core.game3.audio")

@@ -8,6 +8,8 @@
 
 local function body(game, log)
   local U = require("tests.drivers.util")
+  -- (vsync off: the driver runs as fast as the frames go)
+  if love.window.setVSync then love.window.setVSync(0) end
   local function waitFor(pred, limit)
     for _ = 1, limit or 600 do
       if pred() then return true end

@@ -35,7 +35,7 @@ local function body(game, log)
     end
     return pred() and true or false
   end
-  love.window.setMode(1280, 720, { resizable = true, highdpi = true })
+  love.window.setMode(1280, 720, { resizable = true, highdpi = true, vsync = 0 })
   U.wait(2)
   if not waitFor(function() return game.phase == "boot" and game.boot end, 900) then
     log("FAIL boot phase not reached; phase:", game.phase)
@@ -99,8 +99,8 @@ local function body(game, log)
   -- frames a second, live: the raid running as it plays for `seconds` of wall time - the frames
   -- counted and the slowest one (a driver run is not held to 60, so on the desktop this is the
   -- headroom; on the Thor the real figure). FPS_MIN below fails it.
-  -- (the desktop holds a run to its display's 60 with vsync: a little under it passes; a single frame
-  -- longer than two of them, a hitch, fails)
+  -- (vsync is off, so a run is held by nothing: under 57 fails, as does a single frame longer than
+  -- two of a 60 Hz display's, a hitch)
   local FPS_MIN = tonumber(os.getenv("PERF_FPS_MIN")) or 57
   local HITCH_MS = tonumber(os.getenv("PERF_HITCH_MS")) or 34
   local function fps(label, seconds)
@@ -206,8 +206,13 @@ local function body(game, log)
   R.pickBall(1)
   local M = R.throwTimes()
   local th0 = R.current().throw and R.current().throw.t0 or 0
-  waitFor(function() return (X.state().t or 0) - th0 >= M.fly + 0.2 end, 8000)
-  fps("the catch (throw to wobbles)", 2)
+  waitFor(function() return (X.state().t or 0) - th0 >= M.lob + 0.2 end, 8000)
+  fps("the catch (the lob)", 0.5)
+  -- the slow motion at its height: the boss going in
+  waitFor(function() return (X.state().t or 0) - th0 >= (M.suck + M.close) / 2 end, 8000)
+  -- (the measures hold the raid's clock: first, while the boss goes in; the live frames after)
+  parts("the slow-motion lob, the boss going in", { throw = true, update = false })
+  fps("the slow-motion lob", 0.15)
   waitFor(function() return (X.state().t or 0) - th0 >= M.check + 0.6 end, 8000)
   parts("the catch, wobbling in its crater", { throw = true, update = false })
   waitFor(function() return X.state().phase == "rewards" end, 30000)
