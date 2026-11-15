@@ -214,10 +214,10 @@ you won: Exp. Candies, TMs, berries and more.*
   says. Its Separate Screens setting puts the menu on the second screen.
 - 🤝 **Shares the second screen with NaviPlay:** while the battle menu is on the second screen,
   NaviPlay (Super Training, Pokémon-Amie) steps aside, and comes back when the raid ends.
-- 🎵 **Sword and Shield's raid music:** a red den plays the raid den themes, a purple Gigantamax
-  den and a legendary raid the Dynamax Adventure ones: their adventure theme on the den screen, the
-  battle theme in the raid (a legendary raid its own, Eternatus its own), the capture theme while you
-  catch. Each loops seamlessly and follows the game's music volume.
+- 🎵 **Its own raid music:** eight original tracks, one set for a red den and another for a purple
+  Gigantamax den or a legendary raid: an adventure theme on the den screen, a battle theme in the
+  raid (a legendary raid its own, Eternatus its own) and a capture theme while you catch. Each loops
+  seamlessly and follows the game's music volume.
 - 🌐 **In five languages:** the raid's words, buttons, battle messages and options in English,
   Japanese, Portuguese, Spanish or German. Pokémon, move and item names come from the game.
 - ✏️ **Your own words:** LANGUAGE set to CUSTOM writes a file, `lang_custom.lua`, in
@@ -275,8 +275,7 @@ you won: Exp. Candies, TMs, berries and more.*
   Leparagon (Gen 8), Marin, MapleBranchWing and the DS Styled Gen 7+ Repository (Gen 7), shinies
   by StarrWolf and the Pokémon Shattered Light Team, compiled by Golisopod User, UberDunsparce and
   Caruban.
-- **Raid music:** from Lucidious89's [DBK] Raid Battles (Pokémon Essentials Deluxe Battle Kit),
-  Pokémon Sword and Shield's raid themes.
+- **Raid music:** original music made for Galar Rising.
 - **3D:** [g3d](https://github.com/groverburger/g3d) by groverburger (MIT).
 - **Pixel art effects** (hits, slashes, splashes, status marks): made with
   [pixelfx](https://github.com/patch-gg/pixelfx) by Patch, partly after Hugo Duprez's Sprite Fusion
