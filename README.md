@@ -56,8 +56,6 @@ you won: Exp. Candies, TMs, berries and more.*
 
 ## ✨ Features
 
-### Pokémon Dens
-
 - ⚡ **The region awakens:** win your first Gym Badge and, when you step back outside, the
   ground shakes and pillars of light rise from Pokémon Dens along the routes.
 - 🗺️ **Dens on the routes:** one or two on each route, always in the same places on your save.
@@ -75,14 +73,6 @@ you won: Exp. Candies, TMs, berries and more.*
   with one or two, 1★–3★ with three, 2★–3★ with four, 3★–4★ with five or six, and 3★–5★
   with seven or eight.
 
-### The Den Screen
-
-- 🔍 **What's waiting:** the den's stars, its Pokémon's types and its silhouette.
-- 👥 **Your four:** your first four Pokémon are ready to go. Choose a slot to swap in another
-  from your **party** or straight from your **PC boxes** (check a Pokémon's summary before you
-  pick it). Boxed Pokémon stay in their box.
-- ▶️ **Start** fades into the den; **Exit** leaves.
-
 ### The Raid
 
 - 🌌 **Sword and Shield's battlefield, in 3D:** a barren plain of red dust, rounded crags and
@@ -96,9 +86,6 @@ you won: Exp. Candies, TMs, berries and more.*
   fully animated, with their cries.
 - 🌿 **Dynamax Pokémon:** the route's own, with their own sprites and cries, and the moves a wild
   one of their level knows.
-- ⚔️ **Fight, Bag, Run:** each of your four picks a move, or uses an item from the raid's pouch
-  (Potions, a Full Heal and a Revive shared by the team). **Run** asks first: leave, and you're
-  blown out of the den, which is spent for the day.
 - 💥 **G-Max and Max Moves:** as in Sword and Shield, a Max or G-Max Move strikes one of your
   Pokémon, and its effect reaches whoever the game says it does. Volt Crash paralyzes all four,
   Smite and Gold Rush confuse all four, Cuddle makes those of the other gender fall in love (half
@@ -108,14 +95,6 @@ you won: Exp. Candies, TMs, berries and more.*
   Snooze makes only the one it hit drowsy, and Depletion drains the PP of that Pokémon's last move.
   A Dynamax boss uses a Max Move of its strongest attack's type. A confused Pokémon may hurt itself
   instead of attacking, until the confusion wears off.
-- 🌊 **Attacks on the whole party:** the boss's own spread attacks, such as Dazzling Gleam, Rock
-  Slide, Heat Wave, Earthquake or Surf, hit all four of your Pokémon, each for three quarters of the
-  damage, as in Sword and Shield. Every attack has its own look: beams, waves, falling rocks, bites,
-  slashes, earthquakes that crack the ground.
-- 🛡️ **Barriers:** as its HP falls, the boss throws up a barrier that blocks most of each hit
-  until enough blows break it. Breaking it sharply lowers the boss's Defense and Sp. Def.
-- 📣 **Cheers:** a Pokémon that fainted cheers the team on from the sidelines: healing, raised
-  stats, or breaking the barrier.
 - 💪 **Built for a team of your own:** in Sword and Shield a solo player brings one Pokémon and gets
   three helpers at 70% of its level. Here all four are yours, so on Solo difficulty (the default)
   every boss has more HP and hits harder: a real fight at every star level, one a well-trained team
@@ -136,43 +115,6 @@ you won: Exp. Candies, TMs, berries and more.*
   round it, Finale healing your team, Gold Rush's coins after the win). Low Kick, Grass Knot, Heat
   Crash and Heavy Slam fail on a Dynamax Pokémon; Behemoth Blade, Behemoth Bash and Dynamax Cannon
   hit it twice as hard.
-- 🤝 **Moves for the team:** your four fight side by side, so the moves that help allies work as they
-  do in Sword and Shield. Light Screen and Reflect raise a pane of glass in front of the whole team,
-  Aurora Veil a shimmering one (once Hail or Snowscape is up). Safeguard, Mist, Tailwind and Lucky
-  Chant cover all four. Wide Guard, Quick Guard, Crafty Shield and Mat Block guard the team for a
-  turn, and Protect, Detect, King's Shield, Spiky Shield, Baneful Bunker, Obstruct, Silk Trap, Burning
-  Bulwark and Endure guard the one using them. A Max Move still gets through a guard for a quarter of its damage. Follow Me and Rage Powder
-  draw the boss's attacks. Helping Hand, Heal Pulse, Floral Healing, Pollen Puff, Decorate and
-  Aromatic Mist ask which ally to use them on. Life Dew, Jungle Healing, Lunar Blessing, Heal Bell,
-  Aromatherapy, Wish,
-  Howl, Coaching, Gear Up, Magnetic Flux and Flower Shield work on the team. A boss's own screens and
-  Protect work against your team the same way.
-- 🌊 **Friendly fire:** moves that hit everyone around the user in Sword and Shield (Surf,
-  Earthquake, Discharge, Lava Plume, Bulldoze, Boomburst, Explosion and more) hit the boss and your
-  other three too, never the user. Picking one shows your four with an arrow on each it will hit (the
-  user marked Immune); a move for the whole team, such as Light Screen or Wide Guard, shows the arrow
-  on all four. Wide Guard and Protect shield your team from an ally's Surf too, and Explosion faints
-  its user.
-- 🎯 **Every move does what it does in battle:** draining moves heal, recoil hurts, multi-hit moves
-  strike again and again, Hyper Beam needs a turn to recharge, Solar Beam and Fly take a turn first,
-  and the type chart works as always. Weather, terrains, Trick Room, Stealth Rock and the other
-  hazards (they hit your Pokémon as they come back after fainting), Substitute, Metronome, Encore,
-  Taunt, Transform and the rest all work, the newer moves from WoobleDex too. A Dynamax boss shrugs
-  off what Sword and Shield say it does: flinching, one-hit KO moves, Perish Song, Destiny Bond,
-  Encore and Disable.
-- 🎒 **Held items work:** your Pokémon fight with what they hold. Charcoal, Mystic Water and the
-  other type boosters, Choice Band (which keeps its holder to one move until it Dynamaxes), Scope
-  Lens and the rest raise their damage; Leftovers heal at each turn's end; berries heal at half HP,
-  cure statuses and confusion, raise a stat in a pinch or restore PP; Focus Band, Quick Claw,
-  BrightPowder, King's Rock, Shell Bell, White Herb, Mental Herb and Macho Brace do what they do in
-  battle. A berry eaten in a raid is still in your Pokémon's hands afterward.
-- 🎨 **And looks the part:** a multi-hit move lands its blows one at a time, each with its own hit
-  and the HP bar dropping, then says how many times it hit; Fly and
-  Bounce take your Pokémon up out of sight, Dig and Dive into the ground or the water; draining
-  moves pull their light back. Pixel art slashes, sparks, splashes and critical hits burst on the
-  target in the move's colours, and sleep, burns, poison, paralysis, freezing, confusion and love
-  show on whoever they strike. The camera rises over your Pokémon's shoulder as it attacks, to take
-  in the whole blow.
 - 🔒 **Your Pokémon are safe:** your four fight as copies. Nothing in your party or boxes changes
   in a raid, win or lose.
 
@@ -208,24 +150,12 @@ you won: Exp. Candies, TMs, berries and more.*
 
 - 🎮 **On one screen or two:** the battle menu sits over the den, or goes to your device's second
   screen (such as the AYN Thor's) as large touch buttons, leaving the whole den on the main screen.
-- 📱 **Phones held upright:** on a portrait screen the den fills the width, the battle's buttons and
-  words sit at the foot at a size made for it, and the den screen and rewards card sit in the middle.
 - 🧭 **Follows Kanto Gear:** with **Kanto Gear**, the battle menu goes where its Display Mode
   says. Its Separate Screens setting puts the menu on the second screen.
-- 🤝 **Shares the second screen with NaviPlay:** while the battle menu is on the second screen,
-  NaviPlay (Super Training, Pokémon-Amie) steps aside, and comes back when the raid ends.
 - 🎵 **Its own raid music:** eight original tracks, one set for a red den and another for a purple
   Gigantamax den or a legendary raid: an adventure theme on the den screen, a battle theme in the
   raid (a legendary raid its own, Eternatus its own) and a capture theme while you catch. Each loops
   seamlessly and follows the game's music volume.
-- 🌐 **In five languages:** the raid's words, buttons, battle messages and options in English,
-  Japanese, Portuguese, Spanish or German. Pokémon, move and item names come from the game.
-- ✏️ **Your own words:** LANGUAGE set to CUSTOM writes a file, `lang_custom.lua`, in
-  `mod_cache/max_raids/` inside the folder that holds your saves. It lists every line of the mod,
-  English on the left and what to show on the right. Change any right-hand side, or set `base` to
-  one of the five languages for the lines you leave out. It is read again each time you open a den,
-  so a change shows without restarting the game.
-- 🔊 **The game's own sounds:** moves, hits, barriers and the catch use Gen 3's sound effects.
 - 🐢 **Smooth on slower devices:** the battlefield, the move effects, the sounds and the catch's
   pictures are loaded while the screen is black after Start, so a raid plays without stutters on
   older phones and handhelds.
