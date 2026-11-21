@@ -1308,6 +1308,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           if g >= 1 and not m.landed[ti * 100 + k] then
             -- (each hit of a multi-hit move takes its own share of the bar)
             if T.hps then T.hp = T.hps[k] or T.hp end
+            -- (and the barrier as that hit left it)
+            if T.shs then T.sh = T.shs[k] end
             landOnce(m, ti * 100 + k, T, n > 1 and 0.75 or 1, now)
           elseif g > 0 and tick then
             local x, y, z = shotPos(m, T, g, k)
@@ -1393,6 +1395,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
           end
           if t >= at and not m.landed[ti * 100 + k] then
             if T.hps then T.hp = T.hps[k] or T.hp end
+            -- (and the barrier as that hit left it)
+            if T.shs then T.sh = T.shs[k] end
             landOnce(m, ti * 100 + k, T, n > 1 and 0.6 or 1, now)
           end
         end

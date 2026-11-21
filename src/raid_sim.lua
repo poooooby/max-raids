@@ -329,7 +329,7 @@ end
 
 -- a hurt that spends HP of its own: att loses `cut` (held up by the barrier), the words `text`
 function Sim:selfHurt(ev, att, cut, text)
-  cut = self:capAtShield(att, min(hpOf(att), max(1, cut)))
+  cut = self:capAtShield(att, max(1, cut))
   att.mon.hp = hpOf(att) - cut
   ev[#ev + 1] = { kind = "residual", who = att, amount = cut, hp = att.mon.hp, text = text }
   if att.boss then self:checkShield(ev) end
@@ -561,27 +561,41 @@ end
 
 -- ------- the barrier
 
--- the HP the boss cannot be taken below until its next barrier has risen: that barrier's threshold
--- (as Sword / Shield: the hit that reaches it stops there, the rest lost, and the barrier goes up);
--- nil when no barrier is left to come
 -- a threshold's HP, in whole HP: the floor and the barrier's check use this one number (comparing
 -- shares instead left 252 / 360 a hair above 0.7, so the barrier never rose and the boss was held
 -- there for good)
 local function thresholdHp(b, t) return math.floor(maxHpOf(b) * t + 0.5) end
-function Sim:shieldFloor()
+-- the HP of the boss's next barrier still to come (skip 1: the one after it); nil when none is left
+function Sim:shieldFloor(skip)
   local b = self.boss
+  local n = 0
   for _, t in ipairs(b.shields or {}) do
-    if not b.shieldsUsed[t] then return thresholdHp(b, t) end
+    if not b.shieldsUsed[t] then
+      if n >= (skip or 0) then return thresholdHp(b, t) end
+      n = n + 1
+    end
   end
   return nil
 end
 
--- damage `cut` to the boss held at its next barrier's threshold (another battler's untouched)
+-- damage `cut` to the boss against its barriers (another battler's untouched):
+--   no barrier up: what passes the next threshold is cut to SHIELD_DMG, as if the barrier were up
+--     already (checkShield then raises it), held at the threshold after that, or at 1 HP when none
+--     is left, so the barrier always rises
+--   a barrier up: held at the next threshold, which rises only once this one breaks
+-- (cut as dealt, before it is held to the HP: the share past a threshold is taken of the whole blow;
+-- what comes back is never more than the HP left)
 function Sim:capAtShield(who, cut)
-  if not (who and who.boss) then return cut end
+  local hp = who and hpOf(who) or 0
+  if not (who and who.boss) then return min(cut, hp) end
   local f = self:shieldFloor()
-  if f then cut = min(cut, max(0, hpOf(who) - f)) end
-  return cut
+  if not f then return min(cut, hp) end
+  if who.shield then return min(cut, max(0, hp - f)) end
+  if hp - cut >= f then return cut end
+  local reach = max(0, hp - f)
+  cut = reach + floor((cut - reach) * (self.rules.SHIELD_DMG or 0.25))
+  local after = self:shieldFloor(1) or 1
+  return min(cut, max(0, hp - after))
 end
 
 -- after the boss is hurt: a barrier for the first threshold its HP has passed (one at a time)
@@ -652,7 +666,7 @@ function Sim:held(ev, b, mv)
       ev[#ev + 1] = { kind = "cant", who = b, confused = true, text = T("%s is confused!", b.name) }
       if self.rng(1, 3) == 1 then
         local cut = (self.A.confusionHit and self.A.confusionHit(b)) or max(1, floor(maxHpOf(b) / 8))
-        cut = self:capAtShield(b, min(hpOf(b), cut))
+        cut = self:capAtShield(b, cut)
         b.mon.hp = hpOf(b) - cut
         ev[#ev + 1] = { kind = "residual", who = b, amount = cut, hp = b.mon.hp,
           text = T("It hurt itself in its confusion!") }
@@ -962,7 +976,7 @@ function Sim:contactCost(ev, att, def, mv)
   local c = def.guard == "protect" and def.protectRow and def.protectRow.contact
   if not (c and mv.contact and alive(att)) then return end
   if c.hurt then
-    local cut = self:capAtShield(att, min(hpOf(att), max(1, floor(maxHpOf(att) / c.hurt))))
+    local cut = self:capAtShield(att, max(1, floor(maxHpOf(att) / c.hurt)))
     if cut > 0 then
       att.mon.hp = hpOf(att) - cut
       ev[#ev + 1] = { kind = "residual", who = att, amount = cut, hp = att.mon.hp,
@@ -2072,7 +2086,7 @@ function Sim:g3Status(ev, att, def, mv, g)
         self:unlock(att)
         ev[#ev + 1] = { kind = "status", who = att, text = T("%s unleashed its energy!", att.name) }
         if stored <= 0 or not alive(from) then return fail() end
-        local dmg = self:capAtShield(from, min(hpOf(from), self:throughBoss(ev, from, stored * 2)))
+        local dmg = self:capAtShield(from, self:throughBoss(ev, from, stored * 2))
         from.mon.hp = hpOf(from) - dmg
         ev[#ev + 1] = { kind = "damage", who = att, target = from, amount = dmg, hp = from.mon.hp, move = mv }
         if not alive(from) then self:fainted(ev, from) elseif from.boss then self:checkShield(ev) end
@@ -2486,7 +2500,7 @@ function Sim:use(ev, att, mv, targets, ally, locked)
             goto nextHit
           end
           dmg = self:throughBoss(ev, def, max(1, dmg))
-          dmg = self:capAtShield(def, min(hpOf(def), dmg))
+          dmg = self:capAtShield(def, dmg)
           local endured, banded = false, nil
           if def.endure and dmg >= hpOf(def) and hpOf(def) > 1 then dmg, endured = hpOf(def) - 1, true end
           if not endured and not (mv.side and mv.side.ohko) then
@@ -2925,7 +2939,7 @@ function Sim:endTurn(ev)
   -- (ail: the status that hurt it, for its look)
   local function hurt(who, cut, text, ail)
     if self.over or not alive(who) then return end
-    cut = self:capAtShield(who, min(hpOf(who), max(1, cut)))
+    cut = self:capAtShield(who, max(1, cut))
     if cut <= 0 then return end
     who.mon.hp = hpOf(who) - cut
     ev[#ev + 1] = { kind = "residual", who = who, amount = cut, hp = who.mon.hp, text = text, ail = ail }
@@ -2975,7 +2989,7 @@ function Sim:endTurn(ev)
       if not alive(by) or (by.down or 0) > 0 then
         x.seeded = nil
       else
-        local cut = self:capAtShield(x, min(hpOf(x), max(1, floor(maxHpOf(x) / 8))))
+        local cut = self:capAtShield(x, max(1, floor(maxHpOf(x) / 8)))
         x.mon.hp = hpOf(x) - cut
         ev[#ev + 1] = { kind = "residual", who = x, amount = cut, hp = x.mon.hp, text = T("%s's health is sapped by Leech Seed!", x.name) }
         if not alive(x) then self:fainted(ev, x) elseif x.boss then self:checkShield(ev) end
@@ -3018,7 +3032,7 @@ function Sim:endTurn(ev)
         if (tonumber(info.effectiveness) or 1) == 0 or dmg <= 0 then
           ev[#ev + 1] = { kind = "effect", eff = 0, target = def, text = T("It doesn't affect %s...", def.name) }
         else
-          dmg = self:capAtShield(def, min(hpOf(def), self:throughBoss(ev, def, max(1, dmg))))
+          dmg = self:capAtShield(def, self:throughBoss(ev, def, max(1, dmg)))
           def.mon.hp = hpOf(def) - dmg
           ev[#ev + 1] = { kind = "damage", who = p.att, target = def, amount = dmg, hp = def.mon.hp, move = p.mv,
             text = T("%s took the %s attack!", def.name, p.mv.name) }

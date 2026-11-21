@@ -120,21 +120,36 @@ return function(mod, deps)
     spread = { eye = { 0, 2.3, 8.2 }, look = { 0, 2.9, -8 }, fov = 62 },
     catch = { eye = { 0, 1.5, -2.4 }, look = { 0, 1.9, -9.2 }, fov = 58 },
   }
-  -- almost directly behind the member, low, looking up past it at the boss: the member large in the
-  -- foreground, the boss towering over it, the others mostly out past the sides
-  -- TARGET while the boss attacks (the message band covers the screen's foot: aimed a little lower,
-  -- so the member stands clear of it); CHOOSE for the member's own turn (no band: the boss whole);
-  -- ATTACK for its move. The two attacks' are raised and tilted down onto where the blows land, so
-  -- more of the move's effect is in frame
-  Sc.TARGET = { SIDE = 0.3, UP = 1.4, BACK = 3.9, LOOK_X = 0.7, LOOK_Y = 2.7, FOV = 56 }
-  Sc.CHOOSE = { SIDE = 0.3, UP = 0.65, BACK = 3.4, LOOK_X = 0.7, LOOK_Y = 4.4, FOV = 54 }
-  Sc.ATTACK = { SIDE = 0.3, UP = 1.6, BACK = 3.8, LOOK_X = 0.7, LOOK_Y = 3.3, FOV = 56 }
+  -- a member's shot (Sc.targetShot): from behind it, the eye just over its head (CLEAR), aimed at the
+  -- boss's middle, so a member stands under the boss rather than in front of it; drawn back until its
+  -- head sits HEAD of the way up the screen (landscape), between BACK_MIN and BACK_MAX - a tall one,
+  -- past HEAD already at BACK_MIN, drawn back to HEAD_MAX instead (more of it in view); one too small
+  -- to reach HEAD_MIN from BACK_MAX gets a wider view, up to FOV_MAX
+  --   CHOOSE  its own turn (choosing)
+  --   TARGET  the boss attacking it (the message band over the screen's foot: its head a little higher)
+  --   ATTACK  its move
+  Sc.CHOOSE = { SIDE = 0.3, CLEAR = 0.3, HEAD = 0.30, HEAD_MIN = 0.25, HEAD_MAX = 0.35, BACK_MIN = 2.6, BACK_MAX = 8,
+    FOV = 54, FOV_MAX = 68 }
+  Sc.TARGET = { SIDE = 0.3, CLEAR = 0.3, HEAD = 0.33, HEAD_MIN = 0.25, HEAD_MAX = 0.35, BACK_MIN = 2.6, BACK_MAX = 8,
+    FOV = 54, FOV_MAX = 68 }
+  Sc.ATTACK = { SIDE = 0.3, CLEAR = 0.3, HEAD = 0.30, HEAD_MIN = 0.25, HEAD_MAX = 0.35, BACK_MIN = 2.6, BACK_MAX = 8,
+    FOV = 54, FOV_MAX = 68 }
+  -- the whole party (spread): the eye just over the tallest, centred, aimed at the boss's middle; back
+  -- until the tallest's head sits HEAD up the screen and all four fit across (FIT of the 3:2 view's
+  -- half width), up to Z_MAX
+  Sc.PARTY = { CLEAR = 0.3, HEAD = 0.30, FIT = 0.9, Z_MAX = 14, FOV = 60 }
   local targetPose = { eye = { 0, 0, 0 }, look = { 0, 0, 0 }, fov = 60 }
-  -- a Dynamaxed member: drawn GIANT times its size (Sc.giant[i] 0..1, eased by the raid), and its
-  -- shots pulled back and up by GIANT_SHOT x that so the giant stays in frame
+  local partyPose = { eye = { 0, 0, 0 }, look = { 0, 0, 0 }, fov = 60 }
+  -- a Dynamaxed member: drawn GIANT times its size (Sc.giant[i] 0..1, eased by the raid); its shots
+  -- start GIANT_SHOT.BACK further back, so the giant stays in frame whole (its head, about as high as
+  -- the boss's middle, then sits nearer the screen's middle than HEAD_MAX)
   Sc.GIANT = 2.6
-  Sc.GIANT_SHOT = { BACK = 5.0, UP = 1.8, LOOK_Y = 1.4 }
+  Sc.GIANT_SHOT = { BACK = 5.0 }
   Sc.giant = {}
+  -- each member's picture's height in metres at its own size (its opaque box against MEMBER_PIC_H;
+  -- set by its draw), and the boss's size (set by Sc.draw)
+  Sc.memberTop = {}
+  Sc.bossSize = 3.5
 
   -- a member's place now: Sc.MEMBERS, until one grows giant - then the line is laid out again by width
   -- (each its SLOT_W, a giant's times its size; centred on the pad), so no two overlap whoever it is.
@@ -145,13 +160,14 @@ return function(mod, deps)
   -- by its draw), so a wide one gets the room it takes
   Sc.memberWidth = {}
   local placed = { { x = 0, z = 0 }, { x = 0, z = 0 }, { x = 0, z = 0 }, { x = 0, z = 0 } }
+  local widths = {}
   function Sc.memberPos(i)
     local n = #Sc.MEMBERS
     local any = false
     for k = 1, n do if (Sc.giant[k] or 0) > 0 then any = true end end
     local base = Sc.MEMBERS[i] or Sc.MEMBERS[1]
     if not any then return base end
-    local widths, total = {}, 0
+    local total = 0
     for k = 1, n do
       local scale = 1 + ((Sc.GIANT or 1) - 1) * (Sc.giant[k] or 0)
       local own = Sc.memberWidth[k] or Sc.SLOT_W * 0.7
@@ -168,21 +184,117 @@ return function(mod, deps)
     return placed[i] or base
   end
 
+  -- a member's size now: its giant's scale, its top and half its width in metres
+  local function giantK(i) return 1 + (Sc.GIANT - 1) * (Sc.giant[i] or 0) end
+  function Sc.memberTopNow(i) return (Sc.memberTop[i] or Sc.MEMBER_H * 1.1) * giantK(i) end
+  local function halfWidthNow(i) return (Sc.memberWidth[i] or Sc.SLOT_W * 0.7) * giantK(i) / 2 end
+  -- the boss's middle, where every battle shot is aimed
+  function Sc.bossMiddle()
+    local P = Sc.PAD
+    return P.x, P.h + Sc.MEMBER_H * (Sc.bossSize or 3.5) * 0.5, P.z
+  end
+
+  -- a point (x, y, z) seen from an eye looking at (lx, ly, lz), as lookAt / project do: its offsets
+  -- from the view's middle as tangents (right, up)
+  local function viewTan(ex, ey, ez, lx, ly, lz, x, y, z)
+    local zx, zy, zz = ex - lx, ey - ly, ez - lz
+    local l = sqrt(zx * zx + zy * zy + zz * zz)
+    zx, zy, zz = zx / l, zy / l, zz / l
+    local xx, xz = zz, -zx
+    l = sqrt(xx * xx + xz * xz)
+    xx, xz = xx / l, xz / l
+    local yx, yy, yz = zy * xz, zz * xx - zx * xz, -zy * xx
+    local px, py, pz = x - ex, y - ey, z - ez
+    local d = -(zx * px + zy * py + zz * pz)
+    if d < 1e-3 then return 0, -1 end
+    return (xx * px + xz * pz) / d, (yx * px + yy * py + yz * pz) / d
+  end
+  -- how far up a landscape screen that point lands (0 the foot, 1 the top), for a view of fov degrees
+  -- (place() fits a wide view by its height)
+  local function upScreen(ty, fov) return 0.5 + 0.5 * ty / tan(rad(fov) / 2) end
+  Sc.viewTan, Sc.upScreen = viewTan, upScreen
+
+  -- the eye's distance back (lo..hi) at which f(back) - rising with it - first reaches goal; hi when
+  -- it never does, lo when it is there already
+  local function solveBack(f, goal, lo, hi)
+    if f(lo) >= goal then return lo end
+    if f(hi) < goal then return hi end
+    for _ = 1, 16 do
+      local mid = (lo + hi) / 2
+      if f(mid) >= goal then hi = mid else lo = mid end
+    end
+    return hi
+  end
+
   function Sc.targetShot(i, T)
     local m = Sc.memberPos(i)
-    local P = Sc.PAD
     T = T or Sc.TARGET
-    local g, GS = Sc.giant[i] or 0, Sc.GIANT_SHOT
+    local g = Sc.giant[i] or 0
+    local top = Sc.memberTopNow(i)
+    local lx, ly, lz = Sc.bossMiddle()
     -- (a touch off its middle, toward the outside)
-    local side = m.x <= 0 and -1 or 1
-    targetPose.eye[1], targetPose.eye[2], targetPose.eye[3] = m.x + side * T.SIDE, T.UP + GS.UP * g, m.z + T.BACK + GS.BACK * g
-    targetPose.look[1], targetPose.look[2], targetPose.look[3] = m.x * T.LOOK_X, T.LOOK_Y + GS.LOOK_Y * g, P.z
-    targetPose.fov = T.FOV
+    local ex, ey = m.x + (m.x <= 0 and -1 or 1) * T.SIDE, top + T.CLEAR
+    local fov = T.FOV
+    local function head(back)
+      local _, ty = viewTan(ex, ey, m.z + back, lx, ly, lz, m.x, top, m.z)
+      return upScreen(ty, fov)
+    end
+    local GB = Sc.GIANT_SHOT.BACK * g
+    local lo, hi = T.BACK_MIN + GB, T.BACK_MAX + GB
+    local back = solveBack(head, head(lo) >= T.HEAD and T.HEAD_MAX or T.HEAD, lo, hi)
+    -- (too small to reach it: a wider view puts its head at HEAD_MIN)
+    if head(back) < T.HEAD_MIN then
+      local _, ty = viewTan(ex, ey, m.z + back, lx, ly, lz, m.x, top, m.z)
+      fov = min(T.FOV_MAX, max(T.FOV, 2 * math.deg(math.atan(ty / (2 * T.HEAD_MIN - 1)))))
+    end
+    targetPose.eye[1], targetPose.eye[2], targetPose.eye[3] = ex, ey, m.z + back
+    targetPose.look[1], targetPose.look[2], targetPose.look[3] = lx, ly, lz
+    targetPose.fov = fov
     return targetPose
   end
 
   -- a member's own turn - choosing, moving - is framed the same way, so it is plain which one it is
   function Sc.memberShot(i) return Sc.targetShot(i, Sc.CHOOSE) end
+
+  -- the whole party: over the tallest, the boss in the middle, all four across
+  function Sc.partyShot()
+    local T = Sc.PARTY
+    local n = #Sc.MEMBERS
+    local tall, top = 1, 0
+    for k = 1, n do
+      local h = Sc.memberTopNow(k)
+      if h > top then tall, top = k, h end
+    end
+    local lx, ly, lz = Sc.bossMiddle()
+    local ey = top + T.CLEAR
+    local tm = Sc.memberPos(tall)
+    local tx, tz = tm.x, tm.z
+    local fov = T.FOV
+    local half = tan(rad(fov) / 2) * Sc.ASPECT
+    local function head(z)
+      local _, ty = viewTan(0, ey, z, lx, ly, lz, tx, top, tz)
+      return upScreen(ty, fov)
+    end
+    -- (1 - the outermost edge of any member as a share of the 3:2 view's half width: it rises as the
+    -- eye draws back)
+    local function across(z)
+      local most = 0
+      for k = 1, n do
+        local p = Sc.memberPos(k)
+        local w = halfWidthNow(k)
+        local tx2 = viewTan(0, ey, z, lx, ly, lz, p.x + (p.x < 0 and -w or w), 0, p.z)
+        most = max(most, abs(tx2) / half)
+      end
+      return 1 - most
+    end
+    local near = 1
+    for k = 1, n do near = max(near, Sc.memberPos(k).z + 1) end
+    local z = max(solveBack(head, T.HEAD, near, T.Z_MAX), solveBack(across, 1 - T.FIT, near, T.Z_MAX))
+    partyPose.eye[1], partyPose.eye[2], partyPose.eye[3] = 0, ey, z
+    partyPose.look[1], partyPose.look[2], partyPose.look[3] = lx, ly, lz
+    partyPose.fov = fov
+    return partyPose
+  end
 
   local clock = 0
   function Sc.setTime(t) clock = t or 0 end
@@ -211,16 +323,38 @@ return function(mod, deps)
   copyPose(from, Sc.SHOTS.field)
   copyPose(to, Sc.SHOTS.field)
 
+  -- the pose a shot's name stands for now (member / target / attack on i, spread over the party)
+  local function poseFor(name, i)
+    return (name == "member" and Sc.memberShot(i)) or (name == "target" and Sc.targetShot(i))
+      or (name == "attack" and Sc.targetShot(i, Sc.ATTACK)) or (name == "spread" and Sc.partyShot())
+      or (type(name) == "table" and name) or Sc.SHOTS[name]
+  end
+  -- how giant the party is (a shot over it is aimed again as one grows or shrinks)
+  local function giantSum()
+    local s = 0
+    for k = 1, #Sc.MEMBERS do s = s + (Sc.giant[k] or 0) end
+    return s
+  end
   -- the camera to a shot (a name, "member" with i, or a pose) over dur seconds (0: a cut)
   function Sc.shot(name, dur, i)
-    local pose = (name == "member" and Sc.memberShot(i)) or (name == "target" and Sc.targetShot(i))
-      or (name == "attack" and Sc.targetShot(i, Sc.ATTACK))
-      or (type(name) == "table" and name) or Sc.SHOTS[name]
+    local pose = poseFor(name, i)
     if not pose then return false end
     copyPose(from, cur)
     copyPose(to, pose)
     move.t0, move.dur, move.name, move.i = clock, dur or 0, type(name) == "string" and name or "pose", i
+    move.g = giantSum()
     return true
+  end
+  -- (a member growing giant or shrinking back under a shot on it, or on the party: its end aimed again
+  -- each frame, the eye kept over the head)
+  local REAIM = { member = true, target = true, attack = true, spread = true }
+  local function reaim()
+    if not REAIM[move.name] then return end
+    local g = giantSum()
+    if abs(g - (move.g or 0)) < 1e-4 then return end
+    move.g = g
+    local pose = poseFor(move.name, move.i)
+    if pose then copyPose(to, pose) end
   end
   function Sc.shotName() return move.name, move.i end
   function Sc.shotDone() return move.dur <= 0 or clock - move.t0 >= move.dur end
@@ -267,6 +401,7 @@ return function(mod, deps)
 
   local rect = { 0, 0, 256, 192 }
   local function place()
+    reaim()
     local u = move.dur > 0 and min(1, max(0, (clock - move.t0) / move.dur)) or 1
     local k = u * u * u * (u * (u * 6 - 15) + 10)
     for j = 1, 3 do
@@ -1384,8 +1519,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   end
   local function drawMember(G2, i, pic, t)
     if not (pic and pic.image) then return end
-    -- (its width at its own size, for the line's spacing: Sc.memberPos)
-    if pic.box then Sc.memberWidth[i] = (pic.box[3] - pic.box[1]) / (pic.cell or 64) * Sc.MEMBER_PIC_H end
+    -- (its width and height at its own size: the line's spacing, Sc.memberPos, and the shots)
+    if pic.box then
+      Sc.memberWidth[i] = (pic.box[3] - pic.box[1]) / (pic.cell or 64) * Sc.MEMBER_PIC_H
+      Sc.memberTop[i] = (pic.box[4] - pic.box[2]) / (pic.cell or 64) * Sc.MEMBER_PIC_H
+    end
     local x, y, hpx = Sc.memberAt(i)
     if not x then return end
     local box = pic.box
@@ -1570,6 +1708,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if not ok then Sc.drawFlat(G2, ex, ey, ew, eh) end
     -- the portal over the boss, the energy at its feet
     local size = boss and boss.size or 3.5
+    -- (for the shots: aimed at its middle)
+    Sc.bossSize = size
     portal(G2, size)
     pillars(G2, size, false)
     -- (the move effects' back layer: the ground and what stands behind the boss; their middle layer

@@ -66,6 +66,17 @@ local function body(game, log)
   -- it plays, the boss's HP and the bar as drawn)
   boss.mon.hp = math.floor(boss.mon.maxHp * (tonumber(os.getenv("PROBE_START")) or 0.72))
   boss.dispHp, boss.dispTarget = boss.mon.hp, boss.mon.hp
+  -- (PROBE_MOVE=BULLET_SEED: every member's only move; each blow's pill comes off as it lands, while
+  -- the move's use event is still playing)
+  local probeMove = os.getenv("PROBE_MOVE")
+  if probeMove then
+    for _, m in ipairs(r.members) do
+      local mv = assert(T.battle.move(probeMove), probeMove)
+      mv.pp, mv.maxPp = 30, 30
+      m.b.moves = { mv }
+    end
+  end
+  local pillsAtBlows, lastPills = 0, nil
 
   local seen = { up = 0, hit = 0, ["break"] = 0 }
   local lastEvents = nil
@@ -106,6 +117,18 @@ local function body(game, log)
       if sh and not shots.up then shots.up = true; U.wait(20); shot("b01_barrier_up") end
     end
     lastPhase = cur.phase
+    -- the pills as drawn: a change while a move's use event plays came with its blow
+    local pills = cur.boss.shieldShown and (cur.boss.shieldShown.left .. "/" .. cur.boss.shieldShown.max) or "none"
+    if pills ~= lastPills then
+      local e = cur.events and cur.evI and cur.events[cur.evI]
+      if lastPills and cur.phase == "battle" then
+        local atBlow = e and e.kind == "use"
+        if atBlow then pillsAtBlows = pillsAtBlows + 1 end
+        log(("  pills %s -> %s %s"):format(lastPills, pills, atBlow and ("at a blow of " .. tostring(e.move and e.move.name))
+          or ("at event " .. tostring(e and e.kind))))
+      end
+      lastPills = pills
+    end
     if os.getenv("PROBE_TRACE") == "1" and cur.events and cur.evI and cur.evI ~= cur._traced then
       cur._traced = cur.evI
       local e = cur.events[cur.evI]
@@ -139,6 +162,7 @@ local function body(game, log)
   check(seen.hit >= 1, "hits took segments off it")
   check(seen["break"] >= 1, "it broke")
   check(#throughShield > 0 and avg(throughShield) < avg(open), "a hit through it does less")
+  check(pillsAtBlows > 0, ("the pills change as the blows land (%d times)"):format(pillsAtBlows))
   check(wallSeen > 0, "the barrier wall drawn while it stands (Fx.setLasting)")
   check(heardOf("SE_M_BARRIER") and heardOf("SE_ICE_CRACK") and heardOf("SE_ICE_BREAK"), "its sounds: up, hit, break")
   local st = R.current() and R.current().boss and R.current().boss.stages

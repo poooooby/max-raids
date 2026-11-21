@@ -11,6 +11,7 @@ tests/drivers/catch_probe.lua
 tests/drivers/den_screen_probe.lua
 tests/drivers/dens_probe.lua
 tests/drivers/field_probe.lua
+tests/drivers/camera_probe.lua
 tests/drivers/fx_probe.lua
 tests/drivers/gear_option_probe.lua
 tests/drivers/hitch_probe.lua

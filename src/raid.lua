@@ -1804,6 +1804,25 @@ return function(mod, deps)
   -- a blow felt (Fx.onImpact): the raid's clock held a moment, the camera jabbed and shaken, the one
   -- struck flashing white and thrown back - all by the blow's power (0..1+, from the HP it takes)
   Rd.IMPACT = { STOP_S = 0.045, STOP_PER = 0.09, KICK = 1.5, KICK_PER = 4.5, SHAKE = 0.04, SHAKE_PER = 0.2 }
+  -- a barrier event seen: its pills, its look, its sound and shake (at its own event, or at the blow
+  -- that brought it, when the move's look carries it)
+  local function shieldLook(e)
+    if not r.boss then return end
+    r.boss.shieldShown = e.step ~= "break" and { left = e.left, max = e.max } or nil
+    if e.step == "hit" and Scene then Scene.shake(0.06, 0.25) end
+    if Fx then
+      if e.step == "up" then Fx.barrierUp(r.t)
+      elseif e.step == "hit" then Fx.barrierHit(r.t)
+      elseif e.step == "break" then
+        Fx.barrierBreak(placeOf(r.boss), r.t)
+        if Scene then Scene.shake(0.25, 0.6); if Scene.kick then Scene.kick(4, 0.4) end end
+      end
+    end
+    if Sounds then
+      local E2 = Sounds.EVENT
+      Rd.se(e.step == "up" and E2.shieldUp or e.step == "break" and E2.shieldBreak or E2.shieldHit)
+    end
+  end
   function Rd.impact(T, power, key)
     if not r then return end
     local I = Rd.IMPACT
@@ -1824,6 +1843,14 @@ return function(mod, deps)
     end
     -- its bar drains now, as the blow lands: the boss's block, or the members' cards at the top left
     -- (all the move hits, together)
+    -- (the barrier as this blow left it: a segment off, broken, risen)
+    if T.sh then
+      for _, e in ipairs(T.sh) do
+        shieldLook(e)
+        e.shown = true
+      end
+      T.sh = nil
+    end
     if T.b and T.hp then
       T.b.dispTarget = T.hp
       if T.b.boss then
@@ -1956,6 +1983,7 @@ return function(mod, deps)
     if spec[1] ~= "self" then
       local list = r.events or {}
       local seen = {}
+      local shStop = false
       for j = r.evI + 1, #list do
         local x = list[j]
         if x.kind == "use" or x.kind == "over" or x.kind == "cheer" or x.kind == "item" then break end
@@ -1977,6 +2005,25 @@ return function(mod, deps)
           s.hps[#s.hps + 1] = x.hp
         end
         if who and x.kind == "effect" and x.eff then seen[who].eff = x.eff end
+        -- (the barrier's events go with the blow that brought them: a segment off before its hit's
+        -- damage event, broken or risen after it - played as that blow lands, `shs[k]`)
+        -- (not past the turn's end on it - poison, a field, Future Sight - which plays on its own)
+        if (x.kind == "residual" or (x.kind == "damage" and x.text)) and (x.who and x.who.boss or x.target and x.target.boss) then
+          shStop = true
+        end
+        if x.kind == "shield" and x.who and x.who.boss and not shStop then
+          local s = seen[x.who]
+          local k = (s and s.hps and #s.hps or 0) + (x.step == "hit" and 1 or 0)
+          if k > 0 then
+            if not s then s = { b = x.who }; seen[x.who] = s; targets[#targets + 1] = s end
+            s.shs = s.shs or {}
+            s.shs[k] = s.shs[k] or {}
+            local list = s.shs[k]
+            list[#list + 1] = x
+            x.looked = true
+            if not x.text then x.quick = true end
+          end
+        end
       end
     end
     -- (a status move reaching no one - Splash, a move on the user or its field: an aura round it)
@@ -2042,7 +2089,17 @@ return function(mod, deps)
       local tg = {}
       for _, t in ipairs(a.targets) do
         local p = placeOf(t.b)
-        if p then p.frac, p.hp, p.b, p.eff, p.hps = t.frac, t.hp, t.b, t.eff, t.hps; tg[#tg + 1] = p end
+        if p then
+          p.frac, p.hp, p.b, p.eff, p.hps, p.shs = t.frac, t.hp, t.b, t.eff, t.hps, t.shs
+          -- (a look of one blow carries every barrier event at it; a multi-hit's take theirs blow by blow)
+          p.sh = nil
+          if t.shs then
+            local all = {}
+            for k = 1, #(t.hps or {}) + 1 do for _, x in ipairs(t.shs[k] or {}) do all[#all + 1] = x end end
+            p.sh = all
+          end
+          tg[#tg + 1] = p
+        end
       end
       if from then Fx.move(a.spec, a.type, from, tg, r.t, a.gmax) end
       if Sounds then Rd.se(Sounds.moveSe(a.spec, a.type)) end
@@ -2166,19 +2223,9 @@ return function(mod, deps)
     r.evT = r.t
     showFor(e)
     if e.fieldType then r.fieldShown = e.fieldType end
-    -- the barrier's pills follow the events (gone once broken)
-    if e.kind == "shield" and r.boss then
-      r.boss.shieldShown = e.step ~= "break" and { left = e.left, max = e.max } or nil
-      if e.step == "hit" and Scene then Scene.shake(0.06, 0.25) end
-      if Fx then
-        if e.step == "up" then Fx.barrierUp(r.t)
-        elseif e.step == "hit" then Fx.barrierHit(r.t)
-        elseif e.step == "break" then
-          Fx.barrierBreak(placeOf(r.boss), r.t)
-          if Scene then Scene.shake(0.25, 0.6); if Scene.kick then Scene.kick(4, 0.4) end end
-        end
-      end
-    end
+    -- the barrier's pills follow the events (gone once broken); one shown at the blow that brought it
+    -- is left as it is (setting it again would bring back pills a later break took away)
+    if e.kind == "shield" and r.boss and not e.shown then shieldLook(e) end
     if e.kind == "faint" and not e.who.boss then r.shownFaints = (r.shownFaints or 0) + 1 end
     if Sounds then
       local E2 = Sounds.EVENT
@@ -2194,7 +2241,7 @@ return function(mod, deps)
       elseif (e.kind == "status" or e.kind == "cant") and e.torment then Rd.se(Sounds.SIDE.torment)
       elseif e.kind == "field" and (e.fieldType or e.foeField) then Rd.se(Sounds.FIELD[e.fieldType or e.foeField])
       elseif e.kind == "shield" then
-        Rd.se(e.step == "up" and E2.shieldUp or e.step == "break" and E2.shieldBreak or E2.shieldHit)
+        -- (its sound played with its look)
       elseif (e.kind == "damage" or e.kind == "residual") and not e.looked then
         -- (a hit with no look of its own: poison, a trap, the field)
         Rd.se(Sounds.HIT.plain)
