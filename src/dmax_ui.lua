@@ -266,7 +266,7 @@ return function(mod, deps)
     local wx = okW and type(W) == "table" and W.exports or nil
     if wx and type(wx.tag) == "function" then
       a.spec = a.spec or { side = "player", body = { a.box[1], a.box[2], a.box[3], a.box[4] }, top = a.box[2],
-        lowPivot = { 32, 32 } }
+        lowPivot = { (a.box[1] + a.box[3]) / 2, a.box[4] } }
       pcall(wx.tag, img, a.spec)
     end
     return img
@@ -1015,6 +1015,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     end
     function U.frameNo() return frameNo end
     local saved = {}
+    -- (WoobleView told how each giant is drawn - exports.giant: its camera fits it at that size,
+    -- its feet where its own picture's stand)
+    local wvGiant = nil
+    local function giantTo(id, info)
+      if wvGiant == nil then
+        local okW, W = pcall(mod.find, mod, "gen3-hd-sprites")
+        local wx = okW and type(W) == "table" and W.exports or nil
+        wvGiant = wx and type(wx.giant) == "function" and wx.giant or false
+      end
+      if wvGiant then pcall(wvGiant, id, info) end
+    end
     Ui.draw = function(w, h, ...)
       local st = Ui._st
       if not (st and st.__mr and st.__mr.allowed) then return draw(w, h, ...) end
@@ -1030,7 +1041,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
         if k0 > 1.01 then any = true end
         local k = 1 + (k0 - 1) * dk
         local p = k0 ~= 1 and Anim.present(id)
+        if not p and v.wv and v.wv.on then
+          v.wv.on = false
+          giantTo(id, nil)
+        end
         if p then
+          local gi = v.wv or { on = false }
+          v.wv = gi
           n = n + 1
           local s = saved[n] or {}
           saved[n] = s
@@ -1044,10 +1061,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
             p.sx, p.sy = (p.sx or 1) * sc, (p.sy or 1) * sc
             p.ox = (p.ox or 0) - (bx - 32) * sc
             p.oy = (p.oy or 0) + 32 - (A.box[4] - 32) * sc
+            gi.scale, gi.dx, gi.dy, gi.image = sc, -(bx - 32) * sc, 32 - (A.box[4] - 32) * sc, frameNow(A, now)
           else
             p.sx, p.sy = (p.sx or 1) * k, (p.sy or 1) * k
             p.oy = (p.oy or 0) - 32 * (k - 1)
+            gi.scale, gi.dx, gi.dy, gi.image = k, 0, -32 * (k - 1), nil
           end
+          gi.grow = max(0, min(1, (k0 - 1) / (U.K - 1)))
+          gi.on = true
+          giantTo(id, gi)
           -- (red that breathes, never off, as it grows; a blend the battle itself set - a hit's
           -- flash, a status - is left alone)
           -- (with the Dynamax pattern over it, breathing with the red, the red under it lighter)
