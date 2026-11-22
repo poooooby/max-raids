@@ -50,6 +50,10 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
   and the Gigantamax Factor if it came from a Gigantamax raid. Shinies appear 1 time in 4,096.
 - 🎁 **Rewards:** Exp. Candies, TMs, berries, treasures, Dynamax Candy, Max Mushrooms and more.
 - 💎 **Dynamax Crystals** let you call a legendary or mythical Pokémon at any den.
+- 🔴 **Dynamax in your own battles:** the dens' awakening gives you a Dynamax Band. In Gym Leader,
+  Elite Four, Champion and rival battles, one of your Pokémon can Dynamax once per battle for three
+  turns. Its moves become Max Moves, with their weather, terrain and stat changes. A Pokémon with
+  the Gigantamax Factor Gigantamaxes and uses its G-Max Move.
 - 🎮 **One screen or two:** the battle menu can go on a second screen, following Kanto Gear's Display
   Mode.
 - 🎵 **Original raid music** for dens, battles and catches.
@@ -65,6 +69,7 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 | RAID DIFFICULTY | SOLO (default): tougher bosses, since all four Pokémon are yours, and every catch succeeds. SWORD / SHIELD: the games' own numbers. |
 | MOVE INFO | How effective each move is against the boss: BASIC (default) shows words, FULL shows multipliers, OFF shows nothing. |
 | RAID DENS | Turn dens on the routes on or off. |
+| DYNAMAX | Where your Pokémon can Dynamax in the game's own battles: GYMS & LEAGUE (default: Gym Leaders, the Elite Four, the Champion and rivals), ALL TRAINERS, ALL BATTLES (wild ones too), or OFF. |
 | PERF.OVERLAY | Shows frame times in a den, for reporting slowdowns. |
 | LANGUAGE | English (default), Japanese, Portuguese, Spanish, German, or CUSTOM (your own translation file). |
 
@@ -73,6 +78,7 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - **A** picks, **B** goes back, and the **D-pad** moves the cursor.
 - **START** on the den screen starts the raid.
 - **SELECT** or **R** on the move list presses DYNAMAX.
+- In the game's own battles, **R** (or **START**) on the move list picks Dynamax.
 - Every button can also be tapped.
 
 ## 📦 Install
@@ -95,6 +101,7 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - **Pixel art effects:** [pixelfx](https://github.com/patch-gg/pixelfx) by Patch, partly after Hugo
   Duprez's Sprite Fusion effects (MIT).
 - **Type icons:** [PokéSprite](https://github.com/msikma/pokesprite) by msikma and contributors.
+- **Dynamax Band and Dynamax icon:** from Lucidious89's [DBK] Dynamax plugin for Pokémon Essentials.
 - **Max Move power:** from Pokémon Showdown's data (MIT).
 
 Pokémon and their designs are © Nintendo / Creatures Inc. / GAME FREAK Inc. This is an unofficial

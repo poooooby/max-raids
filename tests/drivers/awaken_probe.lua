@@ -140,6 +140,13 @@ local function body(game, log)
   waitFor(function() return Dn.awake() end, 300)
   check(Dn.awake(), "the region awake (saved)")
   check(not require("src.core.game3.field").isLocked(), "the player free again")
+  -- (and with it the Dynamax Band, given after the words)
+  do
+    local band = X._test and X._test.band
+    local s = Runtime.getSession()
+    local has = band and s and require("src.core.game3.bag").has(s.bag, band.index, 1)
+    check(has == true, "the Dynamax Band in the Bag")
+  end
 
   -- on a route: dens
   if route then

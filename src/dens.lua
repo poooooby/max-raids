@@ -710,6 +710,11 @@ return function(mod, deps)
       if FieldView then FieldView.cameraPanX, FieldView.cameraPanY = 0, 0 end
       local rows = {}
       for _, t in ipairs(A.WORDS) do rows[#rows + 1] = { "text", T.game(t) } end
+      -- (and what comes with it: the Dynamax Band, main's deps.gift - script rows)
+      if deps.gift then
+        local okG, more = pcall(deps.gift)
+        if okG and type(more) == "table" then for _, r in ipairs(more) do rows[#rows + 1] = r end end
+      end
       local ok, err = mod.world:queueScript(rows, { onDone = function() finish() end })
       if not ok then
         mod.log:warn("dens: the awakening's words could not show: %s", tostring(err))

@@ -112,9 +112,10 @@ check(#files > 10, "found the drivers (" .. #files .. ")")
 local phaseRefs, menuRefs = 0, 0
 for _, f in ipairs(files) do
   local s = read("tests/drivers/" .. f)
-  -- (game.phase is the engine's, not the raid's)
+  -- (game.phase and the engine battle's Battle._phase are the engine's, not the raid's)
   for lhs, name in s:gmatch("([%w_%.%(%)]*)phase%s*[=~]=%s*\"([%w_]+)\"") do
-    if not lhs:find("game%.$") and name ~= "boot" and name ~= "pressed" and name ~= "released" then
+    if not lhs:find("game%.$") and not lhs:find("Battle%._$") and name ~= "boot" and name ~= "pressed"
+        and name ~= "released" then
       phaseRefs = phaseRefs + 1
       check(PH[name] ~= nil, f .. ": phase \"" .. name .. "\" is a phase in the data")
     end

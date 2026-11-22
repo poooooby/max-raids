@@ -70,3 +70,5 @@ tests/i18n_test.lua
 tests/drivers/language_probe.lua
 tests/raid_api_test.lua
 tests/drivers/api_probe.lua
+tests/dmax_test.lua
+tests/drivers/dmax_probe.lua

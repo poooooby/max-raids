@@ -48,3 +48,8 @@ The pixel art effects (assets/fx/pixelfx/, data/raid_pixelfx.lua): rendered as s
 pixelfx (https://github.com/patch-gg/pixelfx) by Patch, parts adapted from Hugo Duprez's Sprite
 Fusion pixel art VFX; MIT License, Copyright (c) 2026 Patch, Copyright (c) 2026 Hugo Duprez. The
 full licence is assets/fx/pixelfx/LICENSE.txt. Baked by tools/pixelfx_pack.py.
+
+---------------------------------------------
+The Dynamax Band's picture and the Dynamax icon (assets/dmax/): from Lucidious89's [DBK] Dynamax
+plugin for Pokémon Essentials (Graphics/Items/DYNAMAXBAND.png, Graphics/Plugins/Dynamax/
+icon_dynamax.png).

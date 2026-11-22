@@ -73,6 +73,12 @@ return function(mod)
         choices = { { "BASIC", "basic" }, { "FULL", "full" }, { "OFF", "off" } } },
       -- dens on the routes (off: none spawn; those already chosen stay saved)
       { key = "dens", label = "RAID DENS", type = "toggle", default = true },
+      -- Dynamax in the game's own battles (src/dmax.lua), with the Dynamax Band: the Gym Leaders',
+      -- the Elite Four's, the Champion's and the rivals' battles (Sword / Shield's Power Spots), every
+      -- trainer's, every battle, or none
+      { key = "dynamax", label = "DYNAMAX", type = "choice", default = "league",
+        choices = { { "GYMS & LEAGUE", "league" }, { "ALL TRAINERS", "trainers" }, { "ALL BATTLES", "all" },
+          { "OFF", "off" } } },
       -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
       -- raid was doing, shown while a den is open: for reporting slowdowns
       { key = "perf_overlay", label = "PERF.OVERLAY", type = "toggle", default = false },
@@ -129,6 +135,10 @@ return function(mod)
   local makeApi = loadSibling(mod, "src/raid_api.lua")
   local makeAchievements = loadSibling(mod, "src/achievements.lua")
   local AchievementData = loadSibling(mod, "data/raid_achievements.lua")
+  local DmaxData = loadSibling(mod, "data/dmax_battle.lua")
+  local makeDmaxRules = loadSibling(mod, "src/dmax_rules.lua")
+  local makeDmax = loadSibling(mod, "src/dmax.lua")
+  local makeDmaxUi = loadSibling(mod, "src/dmax_ui.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
     mod.log:error("Galar Rising is missing files; it stays off -- reinstall the mod")
     return
@@ -271,6 +281,7 @@ return function(mod)
   local LAYER_ID = "max_raids"
   local Raid
   local Dens = nil
+  local giftRows = nil   -- (the awakening's gift: the Dynamax Band's script rows; set with Dynamax below)
   local Layer = { isMenu = true }
   function Layer.handleInput(input) if Raid then Raid.input(input) end end
   function Layer.update(dt)
@@ -368,7 +379,7 @@ return function(mod)
       return modOption("national_dex_gen3", "clock_source")
     end
     local ok, dn = pcall(makeDens, mod, { N = N, Bosses = Bosses, Dyna = Dyna, open = function(den) return Raid.openDen(den) end, T = T,
-      clockSource = clockSource })
+      clockSource = clockSource, gift = function() return giftRows and giftRows() or nil end })
     if ok and type(dn) == "table" then
       Dens = dn
       Dens.registerSprites()
@@ -376,6 +387,93 @@ return function(mod)
       if not okI then mod.log:warn("dens not installed: %s", tostring(err)) end
     else
       mod.log:warn("dens failed to build: %s", tostring(dn))
+    end
+  end
+
+  -- ------- Dynamax in the game's own battles (src/dmax.lua, src/dmax_ui.lua): the Max Moves and the
+  -- Dynamax Band registered now, as the National Dex registers its own; the battle's wraps at
+  -- game.ready, after the National Dex's
+  local Dmax, DmaxUi = nil, nil
+  local dmaxForced = nil  -- (drivers: _test.dmaxMode("league" | "trainers" | "all" | "off"))
+  local BAND = { id = "DYNAMAX_BAND", name = "DYNAMAX BAND", index = 959 }
+  if DmaxData and makeDmaxRules and makeDmax and makeDmaxUi and Battle then
+    local function dexExports()
+      local ok, d = pcall(mod.find, mod, "national_dex_gen3")
+      return ok and type(d) == "table" and d.exports or nil
+    end
+    local okD, dm = pcall(function()
+      local rules = makeDmaxRules({ data = DmaxData })
+      return makeDmax(mod, { data = DmaxData, rules = rules, battle = Battle, gmax = Gmax, T = T, dex = dexExports,
+        mode = function() return dmaxForced or mod.options:get("dynamax") or "league" end, bandIndex = BAND.index })
+    end)
+    if okD and type(dm) == "table" then
+      Dmax = dm
+      local n = Dmax.register()
+      if mod.log then mod.log:info("dynamax: %d moves registered", n) end
+      local okB, errB = pcall(function()
+        mod.content.items:register(BAND.id, { id = BAND.id, name = BAND.name, index = BAND.index, price = 0,
+          pocket = "KEY_ITEMS", importance = 1,
+          description = "A band that lets\nPokemon Dynamax\nin battle." })
+      end)
+      if not okB then mod.log:warn("dynamax: the Dynamax Band not registered (%s)", tostring(errB)) end
+      local okU, ui = pcall(makeDmaxUi, mod, { dmax = Dmax, bosses = Bosses, sprites = Sprites, T = T,
+        bigCry = function(species) return Raid and Raid.bigCry and Raid.bigCry(species) end })
+      if okU and type(ui) == "table" then
+        DmaxUi = ui
+        Dmax.onDynamax = ui.onDynamax
+      else
+        mod.log:warn("dynamax: its battle screen failed to build: %s", tostring(ui))
+      end
+      -- the band: given at the dens' awakening (its words, then the gift), and to a save already
+      -- awake without it the next time it loads; once (save "dmaxBand")
+      local function bag()
+        local okR, Runtime = pcall(require, "src.core.game3.runtime")
+        local s = okR and Runtime.getSession and Runtime.getSession()
+        local okB, Bag = pcall(require, "src.core.game3.bag")
+        return s and s.bag, okB and Bag or nil
+      end
+      local function hasBand()
+        local b, Bag = bag()
+        if not (b and Bag) then return false end
+        local okH, has = pcall(Bag.has, b, BAND.index, 1)
+        return okH and has == true
+      end
+      -- (the band put in the Bag here: a Gen 3 script has no give_item; its words follow the shake's)
+      giftRows = function()
+        if hasBand() then return nil end
+        local b, Bag = bag()
+        if not (b and Bag) then return nil end
+        local okA, added = pcall(Bag.add, b, BAND.index, 1)
+        if not (okA and added) then return nil end
+        mod.save:set("dmaxBand", true)
+        return {
+          { "text", T.game("The light gathers around your wrist...") },
+          { "text", T.game("You obtained a DYNAMAX BAND!") },
+        }
+      end
+      local function grantOnLoad()
+        if mod.save:get("dmaxBand") or not (Dens and Dens.awake and Dens.awake()) or hasBand() then return end
+        local b, Bag = bag()
+        if not (b and Bag) then return end
+        local okA, added = pcall(Bag.add, b, BAND.index, 1)
+        if okA and added then
+          mod.save:set("dmaxBand", true)
+          mod.log:info("dynamax: the Dynamax Band given (the dens were already awake)")
+        end
+      end
+      mod.events:on("save.loaded", function() pcall(grantOnLoad) end)
+      mod.events:on("game.ready", function()
+        pcall(grantOnLoad)
+        local okI, errI = pcall(Dmax.install)
+        if not okI then mod.log:warn("dynamax: not installed (%s)", tostring(errI)) end
+        if DmaxUi then
+          local okUi, errUi = pcall(DmaxUi.install)
+          if not okUi then mod.log:warn("dynamax: its battle screen not installed (%s)", tostring(errUi)) end
+          pcall(DmaxUi.installBagIcon, BAND.index)
+        end
+      end)
+    else
+      mod.log:warn("dynamax failed to build: %s", tostring(dm))
     end
   end
 
@@ -454,6 +552,7 @@ return function(mod)
     G.pop()
   end
 
+  local cloudWarned = false
   -- the raid over the whole window, after the engine's own HUD
   mod.hooks:wrap("render.hud", function(next, game, viewport)
     lastGame = game or lastGame
@@ -485,6 +584,20 @@ return function(mod)
       G.pop()
       if not ok then mod.log:warn("raid draw failed: %s", tostring(err)) end
     end
+    -- (the red energy shed off a giant in the game's own battle, at the window's resolution)
+    if DmaxUi and not up then
+      local G = love.graphics
+      G.push("all")
+      G.origin()
+      G.setScissor()
+      G.setShader()
+      local okC, errC = pcall(DmaxUi.drawEnergy, viewport)
+      G.pop()
+      if not okC and not cloudWarned then
+        cloudWarned = true
+        mod.log:warn("dynamax: its energy failed to draw: %s", tostring(errC))
+      end
+    end
     if FP and FP.enabled then
       heapBefore, heapNow = heapNow, collectgarbage("count")
       local G = love.graphics
@@ -498,6 +611,11 @@ return function(mod)
   -- taps and clicks on the battle pad (the main window's)
   mod.hooks:wrap("input.pointer", function(next, game, ev)
     if Raid.active() and not Raid.summaryUp() and type(ev) == "table" and Raid.pointer(ev) then return true end
+    -- (the DYNAMAX button in the game's own battle)
+    if DmaxUi and not Raid.active() then
+      local okP, took = pcall(DmaxUi.pointer, ev)
+      if okP and took then return true end
+    end
     return next(game, ev)
   end)
 
@@ -564,6 +682,7 @@ return function(mod)
     rewards = Rewards, fx = Raid and Raid.Fx or nil, screen2 = Screen2, sounds = Sounds, pick = Pick, dyna = Dyna, api = Api,
     padSecond = function(on) padForced = on end, difficulty = function(v) difficultyForced = v end,
     moveInfo = function(v) moveInfoForced = v end,
-    gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end }
+    gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end,
+    dmax = Dmax, dmaxUi = DmaxUi, dmaxMode = function(v) dmaxForced = v end, band = BAND }
   mod.log:info("Galar Rising ready (%d bosses)", #(Bosses.ORDER or {}))
 end
