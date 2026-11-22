@@ -226,6 +226,27 @@ return function(mod, deps)
     return hi
   end
 
+  -- the solvers' view, set before each solve (shots are aimed again every frame while a member
+  -- grows giant, so no closure is made per call): the eye at (ex, ey, ez + back) looking at
+  -- (lx, ly, lz), the head at (hx, hy, hz); across: the 3:2 view's half width as a tangent
+  local sv = { ex = 0, ey = 0, ez = 0, lx = 0, ly = 0, lz = 0, hx = 0, hy = 0, hz = 0, fov = 54, half = 1, n = 4 }
+  local function head(back)
+    local _, ty = viewTan(sv.ex, sv.ey, sv.ez + back, sv.lx, sv.ly, sv.lz, sv.hx, sv.hy, sv.hz)
+    return upScreen(ty, sv.fov)
+  end
+  -- (1 - the outermost edge of any member as a share of the 3:2 view's half width: it rises as the
+  -- eye draws back to z)
+  local function across(z)
+    local most = 0
+    for k = 1, sv.n do
+      local p = Sc.memberPos(k)
+      local w = halfWidthNow(k)
+      local tx2 = viewTan(sv.ex, sv.ey, z, sv.lx, sv.ly, sv.lz, p.x + (p.x < 0 and -w or w), 0, p.z)
+      most = max(most, abs(tx2) / sv.half)
+    end
+    return 1 - most
+  end
+
   function Sc.targetShot(i, T)
     local m = Sc.memberPos(i)
     T = T or Sc.TARGET
@@ -235,10 +256,8 @@ return function(mod, deps)
     -- (a touch off its middle, toward the outside)
     local ex, ey = m.x + (m.x <= 0 and -1 or 1) * T.SIDE, top + T.CLEAR
     local fov = T.FOV
-    local function head(back)
-      local _, ty = viewTan(ex, ey, m.z + back, lx, ly, lz, m.x, top, m.z)
-      return upScreen(ty, fov)
-    end
+    sv.ex, sv.ey, sv.ez, sv.lx, sv.ly, sv.lz = ex, ey, m.z, lx, ly, lz
+    sv.hx, sv.hy, sv.hz, sv.fov = m.x, top, m.z, fov
     local GB = Sc.GIANT_SHOT.BACK * g
     local lo, hi = T.BACK_MIN + GB, T.BACK_MAX + GB
     local back = solveBack(head, head(lo) >= T.HEAD and T.HEAD_MAX or T.HEAD, lo, hi)
@@ -268,25 +287,10 @@ return function(mod, deps)
     local lx, ly, lz = Sc.bossMiddle()
     local ey = top + T.CLEAR
     local tm = Sc.memberPos(tall)
-    local tx, tz = tm.x, tm.z
     local fov = T.FOV
-    local half = tan(rad(fov) / 2) * Sc.ASPECT
-    local function head(z)
-      local _, ty = viewTan(0, ey, z, lx, ly, lz, tx, top, tz)
-      return upScreen(ty, fov)
-    end
-    -- (1 - the outermost edge of any member as a share of the 3:2 view's half width: it rises as the
-    -- eye draws back)
-    local function across(z)
-      local most = 0
-      for k = 1, n do
-        local p = Sc.memberPos(k)
-        local w = halfWidthNow(k)
-        local tx2 = viewTan(0, ey, z, lx, ly, lz, p.x + (p.x < 0 and -w or w), 0, p.z)
-        most = max(most, abs(tx2) / half)
-      end
-      return 1 - most
-    end
+    sv.ex, sv.ey, sv.ez, sv.lx, sv.ly, sv.lz = 0, ey, 0, lx, ly, lz
+    sv.hx, sv.hy, sv.hz, sv.fov = tm.x, top, tm.z, fov
+    sv.half, sv.n = tan(rad(fov) / 2) * Sc.ASPECT, n
     local near = 1
     for k = 1, n do near = max(near, Sc.memberPos(k).z + 1) end
     local z = max(solveBack(head, T.HEAD, near, T.Z_MAX), solveBack(across, 1 - T.FIT, near, T.Z_MAX))

@@ -73,6 +73,26 @@ local function body(game, log)
   end
   -- (the party: the tallest's head at HEAD or higher - all four must fit across)
   measure("spread", "spread", nil, Sc.PARTY.HEAD, 0.6)
+  -- (the shots are aimed again every frame while a member grows giant: solving them makes no garbage)
+  Sc.giant[1] = 0.5
+  local function solveAll(n)
+    for _ = 1, n do
+      for i = 1, 4 do Sc.targetShot(i, Sc.CHOOSE); Sc.targetShot(i) end
+      Sc.partyShot()
+    end
+  end
+  -- (once first: the JIT's traces are heap objects too)
+  solveAll(100)
+  collectgarbage("collect")
+  collectgarbage("stop")
+  local kb0 = collectgarbage("count")
+  solveAll(100)
+  local per = (collectgarbage("count") - kb0) * 1024 / 900
+  collectgarbage("restart")
+  Sc.giant[1] = 0
+  local gOk = per < 16
+  if not gOk then fails = fails + 1 end
+  log(("%s the shots' solve: %.1f bytes of garbage a call"):format(gOk and "ok  " or "FAIL", per))
   X.close()
   log(fails == 0 and "PASS camera" or ("FAIL camera: " .. fails))
 end
