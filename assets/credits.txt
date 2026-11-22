@@ -50,6 +50,7 @@ Fusion pixel art VFX; MIT License, Copyright (c) 2026 Patch, Copyright (c) 2026 
 full licence is assets/fx/pixelfx/LICENSE.txt. Baked by tools/pixelfx_pack.py.
 
 ---------------------------------------------
-The Dynamax Band's picture and the Dynamax icon (assets/dmax/): from Lucidious89's [DBK] Dynamax
-plugin for Pokémon Essentials (Graphics/Items/DYNAMAXBAND.png, Graphics/Plugins/Dynamax/
-icon_dynamax.png).
+The Dynamax Band's picture, the Dynamax icon and the Dynamax pattern (assets/dmax/): from
+Lucidious89's [DBK] Dynamax plugin for Pokémon Essentials (Graphics/Items/DYNAMAXBAND.png,
+Graphics/Plugins/Dynamax/icon_dynamax.png, Graphics/Plugins/Dynamax/Patterns/dynamax.png). The
+Dynamax scene follows that plugin's Dynamax animation, drawn anew.

@@ -417,7 +417,8 @@ return function(mod)
       end)
       if not okB then mod.log:warn("dynamax: the Dynamax Band not registered (%s)", tostring(errB)) end
       local okU, ui = pcall(makeDmaxUi, mod, { dmax = Dmax, bosses = Bosses, sprites = Sprites, T = T,
-        bigCry = function(species) return Raid and Raid.bigCry and Raid.bigCry(species) end })
+        bigCry = function(species) return Raid and Raid.bigCry and Raid.bigCry(species) end,
+        fx = function() return Raid and Raid.Fx end })
       if okU and type(ui) == "table" then
         DmaxUi = ui
         Dmax.onDynamax = ui.onDynamax
@@ -592,10 +593,13 @@ return function(mod)
       G.setScissor()
       G.setShader()
       local okC, errC = pcall(DmaxUi.drawEnergy, viewport)
+      -- (and the Dynamax scene over the whole battle while it plays)
+      local okS, errS = pcall(DmaxUi.drawScene, viewport)
+      if not okS then okC, errC = false, errS end
       G.pop()
       if not okC and not cloudWarned then
         cloudWarned = true
-        mod.log:warn("dynamax: its energy failed to draw: %s", tostring(errC))
+        mod.log:warn("dynamax: its energy or its scene failed to draw: %s", tostring(errC))
       end
     end
     if FP and FP.enabled then

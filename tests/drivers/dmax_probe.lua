@@ -184,15 +184,40 @@ local function body(game, log)
     check(Dm.sel[0] == true, "a tap on DYNAMAX picks it")
   end
   U.tap(game, "a")
-  -- the turn: the Dynamax first
+  -- the turn: the Dynamax first - its scene (shot through its parts, never pressed through), then
+  -- the giant on the field
+  local UI = Tt.dmaxUi
+  local SM = UI.SM
+  local scenes0 = UI.scenes
+  local marks = { { SM.RECALL, "s01_tint" }, { SM.RECALL + 0.15, "s02_recall" }, { SM.BAND + 0.35, "s03_band" },
+    { SM.BURST - 0.02, "s04_swell" }, { SM.BURST + 0.06, "s05_burst" }, { SM.LAND + 0.04, "s06_land" },
+    { SM.OPEN + 0.15, "s07_open" }, { SM.GROW + 0.35, "s08_grow" }, { SM.ROAR + 0.1, "s09_roar" },
+    { SM.HOLD, "s10_hold" } }
+  local nextMark, sceneFrames, sceneHeld = 1, 0, false
   local grownShot, giantSeen = false, false
   for _ = 1, 4000 do
     local v = Dm.vis[0]
-    if v and (v.k or 1) > 1.45 then giantSeen = true end
-    if giantSeen and not grownShot then U.wait(10) shot("d02_giant") grownShot = true end
-    if atCommand() then break end
-    if not pump() then U.wait(1) end
+    if UI.sceneOn() and UI.sceneT() then
+      sceneFrames = sceneFrames + 1
+      local t = UI.sceneT()
+      if t > SM.SLIDE and t < SM.OUT and require("src.core.game3.battle.anim").busy() then sceneHeld = true end
+      if nextMark <= #marks and t >= marks[nextMark][1] then
+        shot(marks[nextMark][2])
+        nextMark = nextMark + 1
+      end
+      U.wait(1)
+    else
+      if v and (v.k or 1) > 1.45 then giantSeen = true end
+      if giantSeen and not grownShot then U.wait(10) shot("d02_giant") grownShot = true end
+      if atCommand() then break end
+      if not pump() then U.wait(1) end
+    end
   end
+  log(("  the Dynamax scene: %d frames, %d of %d shots"):format(sceneFrames, nextMark - 1, #marks))
+  check(UI.scenes == scenes0 + 1, "the Dynamax scene played")
+  check(nextMark > #marks, "the scene went through all its parts")
+  check(sceneHeld, "the battle held while it played")
+  check((UI.patternDraws or 0) > 0, "the Dynamax pattern drawn (" .. tostring(UI.patternDraws) .. " passes)")
   local rec = st.player.__mrDmax
   check(rec ~= nil, "Charizard is Dynamaxed")
   check(st.player.mon.maxHp == math.floor(baseMax * 2.0), ("max HP x2.0 at Level 10: %d -> %d"):format(baseMax,
@@ -390,6 +415,17 @@ local function body(game, log)
     U.tap(game, "a")
     U.wait(20)
     if Ui._mode == "target" then U.tap(game, "a") U.wait(20) end
+    -- (its scene skipped with B a moment in)
+    local UI = Tt.dmaxUi
+    if waitFor(function() return UI.sceneOn() and (UI.sceneT() or 0) > 0.6 end, 900) then
+      U.tap(game, "b")
+      local n = 0
+      while UI.sceneOn() and n < 300 do U.wait(1) n = n + 1 end
+      log(("  doubles: the scene skipped, gone %d frames after B"):format(n))
+      check(n < 60, "doubles: B skips the Dynamax scene")
+    else
+      check(false, "doubles: the Dynamax scene played")
+    end
     toCommand()
     local b0 = require("src.core.game3.battle.state").battler(st, 0)
     check(b0 and b0.__mrDmax ~= nil, "doubles: the first Dynamaxed")

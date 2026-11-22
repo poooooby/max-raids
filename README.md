@@ -52,8 +52,10 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - 💎 **Dynamax Crystals** let you call a legendary or mythical Pokémon at any den.
 - 🔴 **Dynamax in your own battles:** the dens' awakening gives you a Dynamax Band. In Gym Leader,
   Elite Four, Champion and rival battles, one of your Pokémon can Dynamax once per battle for three
-  turns. Its moves become Max Moves, with their weather, terrain and stat changes. A Pokémon with
-  the Gigantamax Factor Gigantamaxes and uses its G-Max Move.
+  turns. A short scene plays as it grows: your Pokémon returns to its ball, you raise the band,
+  and the giant bursts out of a giant ball. Its moves become Max Moves, with their weather, terrain
+  and stat changes. A Pokémon with the Gigantamax Factor Gigantamaxes and uses its G-Max Move. A
+  Dynamaxed Pokémon glows red under a drifting Dynamax pattern.
 - 🎮 **One screen or two:** the battle menu can go on a second screen, following Kanto Gear's Display
   Mode.
 - 🎵 **Original raid music** for dens, battles and catches.
@@ -78,7 +80,8 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - **A** picks, **B** goes back, and the **D-pad** moves the cursor.
 - **START** on the den screen starts the raid.
 - **SELECT** or **R** on the move list presses DYNAMAX.
-- In the game's own battles, **R** (or **START**) on the move list picks Dynamax.
+- In the game's own battles, **R** (or **START**) on the move list picks Dynamax. **A**, **B** or a
+  tap skips the Dynamax scene.
 - Every button can also be tapped.
 
 ## 📦 Install
@@ -101,7 +104,7 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - **Pixel art effects:** [pixelfx](https://github.com/patch-gg/pixelfx) by Patch, partly after Hugo
   Duprez's Sprite Fusion effects (MIT).
 - **Type icons:** [PokéSprite](https://github.com/msikma/pokesprite) by msikma and contributors.
-- **Dynamax Band and Dynamax icon:** from Lucidious89's [DBK] Dynamax plugin for Pokémon Essentials.
+- **Dynamax Band, Dynamax icon and the giants' pattern:** from Lucidious89's [DBK] Dynamax plugin for Pokémon Essentials; the Dynamax scene follows its animation.
 - **Max Move power:** from Pokémon Showdown's data (MIT).
 
 Pokémon and their designs are © Nintendo / Creatures Inc. / GAME FREAK Inc. This is an unofficial

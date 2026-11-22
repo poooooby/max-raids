@@ -5,9 +5,11 @@
 --   Help.update       FireRed / LeafGreen's Help System leaves R alone while the button shows
 --   Anim.launchGeneral  a G-Max field's / binding's vortex look as the cart move of its kind
 --   Ui.draw           the move menu showing the Max Moves (their short names); the giant drawn
---                     bigger and red, a Gigantamax one as its form's animated back
+--                     bigger and red under the scrolling Dynamax pattern, a Gigantamax one as its
+--                     form's animated back
 --   Ui.sidePic        that form's picture in the Pokemon's place
---   Anim.launchMove   the Dynamax's look starts the growth (and the giant's cry), its end the shrink
+--   Anim.launchMove   the Dynamax's look plays the Dynamax scene (U.drawScene, main.lua's render.hud;
+--                     else the growth and the giant's cry), its end's the shrink
 --   Anim.scriptForMove  the two looks: Growth's and Minimize's
 --   Anim.tweenHp      the size follows the HP bar's max (so it holds with the animations off)
 --   Anim.faintMon     a faint puts it back to its size
@@ -52,6 +54,19 @@ return function(mod, deps)
     MARK = { frameLeft = 9, barTop = 1, x = 24, y = 16, s = 7 },
     DOUBLES_K = 0.8,       -- a giant in a double battle this much smaller (the foes' boxes above it)
     LOOK = { DYNAMAX = 74, UNDYNAMAX = 107 },   -- Growth, Minimize
+    -- the Dynamax pattern over a giant (assets/dmax/pattern.png): K pattern texels to a battle
+    -- pixel, scrolling left SPEED texels a second, its opacity breathing from MIN to MAX with the
+    -- red; the red tint under it TINT_K of its own while it shows
+    PATTERN = { ON = true, K = 2.6, SPEED = 34, MIN = 0.32, MAX = 0.55, TINT_K = 0.5 },
+    -- the Dynamax scene: each part's length (seconds), in order; BACK the black lifting off the
+    -- battle after it; presses before SKIP_AFTER are not a skip
+    SCENE = { ON = true, IN = 0.2, SHOW = 0.2, TINT = 0.18, RECALL = 0.24, SLIDE = 0.4, BAND = 0.45,
+      SWELL = 0.32, BURST = 0.24, DROP = 0.62, OPEN = 0.2, GROW = 0.6, ROAR = 0.8, HOLD = 0.2, OUT = 0.3,
+      BACK = 0.3, SKIP_AFTER = 0.25,
+      DROP_HIT = 0.36,     -- the giant ball's landing, this far into the drop
+      MON_H = 56, GIANT_H = 132, BASE_Y = 132, -- the stage's sizes, in a 240 x 160 stage
+      BG = { 0.16, 0.02, 0.09 }, BG_PINK = { 0.62, 0.07, 0.3 }, PINK = { 1, 0.2, 0.6 },
+      OUTLINE = { 0.98, 0.22, 0.38 } },
   }
   Dm.ui = U
 
@@ -283,6 +298,96 @@ return function(mod, deps)
     return v.k
   end
 
+  -- ------- the Dynamax pattern over a giant (the DBK plugin's): a second pass of its sprite through
+  -- PATTERN_SRC, the pattern where the sprite is opaque. Its uniforms are named as the battle's
+  -- stat-change pattern's (origin, size, flip, maskTex: the picture's place in the draw's own
+  -- pixels), so WoobleView carries it onto the full-resolution frame as it carries that one
+
+  local PATTERN_SRC = [[
+extern Image maskTex;
+extern vec2 origin;
+extern vec2 size;
+extern float flip;
+extern vec2 scroll;
+extern vec2 maskSize;
+extern float k;
+extern float eva;
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+  float a = Texel(tex, tc).a;
+  if (a < 0.01) discard;
+  vec2 t = tc;
+  if (flip > 0.5) t.x = 1.0 - t.x;
+  vec2 pos = origin + t * size;
+  vec4 p = Texel(maskTex, (pos * k + scroll) / maskSize);
+  return vec4(p.rgb, eva * a * p.a * color.a);
+}
+]]
+  local pat = { tried = false, sh = nil, img = nil, sent = false, o = { 0, 0 }, s = { 0, 0 }, sc = { 0, 0 },
+    ms = { 1, 1 } }
+  local function patternReady()
+    if not pat.tried then
+      pat.tried = true
+      pat.img = image("assets/dmax/pattern.png")
+      if pat.img then
+        pat.img:setFilter("linear", "linear")
+        pat.img:setWrap("repeat", "repeat")
+        pat.ms[1], pat.ms[2] = pat.img:getDimensions()
+        local ok, sh = pcall(love.graphics.newShader, PATTERN_SRC)
+        pat.sh = ok and sh or nil
+        if not ok and mod.log then
+          mod.log:warn("dynamax: the pattern's shader failed (%s); the giants are tinted red alone", tostring(sh))
+        end
+      end
+    end
+    return pat.sh ~= nil and pat.img ~= nil
+  end
+  U.patternReady = patternReady
+  local function sendPattern(sh, flip, k, eva)
+    if not pat.sent then
+      pat.sent = true
+      sh:send("maskTex", pat.img)
+      sh:send("maskSize", pat.ms)
+    end
+    sh:send("origin", pat.o)
+    sh:send("size", pat.s)
+    sh:send("flip", flip)
+    sh:send("scroll", pat.sc)
+    sh:send("k", k)
+    sh:send("eva", eva)
+  end
+  -- the pattern over a picture just drawn by `draw` at (x, y), scaled (sx, sy) about (ox, oy) (a
+  -- quad's part of it, when one is given): k pattern texels to one of the draw's pixels, eva its
+  -- opacity
+  local function patternOver(draw, img, quad, x, y, sx, sy, ox, oy, k, eva, now)
+    if eva <= 0.004 or not patternReady() then return end
+    local G = love.graphics
+    local iw, ih = img:getDimensions()
+    local fw, fh, u0, v0 = iw, ih, 0, 0
+    if quad then
+      local qx, qy, qw, qh = quad:getViewport()
+      fw, fh, u0, v0 = qw, qh, qx / iw, qy / ih
+    end
+    local ax, ay = math.abs(sx), math.abs(sy)
+    local left = sx >= 0 and (x - ox * sx) or (x + (fw - ox) * sx)
+    local top = sy >= 0 and (y - oy * sy) or (y + (fh - oy) * sy)
+    -- (the texture's coordinates run over the quad's part only: the place widened to the whole)
+    local w, h = fw * ax, fh * ay
+    local tw, th = w * iw / fw, h * ih / fh
+    local sh, P = pat.sh, U.PATTERN
+    pat.o[1], pat.o[2] = left - u0 * tw, top - v0 * th
+    pat.s[1], pat.s[2] = tw, th
+    pat.sc[1], pat.sc[2] = (now * P.SPEED) % pat.ms[1], 0
+    if not pcall(sendPattern, sh, sx < 0 and 1 or 0, k, eva) then return end
+    U.patternDraws = (U.patternDraws or 0) + 1
+    local sh0 = G.getShader()
+    local r, g, b, a = G.getColor()
+    G.setShader(sh)
+    G.setColor(1, 1, 1, a)
+    if quad then draw(img, quad, x, y, 0, sx, sy, ox, oy) else draw(img, x, y, 0, sx, sy, ox, oy) end
+    G.setShader(sh0)
+    G.setColor(r, g, b, a)
+  end
+
   -- ------- the move menu on the Max Moves
 
   local cache = { mon = nil, base = {}, max = {}, saved = {} }
@@ -316,6 +421,470 @@ return function(mod, deps)
   end
   -- (the move menu, and a doubles move's target after it: both on the Max Moves - one target)
   local function moveMode() return E.Ui._mode == "moves" or E.Ui._mode == "target" end
+
+  -- ------- the Dynamax scene (after the DBK plugin's Dynamax animation, drawn anew): the battle cut
+  -- away to the Pokemon on a base, drawn into its ball; the trainer sliding in, the band raised;
+  -- the ball swelling pink, a burst, the giant ball slammed down; the giant out of it, a pulse, the
+  -- roar. At the window's resolution over the game (main.lua's render.hud), holding the battle's
+  -- turn as the engine's own stage tweens do, until it is over or skipped (A, B, a tap)
+
+  local SM = {}   -- each part's start (seconds into the scene); END its last
+  do
+    local S, t = U.SCENE, 0
+    for _, k in ipairs({ "IN", "SHOW", "TINT", "RECALL", "SLIDE", "BAND", "SWELL", "BURST", "DROP", "OPEN", "GROW",
+        "ROAR", "HOLD", "OUT" }) do
+      SM[k] = t
+      t = t + S[k]
+    end
+    SM.END = t
+    SM.LAND = SM.DROP + S.DROP * S.DROP_HIT
+  end
+  -- its sounds: at a part's start, the game's own
+  local CUES = {
+    { at = "RECALL", se = "SE_BALL_OPEN" }, { at = "BAND", se = "SE_M_DETECT" }, { at = "SWELL", se = "SE_M_CHARGE" },
+    { at = "BURST", se = "SE_BALL_THROW" }, { at = "LAND", se = "SE_M_STRENGTH" }, { at = "OPEN", se = "SE_BALL_OPEN" },
+    { at = "GROW", se = "SE_M_MEGA_KICK" }, { at = "ROAR", se = "SE_M_EXPLOSION", cry = true },
+  }
+  -- a ball's top colour by its item (Gen 3's numbers: Master 1 .. Premier 12)
+  local BALL_RGB = {
+    [1] = { 0.55, 0.25, 0.75 }, [2] = { 0.95, 0.8, 0.15 }, [3] = { 0.2, 0.45, 0.95 }, [4] = { 0.9, 0.15, 0.15 },
+    [5] = { 0.45, 0.6, 0.25 }, [6] = { 0.2, 0.75, 0.75 }, [7] = { 0.3, 0.6, 0.95 }, [8] = { 0.55, 0.8, 0.2 },
+    [9] = { 0.95, 0.5, 0.15 }, [10] = { 0.95, 0.95, 0.95 }, [11] = { 0.15, 0.15, 0.18 }, [12] = { 0.95, 0.95, 0.95 },
+  }
+
+  local BOUNCES = { 16, 7, 2.5 }
+  local AROUND4 = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
+  local AROUND8 = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 0.7, 0.7 }, { -0.7, -0.7 }, { 0.7, -0.7 }, { -0.7, 0.7 } }
+  local scene = nil
+  U.SM = SM
+  U.scenes = 0   -- (drivers: scenes played)
+  U.patternDraws = 0   -- (drivers: the pattern's passes)
+  function U.sceneOn() return scene ~= nil end
+  function U.sceneT() return scene and scene.t or nil end
+  -- (drivers: skip the scene playing)
+  function U.skipScene() if scene and not scene.ended then scene.skip = true end end
+
+  local SIL_SRC = [[
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Texel(tex, tc).a * color.a); }
+]]
+  local res = { tried = false }
+  local function sceneRes()
+    if res.tried then return res end
+    res.tried = true
+    local G = love.graphics
+    local ok, sh = pcall(G.newShader, SIL_SRC)
+    res.sil = ok and sh or nil
+    res.band = image("assets/dmax/dynamax_band.png")
+    if res.band then res.band:setFilter("linear", "linear") end
+    res.grad = G.newMesh({ { 0, 0, 0, 0, 0, 0, 0, 0.75 }, { 1, 0, 0, 0, 0, 0, 0, 0.75 }, { 1, 1, 0, 0, 0, 0, 0, 0 },
+      { 0, 1, 0, 0, 0, 0, 0, 0 } }, "fan", "static")
+    patternReady()
+    if pat.img then res.bgQuad = G.newQuad(0, 0, 1, 1, pat.ms[1], pat.ms[2]) end
+    return res
+  end
+
+  -- the pictures, in the update step (a sprite mod's frame is made there, never in a draw): the
+  -- Pokemon's own (WoobleView's full-resolution frame when it has one), its giant (a Gigantamax
+  -- form's frame), the trainer's back
+  local function picOf(img)
+    if not img then return nil end
+    local P = { img = img, quad = nil, box = nil }
+    local okW, W = pcall(mod.find, mod, "gen3-hd-sprites")
+    local wx = okW and type(W) == "table" and W.exports or nil
+    local spec = wx and type(wx.tagOf) == "function" and wx.tagOf(img) or nil
+    if type(spec) == "table" and spec.texture then P.img, P.quad = spec.texture, spec.quad end
+    local m = U.measure(img)
+    if m and m[3] > m[1] and m[4] > m[2] then
+      P.box = { m[1], m[2], m[3], m[4] }
+      -- (a stand-in measured on itself while the texture is drawn: its box in the texture's pixels)
+      if P.img ~= img and not m.onTexture then
+        local fw, fh = P.img:getDimensions()
+        if P.quad then local _ _, _, fw, fh = P.quad:getViewport() end
+        local iw, ih = img:getDimensions()
+        local kx, ky = fw / iw, fh / ih
+        P.box[1], P.box[2], P.box[3], P.box[4] = m[1] * kx, m[2] * ky, m[3] * kx, m[4] * ky
+      end
+    else
+      local w, h = P.img:getDimensions()
+      if P.quad then local _ _, _, w, h = P.quad:getViewport() end
+      P.box = { 0, 0, w, h }
+    end
+    return P
+  end
+  local function prepScene(sc)
+    local v = sc.v
+    if not sc.pic and v.basePic then sc.pic = picOf(v.basePic) end
+    if v.art then
+      local img = frameNow(v.art, love.timer and love.timer.getTime() or 0)
+      if img then
+        sc.gpic = sc.gpic or { quad = nil, box = v.art.box }
+        sc.gpic.img = img
+      end
+    end
+    if sc.trainer == nil then
+      sc.trainer = false
+      local okT, TrainerPic = pcall(require, "src.core.game3.trainer_pic")
+      local okB, strip = false, nil
+      if okT and TrainerPic and TrainerPic.back then okB, strip = pcall(TrainerPic.back, sc.gender) end
+      if okB and type(strip) == "table" and strip.image then
+        local n = tonumber(strip.frames) or 1
+        local quads = {}
+        for i = 1, n do quads[i] = love.graphics.newQuad(0, (i - 1) * 64, 64, 64, 64, 64 * n) end
+        sc.trainer = { img = strip.image, quads = quads, n = n }
+      end
+    end
+  end
+
+  local function playSe(name)
+    if E.Audio and E.Audio.playSe and E.Se and E.Se[name] then pcall(E.Audio.playSe, E.Se[name]) end
+  end
+  local function stepScene(sc, dt)
+    if scene ~= sc then return true end
+    sc.t = sc.t + dt
+    -- (skipped: on to the black at its end, its sounds left unplayed)
+    if sc.skip and sc.t < SM.OUT then
+      sc.t = SM.OUT
+      for i = 1, #CUES do sc.fired[i] = true end
+    end
+    pcall(prepScene, sc)
+    for i, c in ipairs(CUES) do
+      if not sc.fired[i] and sc.t >= SM[c.at] then
+        sc.fired[i] = true
+        playSe(c.se)
+        if c.cry and deps.bigCry and sc.v.species then pcall(deps.bigCry, sc.v.species) end
+      end
+    end
+    return sc.t >= SM.END
+  end
+  local function endScene(sc)
+    sc.ended, sc.back = true, 0
+    -- (the giant at its size under the black, the battle going on)
+    local v = sc.v
+    v.from, v.want, v.k, v.t0 = U.K, U.K, U.K, nil
+    if sc.onEnd then pcall(sc.onEnd) end
+  end
+  -- begun from the Dynamax's look (Anim.launchMove): false when the engine's tasks are not there
+  local function startScene(id, v, opts)
+    local Anim = E.Anim
+    local okT, Task = pcall(require, "src.core.game3.task")
+    if not (okT and type(Task) == "table" and Task.spawn and Anim and type(Anim._stageTasks) == "table") then
+      return false
+    end
+    local st = E.Ui and E.Ui._st
+    local mon = v.mon
+    local sc = { id = id, v = v, t = 0, fired = {}, onEnd = opts.onEnd,
+      gender = st and tonumber(st.playerGender) or 0,
+      ball = BALL_RGB[tonumber(mon and (mon.pokeball or mon.ball)) or 4] or BALL_RGB[4] }
+    scene = sc
+    U.scenes = U.scenes + 1
+    pcall(sceneRes)
+    pcall(prepScene, sc)
+    Anim._introTweening = (Anim._introTweening or 0) + 1
+    local task
+    task = Task.spawn(function(_, dt) return stepScene(sc, tonumber(dt) or 1 / 60) end, { onDone = function()
+      Anim._stageTasks[task.id] = nil
+      Anim._introTweening = max(0, (Anim._introTweening or 1) - 1)
+      endScene(sc)
+    end })
+    Anim._stageTasks[task.id] = true
+    sc.taskId = task.id
+    return true
+  end
+
+  -- a soft glow: rings of light, brightest in the middle (added)
+  local function glow(G, x, y, r, cr, cg, cb, a)
+    G.setBlendMode("add")
+    for i = 8, 1, -1 do
+      G.setColor(cr, cg, cb, a * 0.16)
+      G.circle("fill", x, y, r * i / 8, 28)
+    end
+    G.setBlendMode("alpha")
+  end
+  local function part(t, k) return max(0, min(1, (t - SM[k]) / U.SCENE[k])) end
+  local function smooth(u) return u * u * (3 - 2 * u) end
+  local function lerp(a, b, u) return a + (b - a) * u end
+  -- a picture stood with its opaque box's foot at (cx, foot), h tall: its draw's scale and pivot
+  local function standOf(P, h)
+    local b = P.box
+    local s = h / max(1, b[4] - b[2])
+    return s, (b[1] + b[3]) / 2, b[4]
+  end
+  local function drawPic(P, x, y, s, ox, oy)
+    if P.quad then love.graphics.draw(P.img, P.quad, x, y, 0, s, s, ox, oy)
+    else love.graphics.draw(P.img, x, y, 0, s, s, ox, oy) end
+  end
+  -- the picture as one colour (its outline, a flash)
+  local function drawSil(P, x, y, s, ox, oy, r, g, b, a)
+    if not res.sil or a <= 0 then return end
+    local G = love.graphics
+    G.setShader(res.sil)
+    G.setColor(r, g, b, a)
+    drawPic(P, x, y, s, ox, oy)
+    G.setShader()
+  end
+
+  -- the scene's backdrop: its colour (pink once the giant comes), the dark above, the pattern
+  -- drifting faintly, the rays behind the giant
+  local function drawBackdrop(G, t, vw, vh, S, X0, Y0)
+    local SC = U.SCENE
+    local pk = smooth(part(t, "GROW"))
+    G.setColor(lerp(SC.BG[1], SC.BG_PINK[1], pk), lerp(SC.BG[2], SC.BG_PINK[2], pk), lerp(SC.BG[3], SC.BG_PINK[3], pk), 1)
+    G.rectangle("fill", 0, 0, vw, vh)
+    if res.bgQuad and pat.img then
+      local k = 1.6 / S
+      res.bgQuad:setViewport((t * 60) % pat.ms[1], 0, vw * k, vh * k, pat.ms[1], pat.ms[2])
+      G.setColor(1, 1, 1, 0.16 + 0.1 * pk)
+      G.draw(pat.img, res.bgQuad, 0, 0, 0, 1 / k, 1 / k)
+    end
+    if pk > 0 then
+      G.setBlendMode("add")
+      local cx, cy = X0 + 120 * S, Y0 + 86 * S
+      local R = max(vw, vh) * 1.2
+      local spin = t * 0.35
+      for i = 0, 13 do
+        local a0 = spin + i * (2 * math.pi / 14)
+        local a1 = a0 + 0.11
+        G.setColor(1, 0.35, 0.7, 0.16 * pk)
+        G.polygon("fill", cx, cy, cx + math.cos(a0) * R, cy + math.sin(a0) * R, cx + math.cos(a1) * R, cy + math.sin(a1) * R)
+      end
+      G.setBlendMode("alpha")
+    end
+    if res.grad then
+      G.setColor(1, 1, 1, 1)
+      G.draw(res.grad, 0, 0, 0, vw, vh * 0.55)
+    end
+  end
+
+  function U.drawScene(viewport)
+    local sc = scene
+    if not sc then return end
+    engine()
+    if not (E.Battle and E.Battle.isActive and E.Battle.isActive()) then scene = nil return end
+    -- (its task gone with the battle's animations reset, unfinished: nothing more of it)
+    if not sc.ended and not (E.Anim and E.Anim._stageTasks and E.Anim._stageTasks[sc.taskId]) then
+      scene = nil
+      return
+    end
+    local G = love.graphics
+    local vw = type(viewport) == "table" and viewport.width or G.getWidth()
+    local vh = type(viewport) == "table" and viewport.height or G.getHeight()
+    local okV, Viewport = pcall(require, "src.render.GameViewport")
+    if okV and type(Viewport) == "table" and Viewport.dimensions then vw, vh = Viewport.dimensions() end
+    local SC = U.SCENE
+    -- (over: the black lifting off the battle)
+    if sc.ended then
+      local u = sc.back / SC.BACK
+      if u >= 1 then scene = nil return end
+      G.setColor(0, 0, 0, 1 - u)
+      G.rectangle("fill", 0, 0, vw, vh)
+      G.setColor(1, 1, 1, 1)
+      return
+    end
+    local t = sc.t
+    -- (the black coming down over the battle)
+    if t < SM.SHOW then
+      G.setColor(0, 0, 0, min(1, t / SC.IN))
+      G.rectangle("fill", 0, 0, vw, vh)
+      G.setColor(1, 1, 1, 1)
+      return
+    end
+    local S = min(vw / 240, vh / 160)
+    local X0, Y0 = (vw - 240 * S) / 2, (vh - 160 * S) / 2
+    drawBackdrop(G, t, vw, vh, S, X0, Y0)
+    -- (the shakes: the landing's, then the roar's six)
+    local shx, shy = 0, 0
+    local lu = (t - SM.LAND) / 0.3
+    if lu >= 0 and lu < 1 then shy = math.sin(lu * 40) * 4 * (1 - lu) end
+    local ru = part(t, "ROAR")
+    if ru > 0 and ru < 1 then
+      shy = shy + math.sin(ru * 6 * 2 * math.pi) * 5 * (1 - ru)
+      shx = math.sin(ru * 6 * 2 * math.pi + 1.3) * 2 * (1 - ru)
+    end
+    G.push()
+    G.translate(X0 + shx * S, Y0 + shy * S)
+    G.scale(S)
+    local by = SC.BASE_Y
+    local bu = part(t, "BURST")
+    local du, ou, gu = part(t, "DROP"), part(t, "OPEN"), part(t, "GROW")
+    -- the base: there from the start, rushing past at the burst, back for the ball's landing, gone
+    -- as the giant comes
+    local baseA, baseK, baseDx, baseDy = 1, 1, 0, 0
+    if t >= SM.BURST and t < SM.DROP then
+      local e = bu * bu
+      baseK, baseDx, baseDy, baseA = 1 + 5 * e, -150 * e, 140 * e, 1 - bu
+    elseif t >= SM.DROP then
+      baseA = min(1, du * 3) * (1 - ou)
+    end
+    if baseA > 0 then
+      G.push()
+      G.translate(120 + baseDx, by + baseDy)
+      G.scale(baseK)
+      G.setColor(0.08, 0.02, 0.06, 0.85 * baseA)
+      G.ellipse("fill", 0, 0, 58, 12, 40)
+      G.setLineWidth(1.5)
+      G.setColor(1, 0.3, 0.6, 0.8 * baseA)
+      G.ellipse("line", 0, 0, 58, 12, 40)
+      G.setColor(1, 0.5, 0.75, 0.25 * baseA)
+      G.ellipse("fill", 0, -1, 40, 7, 32)
+      G.setLineWidth(1)
+      G.pop()
+    end
+    -- the Pokemon on the base, turning pink, drawn into its ball
+    local P = sc.pic
+    local ballX, ballY, ballR, ballOpen, ballD, ballA, ballBright = 120, by - 8, 6, 0, 0, 0, 0
+    if P and t < SM.SLIDE then
+      local s, ox, oy = standOf(P, SC.MON_H)
+      local rc = smooth(part(t, "RECALL"))
+      local k = 1 - rc
+      local x, y = lerp(120, ballX, rc), lerp(by, ballY + 4, rc)
+      if k > 0.02 then
+        G.setColor(1, 1, 1, 1 - rc * 0.5)
+        drawPic(P, x, y, s * k, ox, oy)
+        drawSil(P, x, y, s * k, ox, oy, SC.PINK[1], 0.55, 0.85, 0.75 * part(t, "TINT"))
+      end
+      if rc > 0 and rc < 1 then glow(G, ballX, ballY - 3, 22 * (1 - rc) + 6, 1, 0.3, 0.6, 0.5 * (1 - rc * rc)) end
+    end
+    -- the trainer: in from the left, the band raised over the head
+    local tr = sc.trainer
+    if tr and t >= SM.SLIDE and t < SM.DROP then
+      local su = smooth(part(t, "SLIDE"))
+      local tx, ty, tk, ta = lerp(-40, 92, su), by + 8, 1, 1
+      if t >= SM.BURST then
+        local e = bu * bu
+        tx, ty, tk, ta = 92 - 170 * e, by + 8 + 120 * e, 1 + 4 * e, 1 - bu
+      end
+      local f = (t >= SM.BAND) and min(tr.n, 2) or 1
+      G.setColor(1, 1, 1, ta)
+      G.draw(tr.img, tr.quads[f], tx, ty, 0, tk, tk, 32, 64)
+      -- the band over the head, outlined white, a glow behind it
+      local bdu = part(t, "BAND")
+      if res.band and bdu > 0 and t < SM.BURST then
+        local bh = 22
+        local bs = bh / res.band:getHeight()
+        local bx, byy = tx, ty - 62 - 14 * smooth(bdu)
+        local a = min(1, bdu * 2.5)
+        glow(G, bx, byy, 20, 1, 0.35, 0.7, 0.45 * a)
+        if res.sil then
+          G.setShader(res.sil)
+          G.setColor(1, 1, 1, a)
+          for _, d in ipairs(AROUND4) do
+            G.draw(res.band, bx + d[1], byy + d[2], 0, bs, bs, res.band:getWidth() / 2, res.band:getHeight() / 2)
+          end
+          G.setShader()
+        end
+        G.setColor(1, 1, 1, a)
+        G.draw(res.band, bx, byy, 0, bs, bs, res.band:getWidth() / 2, res.band:getHeight() / 2)
+      end
+    end
+    -- the ball: opened for the recall, held up by the trainer, swelling pink; the giant ball dropped
+    -- onto the base, bouncing, opened
+    if t >= SM.RECALL and t < SM.BURST then
+      ballA = 1
+      local rc = part(t, "RECALL")
+      ballOpen = rc < 0.8 and 0.55 or 0.55 * (1 - (rc - 0.8) / 0.2)
+      local su = smooth(part(t, "SLIDE"))
+      ballX, ballY = lerp(ballX, 150, su), lerp(ballY, by - 40, su) + math.sin(t * 6) * 1.5 * su
+      local sw = smooth(part(t, "SWELL"))
+      ballR = lerp(6, 10, sw)
+      ballD, ballBright = sw, 0.25 * sw
+    elseif t >= SM.DROP and t < SM.GROW + U.SCENE.GROW * 0.45 then
+      local hit = SC.DROP_HIT
+      ballR, ballD, ballA = 15, 1, 1
+      ballX = 120
+      local ground = by - 15
+      if du < hit then
+        local u = du / hit
+        ballY = lerp(-30, ground, u * u)
+      else
+        -- (three bounces, each lower)
+        local u = (du - hit) / (1 - hit)
+        local seg = u * 3
+        local i = math.floor(seg)
+        local f = seg - i
+        local hgt = BOUNCES[min(3, i + 1)]
+        ballY = ground - hgt * 4 * f * (1 - f)
+        if du >= 1 then ballY = ground end
+      end
+      ballOpen = smooth(ou)
+      ballBright = 0.5 * ou
+      if gu > 0 then ballA = 1 - gu / 0.45 end
+    end
+    -- (the giant's shadow under all of it)
+    local gpic = sc.gpic or P
+    if gu > 0 and gpic then
+      G.setColor(0, 0, 0, 0.4 * gu)
+      G.ellipse("fill", 120, 152, 72 * smooth(gu), 12 * smooth(gu), 40)
+    end
+    if ballA > 0 then
+      local Fx = deps.fx and deps.fx()
+      local wx, wy = G.transformPoint(ballX, ballY)
+      local wr = ballR * S
+      G.push()
+      G.origin()
+      if Fx and Fx.drawBall then
+        sc.o = sc.o or {}
+        local o = sc.o
+        o.dyna, o.open, o.rgb, o.now, o.bright, o.alpha = ballD, ballOpen, sc.ball, t, ballBright, ballA
+        o.lean, o.phi, o.spin, o.button = 0, 0, 0, ballD
+        pcall(Fx.drawBall, G, wx, wy, wr, o)
+      else
+        G.setColor(lerp(sc.ball[1], 1, ballD), lerp(sc.ball[2], 0.35, ballD), lerp(sc.ball[3], 0.75, ballD), ballA)
+        G.circle("fill", wx, wy, wr, 24)
+      end
+      -- (the light out of it as it opens)
+      if ballOpen > 0.05 and t >= SM.OPEN then
+        G.setBlendMode("add")
+        G.setColor(1, 0.6, 0.85, 0.6 * ballOpen * ballA)
+        G.circle("fill", wx, wy - wr * 0.6, wr * (1 + ballOpen), 28)
+        G.setBlendMode("alpha")
+      end
+      G.pop()
+    end
+    -- the burst's flash
+    if bu > 0 and t < SM.DROP then
+      G.setColor(SC.PINK[1], SC.PINK[2], SC.PINK[3], 0.85 * (1 - bu))
+      G.rectangle("fill", -X0 / S - 4, -Y0 / S - 4, vw / S + 8, vh / S + 8)
+    end
+    -- the giant: up out of the ball, outlined red at the roar, a white flash, the pattern over it
+    if gu > 0 and gpic then
+      local e = 1 - (1 - gu) * (1 - gu)
+      local s0, ox, oy = standOf(gpic, SC.GIANT_H)
+      local s = s0 * lerp(0.06, 1, e)
+      local x, y = 120, lerp(by - 15, 158, e)
+      local ol = min(1, ru / 0.15)
+      if ol > 0 then
+        local O = SC.OUTLINE
+        for _, d in ipairs(AROUND8) do
+          drawSil(gpic, x + d[1], y + d[2], s, ox, oy, O[1], O[2], O[3], ol)
+        end
+      end
+      G.setColor(1, 1, 1, min(1, gu * 4))
+      drawPic(gpic, x, y, s, ox, oy)
+      drawSil(gpic, x, y, s, ox, oy, 1, 0.45, 0.65, 0.35)
+      pcall(patternOver, G.draw, gpic.img, gpic.quad, x, y, s, s, ox, oy, U.PATTERN.K, 0.5 * min(1, gu * 2), t)
+      if ru > 0 then drawSil(gpic, x, y, s, ox, oy, 1, 1, 1, max(0, 1 - ru / 0.25)) end
+    end
+    -- the roar: a pulse racing out, the field flickering pink
+    if ru > 0 and ru < 1 then
+      local pu = min(1, ru / 0.45)
+      G.setLineWidth(lerp(8, 1, pu))
+      G.setColor(1, 0.5, 0.8, 0.9 * (1 - pu))
+      G.circle("line", 120, 90, lerp(12, 230, pu), 64)
+      G.setLineWidth(1)
+      G.setColor(SC.PINK[1], SC.PINK[2], SC.PINK[3], 0.22 * (1 - ru) * (0.5 + 0.5 * math.sin(ru * 40)))
+      G.rectangle("fill", -X0 / S - 4, -Y0 / S - 4, vw / S + 8, vh / S + 8)
+    end
+    G.pop()
+    -- (the black lifting off the scene, and coming down again at its end)
+    local black = 0
+    if t < SM.TINT then black = 1 - (t - SM.SHOW) / SC.SHOW end
+    if t >= SM.OUT then black = (t - SM.OUT) / SC.OUT end
+    if black > 0 then
+      G.setColor(0, 0, 0, min(1, black))
+      G.rectangle("fill", 0, 0, vw, vh)
+    end
+    G.setColor(1, 1, 1, 1)
+  end
 
   -- ------- the wraps
 
@@ -388,7 +957,18 @@ return function(mod, deps)
             end
             local entry = sidePic(back, ign, picSp, form, shiny, personality, mon, ...)
             v.picImg, v.picArt = entry and entry.image or nil, false
+            if back then v.basePic = v.picImg end
             return entry
+          end
+        end
+        -- (its own picture before it grows: the Dynamax scene's)
+        if back then
+          for _, v in pairs(Dm.vis) do
+            if v.mon == mon then
+              local entry = sidePic(back, ign, picSp, form, shiny, personality, mon, ...)
+              v.basePic = entry and entry.image or v.basePic
+              return entry
+            end
           end
         end
       end
@@ -415,15 +995,20 @@ return function(mod, deps)
       v.natFrame = frameNo
     end
     local function catcher(img, x, y, rot, sx, sy, ox, oy, ...)
+      realDraw(img, x, y, rot, sx, sy, ox, oy, ...)
       if catching and type(x) == "number" then
         for _, v in pairs(Dm.vis) do
           if v.picImg ~= nil and v.picImg == img then
-            pcall(noteDraw, v, img, x, y, tonumber(sx) or 1, tonumber(sy) or tonumber(sx) or 1, tonumber(ox) or 0,
-              tonumber(oy) or 0)
+            local nsx, nox, noy = tonumber(sx) or 1, tonumber(ox) or 0, tonumber(oy) or 0
+            local nsy = tonumber(sy) or nsx
+            pcall(noteDraw, v, img, x, y, nsx, nsy, nox, noy)
+            -- (the Dynamax pattern over it, as drawn; not turned)
+            if (v.patA or 0) > 0 and (tonumber(rot) or 0) == 0 then
+              pcall(patternOver, realDraw, img, nil, x, y, nsx, nsy, nox, noy, U.PATTERN.K, v.patA, now)
+            end
           end
         end
       end
-      return realDraw(img, x, y, rot, sx, sy, ox, oy, ...)
     end
     function U.frameNo() return frameNo end
     local saved = {}
@@ -438,6 +1023,7 @@ return function(mod, deps)
       local any = false
       for id, v in pairs(Dm.vis) do
         local k0 = stepK(v, now)
+        v.patA = 0
         if k0 > 1.01 then any = true end
         local k = 1 + (k0 - 1) * dk
         local p = k0 ~= 1 and Anim.present(id)
@@ -461,17 +1047,22 @@ return function(mod, deps)
           end
           -- (red that breathes, never off, as it grows; a blend the battle itself set - a hit's
           -- flash, a status - is left alone)
+          -- (with the Dynamax pattern over it, breathing with the red, the red under it lighter)
           if (tonumber(p.blendCoeff) or 0) <= 0 then
-            local B = U.BREATH
-            local br = B.MIN + (B.MAX - B.MIN) * (0.5 + 0.5 * math.sin(now * 2 * math.pi / B.S))
-            p.blendCoeff = br * min(1, (k0 - 1) / (U.K - 1))
+            local B, P = U.BREATH, U.PATTERN
+            local wave = 0.5 + 0.5 * math.sin(now * 2 * math.pi / B.S)
+            local grown = min(1, (k0 - 1) / (U.K - 1))
+            local patOn = P.ON and pat.sh ~= nil and pat.img ~= nil
+            p.blendCoeff = (B.MIN + (B.MAX - B.MIN) * wave) * grown * (patOn and P.TINT_K or 1)
             p.blendColor = U.TINT_RGB
+            if patOn then v.patA = (P.MIN + (P.MAX - P.MIN) * wave) * grown end
           end
-          -- (a Max Move: the giant pulses red as it strikes, its form too)
+          -- (a Max Move: the giant pulses red as it strikes, its form too, the pattern giving way)
           local fu = v.flashT and (now - v.flashT) / U.FLASH_S
           if fu and fu < 1 then
             p.blendCoeff = U.FLASH_COEFF * (1 - fu) * (0.6 + 0.4 * math.cos(fu * 18))
             p.blendColor = U.TINT_RGB
+            v.patA = v.patA * fu
           end
         end
       end
@@ -518,6 +1109,11 @@ return function(mod, deps)
         local v = id ~= nil and Dm.vis[id]
         local t = love.timer and love.timer.getTime() or 0
         if v and row.key == "DYNAMAX" then
+          -- (the Dynamax scene, holding the battle until it is over; else Growth's look)
+          if U.SCENE.ON and not scene then
+            local okS, began = pcall(startScene, id, v, opts)
+            if okS and began then return nil end
+          end
           grow(v, U.K, t)
           if deps.bigCry and v.species then pcall(deps.bigCry, v.species) end
         elseif v and row.key == "UNDYNAMAX" then
@@ -580,8 +1176,15 @@ return function(mod, deps)
     if Battle and type(Battle.update) == "function" and not Battle.__mrDmaxUi then
       Battle.__mrDmaxUi = true
       local update = Battle.update
-      Battle.update = function(...)
-        local a, b = update(...)
+      Battle.update = function(dt, game, ...)
+        local sc = scene
+        -- (the black lifting off after it, on the game's clock)
+        if sc and sc.ended then sc.back = sc.back + (tonumber(dt) or 1 / 60) end
+        if sc and not sc.ended and sc.t > U.SCENE.SKIP_AFTER then
+          local input = type(game) == "table" and game.input or nil
+          if input and input.wasPressed and (input:wasPressed("a") or input:wasPressed("b")) then sc.skip = true end
+        end
+        local a, b = update(dt, game, ...)
         for _, v in pairs(Dm.vis) do
           local img = v.picImg
           if img and not v.picArt and v.picBoxOf ~= img then
@@ -813,7 +1416,10 @@ return function(mod, deps)
     local fresh = U.frameNo() ~= lastFrame
     lastFrame = U.frameNo()
     local mode = E.Ui and E.Ui._mode
-    if not (active and fresh) or mode == "bag" or mode == "party" then live, boltsLive = 0, 0 return end
+    if not (active and fresh) or mode == "bag" or mode == "party" or (scene and not scene.ended) then
+      live, boltsLive = 0, 0
+      return
+    end
     local dt = min(0.1, love.timer and love.timer.getDelta() or 1 / 60)
     local E2 = U.ENERGY
     -- (new motes off each giant drawn this frame)
@@ -976,7 +1582,13 @@ return function(mod, deps)
   -- a tap (input.pointer, main.lua): on the DYNAMAX button or its R key while they show, as R. The tap's
   -- place in the game's picture (window units) taken to the battle's 240 x 160 as the game fits it
   function U.pointer(ev)
-    if type(ev) ~= "table" or ev.phase ~= "pressed" or not ev.insideGame then return false end
+    if type(ev) ~= "table" or ev.phase ~= "pressed" then return false end
+    -- (the Dynamax scene: a tap skips it, past its first moment)
+    if scene and not scene.ended then
+      if scene.t > U.SCENE.SKIP_AFTER then scene.skip = true end
+      return true
+    end
+    if not ev.insideGame then return false end
     engine()
     local Ui = E.Ui
     local st = Ui and Ui._st
@@ -1067,6 +1679,7 @@ return function(mod, deps)
   -- a Dynamax begun (src/dmax.lua): the form's art ready for the growth
   function U.onDynamax(rec, b)
     engine()
+    pcall(patternReady)
     local v = Dm.vis[rec.id]
     if not v then return end
     v.mon = rec.mon
