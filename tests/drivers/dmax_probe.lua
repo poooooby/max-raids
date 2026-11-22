@@ -256,24 +256,81 @@ local function body(game, log)
       U.wait(1)
     end
     check(seen > 0, "red electricity crackling off it (" .. seen .. " at once)")
-    -- (the Bag over the battle: none of it shows there)
-    U.tap(game, "right")
-    U.wait(8)
-    U.tap(game, "a")
-    waitFor(function() return Ui._mode == "bag" end, 120)
-    U.wait(20)
-    check(Ui._mode == "bag", "the Bag opens over the battle")
-    check((Tt.dmaxUi.energyCount() or 0) == 0 and (Tt.dmaxUi.boltCount() or 0) == 0,
-      "no energy or electricity over the Bag")
-    shot("d03b_bag")
-    for _ = 1, 6 do
-      if Ui._mode == "menu" then break end
-      U.tap(game, "b")
+    -- (the Bag and the party screen over the battle: none of it shows there - WoobOS's glass ones
+    -- and the game's own, its Battle Menus switched off)
+    local PartyMenu = require("src.ui.game3.party_menu")
+    local opts = game.mods and game.mods.modOptions
+    local function screensOver(label)
+      U.tap(game, "right")
+      U.wait(8)
+      U.tap(game, "a")
+      waitFor(function() return Ui._mode == "bag" end, 120)
       U.wait(30)
+      check(Ui._mode == "bag", label .. ": the Bag opens over the battle")
+      log(("  %s bag: motes %d, bolts %d"):format(label, Tt.dmaxUi.energyCount() or 0, Tt.dmaxUi.boltCount() or 0))
+      check((Tt.dmaxUi.energyCount() or 0) == 0 and (Tt.dmaxUi.boltCount() or 0) == 0,
+        label .. ": no energy or electricity over the Bag")
+      shot("d03b_bag_" .. label)
+      for _ = 1, 6 do
+        if Ui._mode == "menu" then break end
+        U.tap(game, "b")
+        U.wait(30)
+      end
+      check(Ui._mode == "menu", label .. ": back from the Bag")
+      U.tap(game, "left")
+      U.wait(8)
+      U.tap(game, "down")
+      U.wait(8)
+      U.tap(game, "a")
+      waitFor(function() return PartyMenu.isOpen and PartyMenu.isOpen() end, 120)
+      U.wait(30)
+      log(("  %s party: open %s, mode %s, motes %d, bolts %d"):format(label,
+        tostring(PartyMenu.isOpen and PartyMenu.isOpen()), tostring(Ui._mode), Tt.dmaxUi.energyCount() or 0,
+        Tt.dmaxUi.boltCount() or 0))
+      check(PartyMenu.isOpen and PartyMenu.isOpen(), label .. ": the party screen opens over the battle")
+      check((Tt.dmaxUi.energyCount() or 0) == 0 and (Tt.dmaxUi.boltCount() or 0) == 0,
+        label .. ": no energy or electricity over the party screen")
+      shot("d03d_party_" .. label)
+      for _ = 1, 6 do
+        if Ui._mode == "menu" and not PartyMenu.isOpen() then break end
+        U.tap(game, "b")
+        U.wait(30)
+      end
+      check(Ui._mode == "menu", label .. ": back from the party screen")
+      -- (the cursor back on FIGHT)
+      U.wait(30)
+      Ui._actionCursor[Ui._active or 0] = 1
+      Ui._menuIndex = 1
     end
-    check(Ui._mode == "menu", "back from the Bag")
-    U.tap(game, "left")
-    U.wait(8)
+    screensOver("woobos")
+    if opts then
+      opts.woob_os = opts.woob_os or {}
+      local was = opts.woob_os.menuBattle
+      opts.woob_os.menuBattle = false
+      screensOver("cart")
+      opts.woob_os.menuBattle = was
+    end
+    -- (the party screen as the battle opens it itself - a faint's or a shift's switch - without its
+    -- "party" mode)
+    do
+      local mode0 = Ui._mode
+      Ui.openPartyMenu(st, 0, { onSelect = function() end })
+      U.wait(30)
+      log(("  battle's own party screen: open %s, mode %s, motes %d, bolts %d"):format(tostring(PartyMenu.isOpen()),
+        tostring(Ui._mode), Tt.dmaxUi.energyCount() or 0, Tt.dmaxUi.boltCount() or 0))
+      check(PartyMenu.isOpen() and Ui._mode ~= "party", "the battle's own party screen, not in its party mode")
+      check((Tt.dmaxUi.energyCount() or 0) == 0 and (Tt.dmaxUi.boltCount() or 0) == 0,
+        "no energy or electricity over the battle's own party screen")
+      shot("d03e_party_battle")
+      PartyMenu.close()
+      Ui._mode = mode0
+      U.wait(30)
+      check(not PartyMenu.isOpen(), "the battle's own party screen closed")
+    end
+    -- (the cursor on FIGHT, whatever the screens left it on: the battle remembers it)
+    U.wait(30)
+    Ui._actionCursor[Ui._active or 0] = 1
+    Ui._menuIndex = 1
     local lm = Tt.dmaxUi.lastMark
     if lm then
       log(("  mark: box %s,%s bar %s,%s -> mark %s,%s"):format(tostring(lm[1]), tostring(lm[2]), tostring(lm[3]),
@@ -319,6 +376,12 @@ local function body(game, log)
       if Ui._mode == "moves" then break end
       U.tap(game, "a")
       waitFor(function() return Ui._mode == "moves" end, 40)
+    end
+    if Ui._mode ~= "moves" then
+      log(("  turn %d: mode %s, phase %s, cursor %s, party open %s, bag open %s"):format(turn, tostring(Ui._mode),
+        tostring(Battle._phase), tostring(Ui._cursor or Ui._menuCursor), tostring(require("src.ui.game3.party_menu").isOpen()),
+        tostring(require("src.ui.game3.bag_menu").isOpen())))
+      shot("d0x_turn" .. turn .. "_stuck")
     end
     check(Ui._mode == "moves", "turn " .. turn .. ": the move menu")
     -- (turn 3: Growl's slot, Max Guard)

@@ -86,6 +86,9 @@ return function(mod, deps)
     E.Audio = req("src.core.game3.audio")
     E.Pokemon = req("src.core.game3.pokemon")
     E.Se = req("src.core.game3.se_ids")
+    E.PartyMenu = req("src.ui.game3.party_menu")
+    E.BagMenu = req("src.ui.game3.bag_menu")
+    E.Summary = req("src.ui.game3.summary_menu")
     return E
   end
 
@@ -1374,6 +1377,21 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
 
   local lastFrame = -1   -- (the battle's draw count at the last frame the energy drew)
 
+  -- a screen of the game's over the battle: the party (from POKeMON, a faint's or a shift's switch,
+  -- an item's target), the Bag, a summary - by the battle's mode, and by each screen itself, as the
+  -- battle opens some without its mode
+  local function isOpen(m)
+    if not (m and m.isOpen) then return false end
+    local ok, open = pcall(m.isOpen)
+    return ok and open == true
+  end
+  local function screenOver()
+    local mode = E.Ui and E.Ui._mode
+    if mode == "bag" or mode == "party" then return true end
+    return isOpen(E.PartyMenu) or isOpen(E.BagMenu) or isOpen(E.Summary)
+  end
+  U.screenOver = screenOver
+
   -- a giant's body on the window this frame: WoobleView's report, else the battle's own draw
   local function bodyNow(st, id, v, viewport)
     -- (drawn by the battle this frame at all: else nothing - hidden, fainted, a screen over it)
@@ -1415,8 +1433,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     -- battle's own draw gave way to - is over it; what was in the air then is gone)
     local fresh = U.frameNo() ~= lastFrame
     lastFrame = U.frameNo()
-    local mode = E.Ui and E.Ui._mode
-    if not (active and fresh) or mode == "bag" or mode == "party" or (scene and not scene.ended) then
+    if not (active and fresh) or screenOver() or (scene and not scene.ended) then
       live, boltsLive = 0, 0
       return
     end
