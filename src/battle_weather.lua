@@ -9,7 +9,9 @@
 --   ELECTRIC sparks, GRASSY blades, MISTY mist, PSYCHIC motes rising.
 -- Each fades in as it comes and out as it goes (one to another: the old out, the new in). Every piece
 -- at a fixed spot by its index, moving on the clock: nothing made a frame.
--- Not drawn while a screen of the battle's (the Bag, the party, a summary) is over it, nor during the
+-- Gone once the battle is decided (st.over, or a catch that held: CatchSeq.catchResult).
+-- Not drawn while a screen of the battle's (the Bag, the party, a summary, a catch's Pokedex page and
+-- naming - the game's own or WoobOS's) is over it, nor during the
 -- Dynamax scene, nor in a raid; and not where WoobleView's 3D scene draws the battle's weather and
 -- terrain itself (its exports.battleWeatherDrawn()).
 --   BW = battle_weather(mod, { ui = DmaxUi, dex = function() -> national_dex_gen3 exports })
@@ -53,6 +55,7 @@ return function(mod, deps)
     E.Rules = req("src.core.game3.battle.rules")
     E.Coords = req("src.core.game3.battle.anim_coords")
     E.State = req("src.core.game3.battle.state")
+    E.CatchSeq = req("src.core.game3.battle.catch_seq")
     return E
   end
   local wv = nil
@@ -303,8 +306,16 @@ return function(mod, deps)
       L.weather, L.terrain = nil, nil
       return
     end
-    local wk = E.Rules and E.Rules.weather and E.Rules.weather.kind and E.Rules.weather.kind(st.weather) or nil
-    local tk = terrainOf(st)
+    -- (the battle decided - a catch, the last faint, a run - the weather goes: nothing of it over
+    -- what follows, the catch's screens and the words before them)
+    local over = st.over == true
+    -- (a catch that held: decided from the ball's click, before the engine marks the battle over)
+    if not over and E.CatchSeq and E.CatchSeq.catchResult then
+      local okC, res = pcall(E.CatchSeq.catchResult)
+      over = okC and res ~= nil
+    end
+    local wk = not over and E.Rules and E.Rules.weather and E.Rules.weather.kind and E.Rules.weather.kind(st.weather) or nil
+    local tk = not over and terrainOf(st) or nil
     follow(shown.weather, wk, now)
     follow(shown.terrain, tk, now)
     L.weather, L.terrain = wk, tk

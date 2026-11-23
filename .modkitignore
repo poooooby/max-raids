@@ -35,6 +35,7 @@ tests/drivers/dyna_probe.lua
 tests/drivers/dynamax_probe.lua
 tests/drivers/weather_probe.lua
 tests/drivers/terrain_probe.lua
+tests/drivers/catch_weather_probe.lua
 tests/drivers/dmax_weather_probe.lua
 tests/drivers/crystal_probe.lua
 tests/drivers/portrait_probe.lua

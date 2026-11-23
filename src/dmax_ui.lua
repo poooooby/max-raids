@@ -92,6 +92,8 @@ return function(mod, deps)
     E.Ui = req("src.core.game3.battle.ui")
     E.Anim = req("src.core.game3.battle.anim")
     E.Moves = req("src.core.game3.battle.moves")
+    E.Naming = req("src.ui.game3.naming")
+    E.Stack = req("src.ui.game3.stack")
     E.State = req("src.core.game3.battle.state")
     E.Battle = req("src.core.game3.battle")
     E.Font = req("src.ui.game3.frlg_font")
@@ -1627,10 +1629,18 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     local ok, open = pcall(m.isOpen)
     return ok and open == true
   end
+  -- a screen over the battle: the Bag, the party, a summary; a catch's Pokedex page and nickname
+  -- screen (the game's own, or WoobOS's in their place - its scene is a layer on the game's UI
+  -- stack, as every screen over a battle is: any layer there counts)
   local function screenOver()
-    local mode = E.Ui and E.Ui._mode
+    local Ui = E.Ui
+    local mode = Ui and Ui._mode
     if mode == "bag" or mode == "party" then return true end
-    return isOpen(E.PartyMenu) or isOpen(E.BagMenu) or isOpen(E.Summary)
+    if Ui and Ui._caughtDexScene ~= nil then return true end
+    if isOpen(E.PartyMenu) or isOpen(E.BagMenu) or isOpen(E.Summary) or isOpen(E.Naming) then return true end
+    local Stack = E.Stack
+    if Stack and type(Stack._layers) == "table" and #Stack._layers > 0 then return true end
+    return false
   end
   U.screenOver = screenOver
 
