@@ -517,6 +517,7 @@ return {
   -- Dynamax in the game's own battles (src/dmax.lua, src/dmax_ui.lua, main.lua)
   ["option|DYNAMAX"] = "ダイマックス",
   ["choice|GYMS & LEAGUE"] = "ジムと リーグ",
+  ["choice|POWER SPOTS"] = "パワースポット",
   ["choice|ALL TRAINERS"] = "すべての トレーナー",
   ["choice|ALL BATTLES"] = "すべての バトル",
   ["The light gathers around your wrist..."] = "ひかりが てくびに あつまっていく……",

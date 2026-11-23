@@ -111,6 +111,9 @@ D.LEAGUE = {
   RIVAL = true, RIVAL_EARLY = true, RIVAL_LATE = true, POKEMON_TRAINER_3 = true,
 }
 
+-- a League trainer's ace's Dynamax Level (HP x2)
+D.FOE_LEVEL = 10
+
 -- the battles no one Dynamaxes in, whatever the option (the battle state's flags / kinds)
 D.NEVER = { "link", "pokedude", "oldManTutorial", "safari", "ghostBattle", "trainerTower", "eReader",
   "battleTower", "frontierTrainer", "facility", "multi", "towerLinkMulti", "recordedLink" }

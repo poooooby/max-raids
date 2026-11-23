@@ -1,9 +1,11 @@
 -- Dynamax in the game's own battles (option DYNAMAX): the player's side may Dynamax one Pokemon a
--- battle, with a Dynamax Band in the Bag, in the battles the option names (src/dmax_rules.lua).
+-- battle, with a Dynamax Band in the Bag, in the battles the option names (src/dmax_rules.lua); a
+-- League trainer Dynamaxes its last Pokemon there, once, while the player has the band.
 -- It works on the engine's battle from outside, through wraps installed at game.ready:
 --   Commands.playerAction       a move chosen while Dynamax is picked (or on) is its Max Move; the
 --                               slot stays, so the base move pays the PP
---   Engine.planTurnFromActions  the Dynamax itself, an action of its own before the first move
+--   Engine.planTurnFromActions  the Dynamax itself, an action of its own before the first move (the
+--                               foe's ace's too, its AI's move made its Max Move there)
 --   / planTurnActions           (singles / doubles); Encore, Disable, Torment and Choice's lock off
 --   Engine.resolveMove          the Dynamax action (HP and max HP x the Dynamax Level's), a base
 --                               move turned to its Max Move; the look: the base move's
@@ -193,13 +195,25 @@ return function(mod, deps)
     classes[#classes + 1] = classNameOf(st, st.trainerClass)
     if st.trainerB then classes[#classes + 1] = classNameOf(st, st.trainerB.class) end
     local kinds = type(st.kinds) == "table" and st.kinds or {}
-    return { wild = st.wild and true or false, classes = classes, flags = st, kinds = kinds }
+    -- (a route with an active den here: POWER SPOTS)
+    local spot = false
+    if deps.spot then
+      local ok, yes = pcall(deps.spot)
+      spot = ok and yes == true
+    end
+    return { wild = st.wild and true or false, classes = classes, flags = st, kinds = kinds, spot = spot }
   end
+  -- the battle's Dynamax state: whether the player's side may (allowed), whether the foe's ace does
+  -- (foe), each side's once a battle (used, foeUsed), the Dynamaxes of the battle (list)
   function Dm.stateOf(st)
     if type(st) ~= "table" then return nil end
     local S = st.__mr
     if S then return S end
-    S = { allowed = R.battleAllows(modeOf(), Dm.factsOf(st)), used = false, list = {}, turn = 0 }
+    local facts = Dm.factsOf(st)
+    local mode = modeOf()
+    S = { allowed = R.battleAllows(mode, facts), foe = R.foeAllows and R.foeAllows(mode, facts) or false,
+      used = false, foeUsed = false, list = {}, turn = 0 }
+    S.ace = S.foe and R.aceIndex and R.aceIndex(st.foeParty) or nil
     st.__mr = S
     return S
   end
@@ -241,9 +255,43 @@ return function(mod, deps)
     return true
   end
 
+  -- whether the foe's b Dynamaxes now: a League trainer's ace (its party's last), on the field, the
+  -- foe's side not yet Dynamaxed this battle, and only while the player has the band too
+  function Dm.foeCan(st, b)
+    local S = Dm.stateOf(st)
+    if not (S and S.allowed and S.foe and S.ace) then return false, "battle" end
+    if S.foeUsed then return false, "used" end
+    if not b or b.side ~= "enemy" or b.__mrDmax then return false, "battler" end
+    if b.partyIndex ~= S.ace then return false, "not the ace" end
+    if E.State.isFainted(b) then return false, "fainted" end
+    if b.expLockedMove or (b.expRechargeTurns or 0) > 0 or (b.expBideTurns or 0) > 0 then return false, "locked" end
+    local d = dx()
+    if d and d.canDynamax then
+      local ok, yes = pcall(d.canDynamax, b.mon)
+      if ok and yes == false then return false, "species" end
+    end
+    if not Dm.hasBand() then return false, "band" end
+    return true
+  end
+
+  -- a foe's ace Gigantamaxes when the raids' art has its species' Gigantamax form (data/raid_bosses.lua
+  -- gmax): that form's G-Max Move, kept on its Pokemon for the battle (mon.__mrGmax)
+  function Dm.foeGmaxOf(mon)
+    local Bosses = deps.bosses
+    if not (Bosses and Bosses.ORDER and mon and E.Pokemon and E.Pokemon.national) then return nil end
+    local ok, nat = pcall(E.Pokemon.national, mon.species)
+    if not ok or not nat then return nil end
+    for _, key in ipairs(Bosses.ORDER) do
+      local rec = Bosses[key]
+      if rec and rec.gmax and tonumber(rec.national) == tonumber(nat) then return rec.gmax, key end
+    end
+    return nil
+  end
+
   -- ------- a Pokemon's Max Moves
 
   local function gmaxIdOf(mon)
+    if mon and mon.__mrGmax then return mon.__mrGmax end
     local d = dx()
     if not (d and d.canGigantamax and d.gmaxMoveOf) then return nil end
     local ok, yes = pcall(d.canGigantamax, mon)
@@ -258,9 +306,9 @@ return function(mod, deps)
     local ok, v = pcall(d.level, mon)
     return ok and tonumber(v) or 0
   end
-  local function multOf(mon)
+  local function multOf(mon, foe)
     local d = dx()
-    local lvl = levelOf(mon)
+    local lvl = foe and (D.FOE_LEVEL or 10) or levelOf(mon)
     if d and d.hpMult then
       local ok, v = pcall(d.hpMult, lvl)
       if ok and tonumber(v) then return tonumber(v) end
@@ -304,7 +352,8 @@ return function(mod, deps)
     local mon = b.mon
     local S = Dm.stateOf(st)
     local baseMax = tonumber(mon.maxHp) or 1
-    local mult = multOf(mon)
+    local foe = b.side == "enemy"
+    local mult = multOf(mon, foe)
     local hp0 = tonumber(mon.hp) or 0
     local hp, dynMax = R.up(hp0, baseMax, mult)
     mon.maxHp, mon.hp = dynMax, hp
@@ -312,7 +361,8 @@ return function(mod, deps)
       gmax = gmaxIdOf(mon), id = idOf(b) }
     b.__mrDmax = rec
     S.list[#S.list + 1] = rec
-    S.used = true
+    if foe then S.foeUsed = true else S.used = true end
+    rec.foe = foe
     -- (Encore, Disable, Torment and a Choice item's lock end; a Dynamaxed Pokemon takes none)
     b.expEncoreMove, b.expEncoreTurns, b.expEncoreSlot = nil, nil, nil
     b.expDisabledMove, b.expDisabledTurns = nil, nil
@@ -324,8 +374,10 @@ return function(mod, deps)
     return rec
   end
 
-  -- the Dynamax over: HP back to its share of the base max; `quiet` for a switch / faint / the end
-  function Dm.revert(st, ad, b, rec, quiet)
+  -- the Dynamax over: HP back to its share of the base max; `quiet` for a switch / faint / the end;
+  -- `keepLook` (a faint): the giant drawn on until the faint's own animation (Anim.faintMon) - the
+  -- battle works the turn out before it plays, so it is still giant while the blow that felled it shows
+  function Dm.revert(st, ad, b, rec, quiet, keepLook)
     rec = rec or (b and b.__mrDmax)
     if not rec then return end
     local mon = rec.mon
@@ -340,7 +392,7 @@ return function(mod, deps)
         attackerId = idOf(b), targetId = idOf(b), turn = 0 })
       ad:say(T.game("%s's Dynamax\nended!", nameOf(ad, b)))
       ad:pushEvent({ kind = "hp", side = b.side, battler = idOf(b), from = hp, to = hp, maxHp = rec.baseMax })
-    elseif quiet and rec.id ~= nil then
+    elseif quiet and rec.id ~= nil and not keepLook then
       local v = Dm.vis[rec.id]
       if v then v.want, v.k = 1, 1 end
     end
@@ -392,7 +444,7 @@ return function(mod, deps)
     local row = { kind = "move", user = b, target = b, battler = id, move = Dm.num("DYNAMAX"), slot = nil,
       mrDynamax = true }
     for i, a in ipairs(actions) do
-      if a.kind == "move" then table.insert(actions, i, row) return end
+      if a.kind == "move" and not a.mrDynamax then table.insert(actions, i, row) return end
     end
     actions[#actions + 1] = row
   end
@@ -704,6 +756,7 @@ return function(mod, deps)
     -- a battle's start: its state; its end: every Dynamax undone before the write-back
     local start = E.Battle.start
     E.Battle.start = function(opts, ...)
+      if Dm.ui and Dm.ui.dropGiants then pcall(Dm.ui.dropGiants) end
       for k in pairs(Dm.vis) do Dm.vis[k] = nil end
       for k in pairs(Dm.sel) do Dm.sel[k] = nil end
       local a, b2, c = start(opts, ...)
@@ -713,6 +766,7 @@ return function(mod, deps)
       if cb then
         E.Battle._onDone = function(result, st2, ...)
           pcall(Dm.revertAll, st2 or st, true)
+          if Dm.ui and Dm.ui.dropGiants then pcall(Dm.ui.dropGiants) end
           for k in pairs(Dm.vis) do Dm.vis[k] = nil end
           return cb(result, st2, ...)
         end
@@ -740,6 +794,46 @@ return function(mod, deps)
       return act
     end
 
+    -- the foe's chosen move: its Max Move while Dynamaxed, and when its ace Dynamaxes now (the
+    -- action marked, its G-Max form chosen); a Max Move has one target. True when it Dynamaxes now
+    local function foeMove(st, b, act)
+      if not (b and type(act) == "table" and act.kind == "move" and b.mon) then return false end
+      local now = false
+      if not b.__mrDmax then
+        if not Dm.foeCan(st, b) then return false end
+        now = true
+        if b.mon.__mrGmax == nil then b.mon.__mrGmax = Dm.foeGmaxOf(b.mon) or false end
+      end
+      local n = Dm.maxOf(b, act.move)
+      if n and n ~= numOf(act.move) then
+        act.move = n
+        local okM, def = pcall(E.Moves.get, n)
+        if okM and def then
+          if act.targetType ~= nil then act.targetType = tonumber(def.target) or act.targetType end
+          -- (a double battle: one of the player's on the field, the one it aimed at when it still stands)
+          if st.double and (tonumber(def.target) or 0) == 0 then
+            local t = act.target ~= nil and E.State.battler(st, act.target) or nil
+            if not t or t.side ~= "player" or E.State.isFainted(t) then
+              local pick = nil
+              for _, id in ipairs({ 0, 2 }) do
+                local pb = E.State.battler(st, id)
+                if pb and not E.State.isFainted(pb) and not (st.absent and st.absent[id]) and (pick == nil or math.random() < 0.5) then
+                  pick = id
+                end
+              end
+              if pick ~= nil then act.target = pick end
+            end
+          end
+        end
+      end
+      if now then
+        act.dynamax = true
+        b.expEncoreMove, b.expEncoreTurns, b.expDisabledMove, b.choicedMove = nil, nil, nil, nil
+      end
+      return now
+    end
+    Dm._foeMove = foeMove
+
     -- the turn: the Dynamax first
     local planFrom = Engine.planTurnFromActions
     Engine.planTurnFromActions = function(st, ad, playerAct, enemyAct, ...)
@@ -752,8 +846,14 @@ return function(mod, deps)
           b = nil
         end
       end
+      -- (the foe's ace, its move chosen)
+      local fb = nil
+      if isOn(st) and not st.double and type(enemyAct) == "table" and st.enemy and foeMove(st, st.enemy, enemyAct) then
+        fb = st.enemy
+      end
       local actions, x = planFrom(st, ad, playerAct, enemyAct, ...)
       if b then insertAction(actions, b, 0) end
+      if fb then insertAction(actions, fb, 1) end
       return actions, x
     end
     local planActions = Engine.planTurnActions
@@ -772,8 +872,17 @@ return function(mod, deps)
             end
           end
         end
+        -- (the foe's: its ace's Dynamax, the Max Moves of a Dynamaxed one)
+        local fb, fid = nil, nil
+        if isOn(st) and type(chosen) == "table" then
+          for _, id in ipairs({ 1, 3 }) do
+            local bb = State.battler(st, id)
+            if bb and foeMove(st, bb, chosen[id]) and not fb then fb, fid = bb, id end
+          end
+        end
         local actions, x = planActions(st, ad, chosen, ...)
         if b then insertAction(actions, b, bid) end
+        if fb then insertAction(actions, fb, fid) end
         return actions, x
       end
     end
@@ -1015,7 +1124,7 @@ return function(mod, deps)
       mod.events:on("battle.fainted", function(ev)
         local b = ev and ev.battler
         local st = ev and ev.battle
-        if b and b.__mrDmax and isOn(st) then Dm.revert(st, nil, b, nil, true) end
+        if b and b.__mrDmax and isOn(st) then Dm.revert(st, nil, b, nil, true, true) end
       end)
     end
 

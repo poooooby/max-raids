@@ -66,6 +66,30 @@ for _, f in ipairs({ "link", "safari", "oldManTutorial", "pokedude", "battleTowe
 end
 check(not R.battleAllows("all", facts({ wild = true, kinds = { firstBattle = true } })), "never in the first battle")
 
+-- ------- Power Spots: the League's battles anywhere, any battle on a route with an active den
+local function spot(t) local f = facts(t) f.spot = true return f end
+check(R.battleAllows("spots", leader), "POWER SPOTS: a Gym Leader")
+check(not R.battleAllows("spots", hiker), "POWER SPOTS: not a Hiker away from a den")
+check(not R.battleAllows("spots", wild), "POWER SPOTS: not a wild battle away from a den")
+check(R.battleAllows("spots", spot({ classes = { "HIKER" } })), "POWER SPOTS: a Hiker on a den's route")
+check(R.battleAllows("spots", spot({ wild = true })), "POWER SPOTS: a wild battle on a den's route")
+check(not R.battleAllows("spots", spot({ wild = true, flags = { safari = true } })), "POWER SPOTS: never in the Safari Zone")
+check(not R.battleAllows("league", spot({ classes = { "HIKER" } })), "GYMS & LEAGUE: a den's route changes nothing")
+
+-- ------- the foe's ace: a League trainer's, where the option allows
+check(R.foeAllows("league", leader), "the foe: a Gym Leader's ace")
+check(R.foeAllows("league", facts({ classes = { "ELITE_FOUR" } })) and R.foeAllows("league", facts({ classes = { "RIVAL_LATE" } })),
+  "the foe: the Elite Four's, a rival's")
+check(not R.foeAllows("trainers", hiker) and not R.foeAllows("all", hiker), "the foe: never a Hiker's, whatever the option")
+check(not R.foeAllows("all", wild), "the foe: never a wild one")
+check(not R.foeAllows("off", leader), "the foe: not with the option OFF")
+check(R.foeAllows("spots", leader) and R.foeAllows("trainers", leader), "the foe: a Leader's under POWER SPOTS and ALL TRAINERS")
+check(not R.foeAllows("league", facts({ classes = { "LEADER" }, flags = { link = true } })), "the foe: never in a link battle")
+check(R.aceIndex({ { species = 74 }, { species = 299 } }) == 2, "the ace: the last Pokemon")
+check(R.aceIndex({ { species = 74 }, { species = 299 }, { species = 0 } }) == 2, "the ace: an empty slot after it left out")
+check(R.aceIndex({ { species = 74 }, { species = 1, isEgg = true } }) == 1, "the ace: never an egg")
+check(R.aceIndex({}) == nil and R.aceIndex(nil) == nil, "the ace: none in no party")
+
 -- ------- which Max Move
 local function mv(t)
   return { status = (t.power or 0) == 0, power = t.power or 0, typeName = t.typeName, type = t.type or 0, key = t.key,

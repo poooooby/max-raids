@@ -56,6 +56,8 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
   and the giant bursts out of a giant ball. Its moves become Max Moves, with their weather, terrain
   and stat changes. A Pokémon with the Gigantamax Factor Gigantamaxes and uses its G-Max Move. A
   Dynamaxed Pokémon glows red under a drifting Dynamax pattern.
+- 👑 **Leaders Dynamax too:** once you have the band, Gym Leaders, the Elite Four, the Champion and
+  rivals Dynamax their last Pokémon, Gigantamaxing it when it has a Gigantamax form.
 - 🎮 **One screen or two:** the battle menu can go on a second screen, following Kanto Gear's Display
   Mode.
 - 🎵 **Original raid music** for dens, battles and catches.
@@ -71,7 +73,7 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 | RAID DIFFICULTY | SOLO (default): tougher bosses, since all four Pokémon are yours, and every catch succeeds. SWORD / SHIELD: the games' own numbers. |
 | MOVE INFO | How effective each move is against the boss: BASIC (default) shows words, FULL shows multipliers, OFF shows nothing. |
 | RAID DENS | Turn dens on the routes on or off. |
-| DYNAMAX | Where your Pokémon can Dynamax in the game's own battles: GYMS & LEAGUE (default: Gym Leaders, the Elite Four, the Champion and rivals), ALL TRAINERS, ALL BATTLES (wild ones too), or OFF. |
+| DYNAMAX | Where your Pokémon can Dynamax in the game's own battles: GYMS & LEAGUE (default: Gym Leaders, the Elite Four, the Champion and rivals), POWER SPOTS (those, plus any battle on a route with an active den), ALL TRAINERS, ALL BATTLES (wild ones too), or OFF. Leaders and the League's trainers Dynamax their last Pokémon wherever you can. |
 | PERF.OVERLAY | Shows frame times in a den, for reporting slowdowns. |
 | LANGUAGE | English (default), Japanese, Portuguese, Spanish, German, or CUSTOM (your own translation file). |
 

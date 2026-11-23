@@ -4,7 +4,11 @@
 --   R.rows()                        every move to register: { key, id, name, label, index, type,
 --                                   power, accuracy, pp, effect, priority, target, flags }
 --   R.battleAllows(mode, facts)     the option against one battle: facts = { wild, classes = { name },
---                                   flags = { link = true ... }, kinds = { firstBattle = true ... } }
+--                                   flags = { link = true ... }, kinds = { firstBattle = true ... },
+--                                   spot = a route with an active den here }
+--   R.foeAllows(mode, facts)        whether the foe's ace Dynamaxes there: a League trainer's battle
+--                                   the option allows (the band is src/dmax.lua's to check)
+--   R.aceIndex(party, usable)       a trainer's ace: the last Pokemon in its party that can battle
 --   R.maxKey(mv, gmaxId, Bt)        the Max Move a move (src/battle.lua Bt.move) becomes: its key in
 --                                   R.rows() and its power
 --   R.up(hp, maxHp, mult)           HP and max HP once Dynamaxed
@@ -62,18 +66,37 @@ return function(deps)
     return false
   end
 
+  local function league(facts)
+    for _, c in ipairs(facts.classes or {}) do
+      if c and D.LEAGUE[c] then return true end
+    end
+    return false
+  end
+  -- (the modes: league, spots - Sword / Shield's Power Spots: the League's battles anywhere, and any
+  -- battle on a route with an active den -, trainers, all)
   function R.battleAllows(mode, facts)
-    if mode ~= "league" and mode ~= "trainers" and mode ~= "all" then return false end
+    if mode ~= "league" and mode ~= "spots" and mode ~= "trainers" and mode ~= "all" then return false end
     facts = facts or {}
     if any(D.NEVER, facts.flags) or any(D.NEVER_KINDS, facts.kinds) then return false end
+    if mode == "spots" then return facts.spot == true or (not facts.wild and league(facts)) end
     if facts.wild then return mode == "all" end
-    if mode == "league" then
-      for _, c in ipairs(facts.classes or {}) do
-        if c and D.LEAGUE[c] then return true end
-      end
-      return false
-    end
+    if mode == "league" then return league(facts) end
     return true
+  end
+  function R.foeAllows(mode, facts)
+    facts = facts or {}
+    return not facts.wild and league(facts) and R.battleAllows(mode, facts)
+  end
+  function R.aceIndex(party, usable)
+    if type(party) ~= "table" then return nil end
+    usable = usable or function(m)
+      return type(m) == "table" and (tonumber(m.species) or 0) > 0 and not m.isEgg and not m.egg
+    end
+    local n = 0
+    for i, m in pairs(party) do
+      if type(i) == "number" and i > n and usable(m) then n = i end
+    end
+    return n > 0 and n or nil
   end
 
   function R.maxKey(mv, gmaxId, Bt)

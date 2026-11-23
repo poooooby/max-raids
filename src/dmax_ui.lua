@@ -27,6 +27,10 @@ return function(mod, deps)
     -- its red breathing: from MIN to MAX and back every S seconds, never off (Gigantamax too)
     BREATH = { MIN = 0.14, MAX = 0.42, S = 2.4 },
     GMAX_H = 92,           -- a Gigantamax form's height in the game's pixels
+    -- a foe's giant: less bigger (its place near the top of the field), its Gigantamax form lower
+    -- (its head kept TOP_MARGIN of the game's pixels under the field's top: grown less when it would
+    -- pass it, v.capK from where it was drawn the frame before)
+    FOE_K = 1.35, FOE_GMAX_H = 74, TOP_MARGIN = 2,
     ANIM_UNIT_S = 1 / 20,  -- the pack's frame unit (as the raid's)
     BUTTON = { x = 2, y = 98, w = 54, h = 13 },
     TEXT_Y = -1,           -- the word's draw row from the card's top (the small font's glyphs sit low)
@@ -211,7 +215,7 @@ return function(mod, deps)
   end
 
   -- the pack key of a G-Max move's form (data/raid_bosses.lua gmax; the species' own first)
-  local function packKeyOf(gid, species)
+  local function packKeyOf(gid, species, front)
     local nat = nil
     if E.Pokemon and E.Pokemon.national then
       local ok, n = pcall(E.Pokemon.national, species)
@@ -220,28 +224,31 @@ return function(mod, deps)
     local pick
     for _, key in ipairs(Bosses.ORDER or {}) do
       local rec, sp = Bosses[key], Sprites[key]
-      if rec and sp and sp.back and rec.gmax == gid and (not pick or rec.national == nat) then pick = key end
+      if rec and sp and (front or sp.back) and rec.gmax == gid and (not pick or rec.national == nat) then pick = key end
     end
     return pick
   end
 
-  -- a Gigantamax form's back sheet as one Image a frame (the engine draws a whole picture), made a
-  -- frame or two at a time as they are first wanted; its opaque box from frame 1
+  -- a Gigantamax form's back sheet (the player's) or front sheet (a foe's: the raid boss's own) as
+  -- one Image a frame (the engine draws a whole picture), made a frame or two at a time as they are
+  -- first wanted; its opaque box from frame 1
   local arts = {}
-  function U.artFor(gid, species, shiny)
-    local id = tostring(gid) .. (shiny and ":s" or "")
+  function U.artFor(gid, species, shiny, front)
+    local id = tostring(gid) .. (shiny and ":s" or "") .. (front and ":f" or "")
     local a = arts[id]
     if a ~= nil then return a or nil end
     engine()
-    local key = packKeyOf(gid, species)
+    local key = packKeyOf(gid, species, front)
     local sp = key and Sprites[key]
-    local B = sp and sp.back
+    local B = sp and (front and sp.cell and { cell = sp.cell, cols = sp.cols or sp.frames, frames = sp.frames } or sp.back)
     if not B then arts[id] = false return nil end
-    local data = imageData("assets/bosses/backs/" .. key .. ((shiny and sp.shiny) and "_shiny" or "") .. ".png")
+    local path = front and ("assets/bosses/" .. key .. ((shiny and sp.shiny) and "_shiny" or "") .. ".png")
+      or ("assets/bosses/backs/" .. key .. ((shiny and sp.shiny) and "_shiny" or "") .. ".png")
+    local data = imageData(path)
     if not data then arts[id] = false return nil end
     local x0, y0, x1, y1, edges = boxAndEdges(data, 0, 0, B.cell, B.cell)
     a = { data = data, B = B, key = key, frames = {}, box = { x0, y0, x1, y1 }, edges = edges,
-      speed = (sp.speed and sp.speed[1]) or 2, entry = {} }
+      speed = (sp.speed and sp.speed[1]) or 2, entry = {}, front = front and true or false }
     arts[id] = a
     return a
   end
@@ -265,7 +272,8 @@ return function(mod, deps)
     local okW, W = pcall(mod.find, mod, "gen3-hd-sprites")
     local wx = okW and type(W) == "table" and W.exports or nil
     if wx and type(wx.tag) == "function" then
-      a.spec = a.spec or { side = "player", body = { a.box[1], a.box[2], a.box[3], a.box[4] }, top = a.box[2],
+      a.spec = a.spec or { side = a.front and "enemy" or "player", body = { a.box[1], a.box[2], a.box[3], a.box[4] },
+        top = a.box[2],
         lowPivot = { (a.box[1] + a.box[3]) / 2, a.box[4] } }
       pcall(wx.tag, img, a.spec)
     end
@@ -464,6 +472,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
   U.patternDraws = 0   -- (drivers: the pattern's passes)
   function U.sceneOn() return scene ~= nil end
   function U.sceneT() return scene and scene.t or nil end
+  function U.sceneFoe() return scene and scene.foe or nil end
   -- (drivers: skip the scene playing)
   function U.skipScene() if scene and not scene.ended then scene.skip = true end end
 
@@ -524,6 +533,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
         sc.gpic.img = img
       end
     end
+    -- (a foe's: its trainer's front picture)
+    if sc.trainer == nil and sc.foe then
+      sc.trainer = false
+      local okT, TrainerPic = pcall(require, "src.core.game3.trainer_pic")
+      local okF, pic = false, nil
+      if okT and TrainerPic and TrainerPic.front and sc.picId ~= nil then okF, pic = pcall(TrainerPic.front, sc.picId) end
+      if okF and type(pic) == "table" and pic.image then
+        local iw, ih = pic.image:getDimensions()
+        sc.trainer = { img = pic.image, quads = { love.graphics.newQuad(0, 0, min(64, iw), min(64, ih), iw, ih) }, n = 1 }
+      end
+    end
     if sc.trainer == nil then
       sc.trainer = false
       local okT, TrainerPic = pcall(require, "src.core.game3.trainer_pic")
@@ -575,8 +595,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     end
     local st = E.Ui and E.Ui._st
     local mon = v.mon
-    local sc = { id = id, v = v, t = 0, fired = {}, onEnd = opts.onEnd,
-      gender = st and tonumber(st.playerGender) or 0,
+    local sc = { id = id, v = v, t = 0, fired = {}, onEnd = opts.onEnd, foe = v.foe and true or false,
+      gender = st and tonumber(st.playerGender) or 0, picId = st and st.trainerPicId,
       ball = BALL_RGB[tonumber(mon and (mon.pokeball or mon.ball)) or 4] or BALL_RGB[4] }
     scene = sc
     U.scenes = U.scenes + 1
@@ -707,6 +727,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     G.translate(X0 + shx * S, Y0 + shy * S)
     G.scale(S)
     local by = SC.BASE_Y
+    -- (a foe's scene mirrored: its trainer in from the right, the ball held on its left)
+    local side = sc.foe and -1 or 1
+    local function mx(x) return sc.foe and (240 - x) or x end
     local bu = part(t, "BURST")
     local du, ou, gu = part(t, "DROP"), part(t, "OPEN"), part(t, "GROW")
     -- the base: there from the start, rushing past at the burst, back for the ball's landing, gone
@@ -714,7 +737,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     local baseA, baseK, baseDx, baseDy = 1, 1, 0, 0
     if t >= SM.BURST and t < SM.DROP then
       local e = bu * bu
-      baseK, baseDx, baseDy, baseA = 1 + 5 * e, -150 * e, 140 * e, 1 - bu
+      baseK, baseDx, baseDy, baseA = 1 + 5 * e, -150 * e * side, 140 * e, 1 - bu
     elseif t >= SM.DROP then
       baseA = min(1, du * 3) * (1 - ou)
     end
@@ -751,10 +774,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     local tr = sc.trainer
     if tr and t >= SM.SLIDE and t < SM.DROP then
       local su = smooth(part(t, "SLIDE"))
-      local tx, ty, tk, ta = lerp(-40, 92, su), by + 8, 1, 1
+      local tx, ty, tk, ta = mx(lerp(-40, 92, su)), by + 8, 1, 1
       if t >= SM.BURST then
         local e = bu * bu
-        tx, ty, tk, ta = 92 - 170 * e, by + 8 + 120 * e, 1 + 4 * e, 1 - bu
+        tx, ty, tk, ta = mx(92 - 170 * e), by + 8 + 120 * e, 1 + 4 * e, 1 - bu
       end
       local f = (t >= SM.BAND) and min(tr.n, 2) or 1
       G.setColor(1, 1, 1, ta)
@@ -786,7 +809,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       local rc = part(t, "RECALL")
       ballOpen = rc < 0.8 and 0.55 or 0.55 * (1 - (rc - 0.8) / 0.2)
       local su = smooth(part(t, "SLIDE"))
-      ballX, ballY = lerp(ballX, 150, su), lerp(ballY, by - 40, su) + math.sin(t * 6) * 1.5 * su
+      ballX, ballY = lerp(ballX, mx(150), su), lerp(ballY, by - 40, su) + math.sin(t * 6) * 1.5 * su
       local sw = smooth(part(t, "SWELL"))
       ballR = lerp(6, 10, sw)
       ballD, ballBright = sw, 0.25 * sw
@@ -950,7 +973,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       if drawing and mon then
         for _, v in pairs(Dm.vis) do
           if v.mon == mon and (v.k or 1) > 1.01 then
-            if back and v.art and v.k > 1 + (U.K - 1) * 0.5 then
+            if v.art and (v.art.front == not back) and v.k > 1 + (U.K - 1) * 0.5 then
               local img = frameNow(v.art, now)
               if img then
                 v.art.entry.image = img
@@ -960,18 +983,16 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
             end
             local entry = sidePic(back, ign, picSp, form, shiny, personality, mon, ...)
             v.picImg, v.picArt = entry and entry.image or nil, false
-            if back then v.basePic = v.picImg end
+            v.basePic = v.picImg
             return entry
           end
         end
         -- (its own picture before it grows: the Dynamax scene's)
-        if back then
-          for _, v in pairs(Dm.vis) do
-            if v.mon == mon then
-              local entry = sidePic(back, ign, picSp, form, shiny, personality, mon, ...)
-              v.basePic = entry and entry.image or v.basePic
-              return entry
-            end
+        for _, v in pairs(Dm.vis) do
+          if v.mon == mon then
+            local entry = sidePic(back, ign, picSp, form, shiny, personality, mon, ...)
+            v.basePic = entry and entry.image or v.basePic
+            return entry
           end
         end
       end
@@ -1026,6 +1047,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       end
       if wvGiant then pcall(wvGiant, id, info) end
     end
+    -- (the battle's records going: every giant WoobleView was told of let go)
+    function U.dropGiants()
+      for id, v in pairs(Dm.vis) do
+        if v.wv and v.wv.on then
+          v.wv.on = false
+          giantTo(id, nil)
+        end
+      end
+    end
     Ui.draw = function(w, h, ...)
       local st = Ui._st
       if not (st and st.__mr and st.__mr.allowed) then return draw(w, h, ...) end
@@ -1036,10 +1066,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       local dk = st.double and U.DOUBLES_K or 1
       local any = false
       for id, v in pairs(Dm.vis) do
+        -- (its look only while its own Pokemon holds that place: another sent in there is its own size)
+        local hb = v.mon and E.State and E.State.battler(st, id)
+        if hb and hb.mon and hb.mon ~= v.mon and (v.want or 1) > 1 then v.want, v.k, v.t0 = 1, 1, nil end
         local k0 = stepK(v, now)
         v.patA = 0
         if k0 > 1.01 then any = true end
-        local k = 1 + (k0 - 1) * dk
+        local kmax = v.foe and U.FOE_K or U.K
+        local cap = v.foe and (v.capK or 1) or 1
+        local k = max(1, (1 + (k0 - 1) / (U.K - 1) * (kmax - 1) * dk) * cap)
         local p = k0 ~= 1 and Anim.present(id)
         if not p and v.wv and v.wv.on then
           v.wv.on = false
@@ -1056,7 +1091,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
           if gm then
             local A = v.art
             local hgt = max(1, A.box[4] - A.box[2])
-            local sc = U.GMAX_H * dk / hgt * (k0 / U.K)
+            local sc = (v.foe and U.FOE_GMAX_H or U.GMAX_H) * dk / hgt * (k0 / U.K) * cap
             local bx = (A.box[1] + A.box[3]) / 2
             p.sx, p.sy = (p.sx or 1) * sc, (p.sy or 1) * sc
             p.ox = (p.ox or 0) - (bx - 32) * sc
@@ -1108,6 +1143,20 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       end
       if vb then swapOut(vb.mon) labels = false end
       drawing = false
+      -- (a foe's giant past the field's top: its growth held to fit, from this frame's draw)
+      if any then
+        for _, v in pairs(Dm.vis) do
+          if v.foe and v.natFrame == frameNo and v.nat and (v.k or 1) > 1.01 then
+            local top, foot = v.nat[2], v.nat[4]
+            local h = foot - top
+            if h > 4 then
+              local M = U.TOP_MARGIN
+              local want = (v.capK or 1) * (foot - M) / h
+              if top < M or ((v.capK or 1) < 1 and top > M + 1) then v.capK = max(0.3, min(1, want)) end
+            end
+          end
+        end
+      end
       for i = n, 1, -1 do
         local s = saved[i]
         local p = s.p
@@ -1245,14 +1294,26 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
         end
       end
       local dp, dd = Chrome.drawPlayerBox, Chrome.drawDoublesBox
+      local de = Chrome.drawEnemyBox
       if type(dp) == "function" then
         Chrome.drawPlayerBox = function(x, y, ...) note(x, y) return dp(x, y, ...) end
       end
+      if type(de) == "function" then
+        Chrome.drawEnemyBox = function(x, y, ...) note(x, y) return de(x, y, ...) end
+      end
       if type(dd) == "function" then
         Chrome.drawDoublesBox = function(isPlayer, x, y, ...)
-          if isPlayer then note(x, y) end
+          note(x, y)
           return dd(isPlayer, x, y, ...)
         end
+      end
+      -- (the mark while it is drawn giant: the battle may already have ended its Dynamax - a faint
+      -- worked out before its blow plays - while it still shows)
+      local function shownGiant(b)
+        if b.__mrDmax then return true end
+        local okI, id = pcall(E.State.idOf, b)
+        local v = okI and id ~= nil and Dm.vis[id]
+        return v and (v.k or 1) > 1.01 or false
       end
       local hdraw = Healthbox.draw
       Healthbox.draw = function(side, battler, o, ...)
@@ -1261,7 +1322,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
         local ok, a, b2 = pcall(hdraw, side, battler, o, ...)
         inside = inside - 1
         if not ok then error(a, 0) end
-        if inside == 0 and boxX and type(battler) == "table" and battler.__mrDmax then
+        if inside == 0 and boxX and type(battler) == "table" and shownGiant(battler) then
           local img = iconImage()
           if img then
             love.graphics.setColor(1, 1, 1, 1)
@@ -1723,9 +1784,10 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     if not v then return end
     v.mon = rec.mon
     v.species = E.Pokemon and E.Pokemon.speciesOf and select(2, pcall(E.Pokemon.speciesOf, rec.mon)) or rec.mon.species
+    v.foe = rec.foe and true or false
     if rec.gmax then
       local shiny = E.Pokemon and E.Pokemon.isShiny and select(2, pcall(E.Pokemon.isShiny, rec.mon)) == true
-      v.art = U.artFor(rec.gmax, v.species, shiny)
+      v.art = U.artFor(rec.gmax, v.species, shiny, v.foe)
       if v.art then frameOf(v.art, 1) end
     end
   end

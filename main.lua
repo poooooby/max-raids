@@ -74,11 +74,12 @@ return function(mod)
       -- dens on the routes (off: none spawn; those already chosen stay saved)
       { key = "dens", label = "RAID DENS", type = "toggle", default = true },
       -- Dynamax in the game's own battles (src/dmax.lua), with the Dynamax Band: the Gym Leaders',
-      -- the Elite Four's, the Champion's and the rivals' battles (Sword / Shield's Power Spots), every
-      -- trainer's, every battle, or none
+      -- the Elite Four's, the Champion's and the rivals' battles; those and any battle on a route
+      -- with an active den (Sword / Shield's Power Spots); every trainer's; every battle; or none.
+      -- The League's trainers Dynamax their last Pokemon wherever the player may
       { key = "dynamax", label = "DYNAMAX", type = "choice", default = "league",
-        choices = { { "GYMS & LEAGUE", "league" }, { "ALL TRAINERS", "trainers" }, { "ALL BATTLES", "all" },
-          { "OFF", "off" } } },
+        choices = { { "GYMS & LEAGUE", "league" }, { "POWER SPOTS", "spots" }, { "ALL TRAINERS", "trainers" },
+          { "ALL BATTLES", "all" }, { "OFF", "off" } } },
       -- the engine's frame-time readout with the raid's parts, and the slowest frames with what the
       -- raid was doing, shown while a den is open: for reporting slowdowns
       { key = "perf_overlay", label = "PERF.OVERLAY", type = "toggle", default = false },
@@ -404,7 +405,8 @@ return function(mod)
     local okD, dm = pcall(function()
       local rules = makeDmaxRules({ data = DmaxData })
       return makeDmax(mod, { data = DmaxData, rules = rules, battle = Battle, gmax = Gmax, T = T, dex = dexExports,
-        mode = function() return dmaxForced or mod.options:get("dynamax") or "league" end, bandIndex = BAND.index })
+        mode = function() return dmaxForced or mod.options:get("dynamax") or "league" end, bandIndex = BAND.index,
+        bosses = Bosses, spot = function() return Dens ~= nil and Dens.liveHere ~= nil and Dens.liveHere() end })
     end)
     if okD and type(dm) == "table" then
       Dmax = dm

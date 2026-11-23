@@ -517,6 +517,7 @@ return {
   -- Dynamax in the game's own battles (src/dmax.lua, src/dmax_ui.lua, main.lua)
   ["option|DYNAMAX"] = "DINAMAX",
   ["choice|GYMS & LEAGUE"] = "GIMNASIOS Y LIGA",
+  ["choice|POWER SPOTS"] = "ZONAS DE PODER",
   ["choice|ALL TRAINERS"] = "TODOS LOS ENTRENADORES",
   ["choice|ALL BATTLES"] = "TODOS LOS COMBATES",
   ["The light gathers around your wrist..."] = "La luz se reúne en tu muñeca...",

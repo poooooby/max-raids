@@ -412,6 +412,18 @@ return function(mod, deps)
   -- and boss. Registered each boot and held here; each one's day saved under "extDens"[key] =
   -- { day, done, boss } (the boss only when its mod's function chose it for the day)
   local extMaps, extByKey, extSpawned = {}, {}, {}
+  -- whether the map the player is on has a den standing active today (a Power Spot: src/dmax.lua)
+  function Dn.liveHere()
+    local M = engine("src.core.game3.map")
+    local mapId = M and M.current
+    if not mapId then return false end
+    local list = saved()[mapId]
+    if type(list) == "table" then
+      for _, den in ipairs(list) do if Dn.isLive(den) and den.day == Dn.today() then return true end end
+    end
+    for _, den in ipairs(extMaps[mapId] or {}) do if Dn.isLive(den) then return true end end
+    return false
+  end
   local function extSaved()
     local all = mod.save:get("extDens")
     return type(all) == "table" and all or {}

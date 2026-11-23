@@ -114,6 +114,167 @@ local function body(game, log)
     return atCommand()
   end
 
+  -- ------- the foe's side: a Gym Leader's ace Dynamaxes (her party cut to one: Lapras, last and so
+  -- her ace, Gigantamaxing - the raids' art has its form), once, only while the player has the band
+  local function foeSection()
+    local UI = Tt.dmaxUi
+    -- (POWER SPOTS: a wild battle on a route with an active den allows it, away from one not)
+    if Tt.dens and Tt.dmaxMode then
+      Tt.dmaxMode("spots")
+      local live = Tt.dens.liveHere
+      for _, here in ipairs({ true, false }) do
+        Tt.dens.liveHere = function() return here end
+        local okS = BattleBridge.startWild(Runtime._mod, game, { species = sp("ZIGZAGOON"), level = 3 }, {})
+        check(okS == true and toCommand(), "spots: a wild battle " .. (here and "by a den" or "away from dens"))
+        local stS = Battle.getState()
+        check(stS and stS.__mr and (stS.__mr.allowed == here) and not stS.__mr.foe,
+          "spots: Dynamax " .. (here and "allowed by an active den" or "not away from one") .. ", never the wild foe")
+        Battle.abort("run")
+        waitFor(function() return not Battle.isActive() end, 600)
+        U.wait(30)
+      end
+      Tt.dens.liveHere = live
+      Tt.dmaxMode(nil)
+    end
+    local by2 = C.trainers.byName
+    local tid2 = by2.TRAINER_ROXANNE_1 or by2.TRAINER_ROXANNE or by2.TRAINER_LEADER_BROCK
+    local foe = Trainers.foeFromId(tid2)
+    local ace = foe.party[#foe.party]
+    ace.species = sp("LAPRAS")
+    ace.moves = { mv("ICE_BEAM"), mv("BODY_SLAM"), mv("PROTECT"), mv("GROWL") }
+    foe.party = { ace }
+    foe.species, foe.level, foe.moves = ace.species, ace.level, ace.moves
+    for _, m in ipairs(session.party) do m.hp = m.maxHp end
+    if dx then dx.setFactor(zard, false) end
+    local ok, err = BattleBridge.start(Runtime._mod, game, foe, { wild = false, trainerId = tid2 })
+    check(ok == true, "foe: her battle starts " .. tostring(err or ""))
+    check(toCommand(), "foe: its command menu")
+    local st = Battle.getState()
+    local S = st and st.__mr
+    check(S and S.foe and S.ace == 1, "foe: a Gym Leader's battle, her ace the last (" .. tostring(S and S.ace) .. ")")
+    local can, why = Dm.foeCan(st, st.enemy)
+    check(can, "foe: her ace may Dynamax (" .. tostring(why) .. ")")
+    do
+      local hb = Dm.hasBand
+      Dm.hasBand = function() return false end
+      local c2, w2 = Dm.foeCan(st, st.enemy)
+      Dm.hasBand = hb
+      check(not c2 and w2 == "band", "foe: not while the player has no band (" .. tostring(w2) .. ")")
+    end
+    local said = {}
+    do
+      local ad = Battle._adapter
+      local pushEvent = ad.pushEvent
+      ad.pushEvent = function(self, ev, ...)
+        if type(ev) == "table" and ev.kind == "msg" then
+          said[#said + 1] = tostring(ev.text)
+          log("  says: " .. tostring(ev.text):gsub("\n", " / "))
+        end
+        return pushEvent(self, ev, ...)
+      end
+    end
+    local baseMax = st.enemy.mon.maxHp
+    -- (the player: Growl, no Dynamax; her Lapras Dynamaxes as the turn begins)
+    for _ = 1, 6 do
+      if Ui._mode == "moves" then break end
+      U.tap(game, "a")
+      waitFor(function() return Ui._mode == "moves" end, 40)
+    end
+    U.tap(game, "down")
+    U.wait(8)
+    U.tap(game, "a")
+    local SM = UI.SM
+    local marks = { { SM.SLIDE + 0.3, "f01_trainer" }, { SM.BAND + 0.35, "f02_band" }, { SM.GROW + 0.4, "f03_grow" },
+      { SM.ROAR + 0.1, "f04_roar" } }
+    local nextMark, sceneFoe, scenes0 = 1, nil, UI.scenes
+    for _ = 1, 4000 do
+      if UI.sceneOn() and UI.sceneT() then
+        if sceneFoe == nil then sceneFoe = UI.sceneFoe and UI.sceneFoe() end
+        local t = UI.sceneT()
+        if nextMark <= #marks and t >= marks[nextMark][1] then
+          shot(marks[nextMark][2])
+          nextMark = nextMark + 1
+        end
+        U.wait(1)
+      else
+        if atCommand() or not Battle.isActive() then break end
+        if not pump() then U.wait(1) end
+      end
+    end
+    local rec = st.enemy.__mrDmax
+    check(UI.scenes == scenes0 + 1 and sceneFoe == true, "foe: her Dynamax scene played, mirrored")
+    check(rec ~= nil, "foe: her Lapras Dynamaxed")
+    check(rec and rec.gmax ~= nil, "foe: Gigantamaxed (" .. tostring(rec and rec.gmax) .. ")")
+    check(st.enemy.mon.maxHp == math.floor(baseMax * 2.0), ("foe: max HP x2.0 at Level 10: %d -> %d"):format(baseMax,
+      st.enemy.mon.maxHp))
+    check(S.foeUsed and not S.used, "foe: once for her side; the player's still to use")
+    check(Dm.can(st, st.player), "foe: Charizard may still Dynamax")
+    local maxUsed = false
+    for _, s in ipairs(said) do if s:find("MAX", 1, true) and s:find("used", 1, true) then maxUsed = true end end
+    check(maxUsed, "foe: her move a Max Move")
+    local v = Dm.vis[1]
+    check(v and v.foe and v.art and v.art.front, "foe: drawn as the raid boss's G-Max front")
+    U.wait(40)
+    check(v and (v.k or 1) > 1.3, "foe: drawn giant (" .. tostring(v and v.k) .. ")")
+    log(("  foe energy: placed by %s, motes %d; mark %s"):format(tostring(UI.lastEnergy), UI.energyCount() or 0,
+      UI.lastMark and ("%s,%s"):format(tostring(UI.lastMark[5]), tostring(UI.lastMark[6])) or "none"))
+    check((UI.energyCount() or 0) > 0, "foe: red energy off her giant")
+    log(("  foe drawn: %s, kept under the top by %.2f"):format(v and v.nat and ("%.0f,%.0f-%.0f,%.0f"):format(v.nat[1],
+      v.nat[2], v.nat[3], v.nat[4]) or "none", v and v.capK or 1))
+    check(v and v.nat and v.nat[2] >= 1, "foe: its head on the field, under its top")
+    shot("f05_giant")
+    -- (the player's Charizard Dynamaxes too, its own once)
+    for _ = 1, 6 do
+      if Ui._mode == "moves" then break end
+      U.tap(game, "a")
+      waitFor(function() return Ui._mode == "moves" end, 40)
+    end
+    U.tap(game, "r")
+    U.wait(6)
+    check(Dm.sel[0] == true, "foe: the player picks Dynamax against her giant")
+    U.tap(game, "down")
+    U.wait(8)
+    U.tap(game, "a")
+    local UI2 = UI
+    if waitFor(function() return UI2.sceneOn() and (UI2.sceneT() or 0) > 0.5 end, 900) then
+      check(st.player.__mrDmax ~= nil and st.enemy.__mrDmax ~= nil, "foe: both giants at once")
+      U.tap(game, "b")
+    else
+      check(false, "foe: the player's Dynamax scene")
+    end
+    waitFor(function() return not UI2.sceneOn() end, 200)
+    -- (her giant drawn on while Charizard's blow plays - the battle has worked out her faint
+    -- already - until her faint's own animation)
+    local Anim = require("src.core.game3.battle.anim")
+    local faintMon, fainted = Anim.faintMon, false
+    Anim.faintMon = function(id, ...)
+      if id == 1 then fainted = true end
+      return faintMon(id, ...)
+    end
+    local minK, frames, bothShot = 9, 0, false
+    for _ = 1, 900 do
+      if fainted or atCommand() or not Battle.isActive() then break end
+      local v1 = Dm.vis[1]
+      if v1 then minK = math.min(minK, v1.k or 1) end
+      frames = frames + 1
+      if frames == 40 and not bothShot then bothShot = true shot("f06_both") end
+      if not pump() then U.wait(1) end
+    end
+    Anim.faintMon = faintMon
+    log(("  foe after the player's Dynamax: %d frames, smallest drawn %.2f, fainted %s"):format(frames, minK,
+      tostring(fainted)))
+    check(minK > 1.3, "foe: drawn giant until her faint plays (" .. ("%.2f"):format(minK) .. ")")
+    toCommand()
+    Battle.abort("run")
+    waitFor(function() return not Battle.isActive() end, 600)
+    U.wait(30)
+  end
+  if os.getenv("PROBE_FOE_ONLY") == "1" then
+    foeSection()
+    log(("%d failures"):format(fails))
+    return
+  end
+
   -- ------- a wild battle: not under GYMS & LEAGUE
   local okW = BattleBridge.startWild(Runtime._mod, game, { species = sp("ZIGZAGOON"), level = 3 }, {})
   check(okW == true, "a wild battle starts")
@@ -528,6 +689,7 @@ local function body(game, log)
     U.wait(30)
     check(session.party[1].maxHp == baseMax, "after the double battle: its own max HP")
   end
+  foeSection()
   log(("%d failures"):format(fails))
 end
 
