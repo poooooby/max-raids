@@ -857,6 +857,20 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
         G.setColor(lerp(sc.ball[1], 1, ballD), lerp(sc.ball[2], 0.35, ballD), lerp(sc.ball[3], 0.75, ballD), ballA)
         G.circle("fill", wx, wy, wr, 24)
       end
+      -- (the recall: its open mouth filled with the light drawing the Pokemon in - layers of it,
+      -- brightest at the middle - so the inside never shows dark)
+      if ballOpen > 0.05 and t < SM.SLIDE then
+        local a = min(1, ballOpen / 0.55) * ballA
+        local mx0, my0 = wx, wy - wr * 0.32
+        G.setBlendMode("add")
+        for i = 4, 1, -1 do
+          local f = i / 4
+          G.setColor(1, 0.35 + 0.3 * (1 - f), 0.65 + 0.2 * (1 - f), 0.38 * a)
+          G.ellipse("fill", mx0, my0, wr * 0.9 * f, wr * 0.52 * f, 28)
+        end
+        G.setBlendMode("alpha")
+        glow(G, mx0, my0, wr * 1.6, 1, 0.3, 0.6, 0.35 * a)
+      end
       -- (the light out of it as it opens)
       if ballOpen > 0.05 and t >= SM.OPEN then
         G.setBlendMode("add")
