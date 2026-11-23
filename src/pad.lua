@@ -1370,11 +1370,19 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
         G.printf(T.c("button", "Back"), b.x, b.y + (bh - fb:getHeight()) / 2 + (held == "back" and bh * 0.06 or 0), b.w, "center")
         -- DYNAMAX left of it, while this member holds the Dynamax Energy
         if c and c.menu == "moves" and c.canDmax then
-          -- (in the room between the title and Back)
+          -- (in the room between the title and Back; `dmaxCenter`: across the header's middle,
+          -- as wide as keeps it clear of Back)
           local titleEnd = h * 0.04 + fh:getWidth(title) + h * 0.03
           local dh = hh * 0.82
-          local dw = min(dh * 4.4, b.x - h * 0.03 - titleEnd)
-          local d = rset(sWhere.dynamax, b.x - dw - h * 0.03, (hh - dh) / 2, dw, dh)
+          local dw, dx
+          if c.dmaxCenter then
+            dw = min(dh * 4.4, w - 2 * (w - b.x + h * 0.03))
+            dx = (w - dw) / 2
+          else
+            dw = min(dh * 4.4, b.x - h * 0.03 - titleEnd)
+            dx = b.x - dw - h * 0.03
+          end
+          local d = rset(sWhere.dynamax, dx, (hh - dh) / 2, dw, dh)
           Pad.drawDynamaxPill(G, d.x, d.y + (held == "dynamax" and dh * 0.05 or 0), d.w, d.h, c.dmax == true)
         end
       end

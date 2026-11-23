@@ -140,6 +140,7 @@ return function(mod)
   local makeDmaxRules = loadSibling(mod, "src/dmax_rules.lua")
   local makeDmax = loadSibling(mod, "src/dmax.lua")
   local makeDmaxUi = loadSibling(mod, "src/dmax_ui.lua")
+  local makeDmaxPad = loadSibling(mod, "src/dmax_pad.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
     mod.log:error("Galar Rising is missing files; it stays off -- reinstall the mod")
     return
@@ -394,7 +395,7 @@ return function(mod)
   -- ------- Dynamax in the game's own battles (src/dmax.lua, src/dmax_ui.lua): the Max Moves and the
   -- Dynamax Band registered now, as the National Dex registers its own; the battle's wraps at
   -- game.ready, after the National Dex's
-  local Dmax, DmaxUi = nil, nil
+  local Dmax, DmaxUi, DmaxPad = nil, nil, nil
   local dmaxForced = nil  -- (drivers: _test.dmaxMode("league" | "trainers" | "all" | "off"))
   local BAND = { id = "DYNAMAX_BAND", name = "DYNAMAX BAND", index = 959 }
   if DmaxData and makeDmaxRules and makeDmax and makeDmaxUi and Battle then
@@ -424,6 +425,17 @@ return function(mod)
       if okU and type(ui) == "table" then
         DmaxUi = ui
         Dmax.onDynamax = ui.onDynamax
+        -- (our Max Move pad in Kanto Gear's place while a Dynamax move is chosen: src/dmax_pad.lua)
+        if makeDmaxPad then
+          local okP, pad = pcall(makeDmaxPad, mod, { dmax = Dmax, ui = ui, Pad = Pad, battle = Battle, T = T,
+            gearOption = function(key) return gearOption(key) end, makeScreen2 = makeScreen2 })
+          if okP and type(pad) == "table" then
+            DmaxPad = pad
+            ui.padStep = function() return pad.step() end
+          else
+            mod.log:warn("dynamax: its move pad failed to build: %s", tostring(pad))
+          end
+        end
       else
         mod.log:warn("dynamax: its battle screen failed to build: %s", tostring(ui))
       end
@@ -595,9 +607,14 @@ return function(mod)
       G.setScissor()
       G.setShader()
       local okC, errC = pcall(DmaxUi.drawEnergy, viewport)
-      -- (and the Dynamax scene over the whole battle while it plays)
+      -- (and the Dynamax scene over the whole battle while it plays; the Max Move pad in Kanto Gear's
+      -- place on this screen)
       local okS, errS = pcall(DmaxUi.drawScene, viewport)
       if not okS then okC, errC = false, errS end
+      if DmaxPad then
+        local okD, errD = pcall(DmaxPad.drawMain, viewport)
+        if not okD then okC, errC = false, errD end
+      end
       G.pop()
       if not okC and not cloudWarned then
         cloudWarned = true
@@ -615,9 +632,43 @@ return function(mod)
   end)
 
   -- taps and clicks on the battle pad (the main window's)
+  -- (the game kept in Kanto Gear's game rect while our Max Move pad holds the Gear's: src/dmax_pad.lua)
+  mod.hooks:wrap("render.viewport", function(next, context)
+    local available = next(context)
+    if DmaxPad then
+      local ok, rect = pcall(DmaxPad.viewport, available, context)
+      if ok and rect then return rect end
+    end
+    return available
+  end)
+
+  -- (the battle's own menu kept away while our pad has it, as the Gear's GEAR view keeps it away:
+  -- the engine's battle.bottom_ui_visible, which the Gear and WoobleView both read)
+  mod.hooks:wrap("battle.bottom_ui_visible", function(next, st, ...)
+    if DmaxPad and DmaxPad.shown() then return false end
+    return next(st, ...)
+  end)
+
+  -- (and our pad drawn in the Gear's rect, over the window, once the game's rect is in place)
+  mod.hooks:wrap("render.window", function(next, game, context)
+    local r = next(game, context)
+    if DmaxPad then
+      local ok, err = pcall(DmaxPad.drawWindow)
+      if not ok and not cloudWarned then
+        cloudWarned = true
+        mod.log:warn("dynamax: its move pad failed to draw: %s", tostring(err))
+      end
+    end
+    return r
+  end)
+
   mod.hooks:wrap("input.pointer", function(next, game, ev)
     if Raid.active() and not Raid.summaryUp() and type(ev) == "table" and Raid.pointer(ev) then return true end
     -- (the DYNAMAX button in the game's own battle)
+    if DmaxPad and not Raid.active() then
+      local okD, tookD = pcall(DmaxPad.pointer, ev)
+      if okD and tookD then return true end
+    end
     if DmaxUi and not Raid.active() then
       local okP, took = pcall(DmaxUi.pointer, ev)
       if okP and took then return true end
@@ -647,7 +698,8 @@ return function(mod)
         end,
         available = function() return false end,
         open = function() return false end,
-        shown = function() return Raid.active() end,
+        -- (and while a Dynamax move is chosen with the Gear's battle on its screen: our pad has it)
+        shown = function() return Raid.active() or (DmaxPad ~= nil and DmaxPad.shown()) end,
       })
       if okReg and registered == true then
         mod.log:info("Kanto Gear stands down while a raid is up (store module, no tile)")
@@ -689,6 +741,6 @@ return function(mod)
     padSecond = function(on) padForced = on end, difficulty = function(v) difficultyForced = v end,
     moveInfo = function(v) moveInfoForced = v end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end,
-    dmax = Dmax, dmaxUi = DmaxUi, dmaxMode = function(v) dmaxForced = v end, band = BAND }
+    dmax = Dmax, dmaxUi = DmaxUi, dmaxPad = function() return DmaxPad end, dmaxMode = function(v) dmaxForced = v end, band = BAND }
   mod.log:info("Galar Rising ready (%d bosses)", #(Bosses.ORDER or {}))
 end

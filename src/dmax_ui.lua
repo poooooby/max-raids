@@ -1264,7 +1264,29 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     if Battle and type(Battle.update) == "function" and not Battle.__mrDmaxUi then
       Battle.__mrDmaxUi = true
       local update = Battle.update
+      -- (a press made for the battle - src/dmax_pad.lua's taps: the button reads as pressed for
+      -- this one update, every other read the real input's)
+      local proxyKey, proxyReal = nil, nil
+      local proxy = setmetatable({}, { __index = function(_, k)
+        local v = proxyReal and proxyReal[k]
+        if k == "wasPressed" then
+          return function(_, key) return key == proxyKey or (v ~= nil and v(proxyReal, key)) or false end
+        end
+        if type(v) == "function" then return function(_, ...) return v(proxyReal, ...) end end
+        return v
+      end })
       Battle.update = function(dt, game, ...)
+        local key = U.pending
+        U.pending = nil
+        if key and type(game) == "table" and type(game.input) == "table" then
+          proxyKey, proxyReal = key, game.input
+          game.input = proxy
+          local ok, a, b = pcall(Battle.update, dt, game, ...)
+          game.input = proxyReal
+          proxyKey, proxyReal = nil, nil
+          if not ok then error(a, 0) end
+          return a, b
+        end
         local sc = scene
         -- (the black lifting off after it, on the game's clock)
         if sc and sc.ended then sc.back = sc.back + (tonumber(dt) or 1 / 60) end
@@ -1279,6 +1301,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
             v.picBox, v.picBoxOf = U.measure(img), img
           end
         end
+        -- (the Max Move pad in Kanto Gear's place: its state, its second screen)
+        if U.padStep then pcall(U.padStep) end
         return a, b
       end
     end
@@ -1620,6 +1644,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     end
     G.setLineWidth(1)
     G.setColor(1, 1, 1, 1)
+  end
+
+  -- a button pressed for the battle at its next update (A, B, R: src/dmax_pad.lua's taps)
+  function U.press(key)
+    if type(key) ~= "string" then return false end
+    U.pending = key
+    return true
   end
 
   -- whether the DYNAMAX button shows now: a battle that allows it, the move menu, the one choosing
