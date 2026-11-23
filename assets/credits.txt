@@ -54,3 +54,6 @@ The Dynamax Band's picture, the Dynamax icon and the Dynamax pattern (assets/dma
 Lucidious89's [DBK] Dynamax plugin for Pokémon Essentials (Graphics/Items/DYNAMAXBAND.png,
 Graphics/Plugins/Dynamax/icon_dynamax.png, Graphics/Plugins/Dynamax/Patterns/dynamax.png). The
 Dynamax scene follows that plugin's Dynamax animation, drawn anew.
+The Dynamax scene's sounds are the ones that animation plays: Pokemon Essentials v21.1's Audio/SE
+(Battle recall, Battle throw, Anim/Psych Up, Anim/Earth1, Anim/Explosion3) and the Deluxe Battle
+Kit's Audio/SE/DX Action (Lucidious89).

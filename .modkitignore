@@ -73,3 +73,4 @@ tests/drivers/api_probe.lua
 tests/dmax_test.lua
 tests/drivers/dmax_probe.lua
 tests/drivers/gear_view_probe.lua
+tools/dmax_sound_atlas.py

@@ -137,6 +137,7 @@ return function(mod)
   local makeAchievements = loadSibling(mod, "src/achievements.lua")
   local AchievementData = loadSibling(mod, "data/raid_achievements.lua")
   local DmaxData = loadSibling(mod, "data/dmax_battle.lua")
+  local DmaxSounds = loadSibling(mod, "data/dmax_sounds.lua")
   local makeDmaxRules = loadSibling(mod, "src/dmax_rules.lua")
   local makeDmax = loadSibling(mod, "src/dmax.lua")
   local makeDmaxUi = loadSibling(mod, "src/dmax_ui.lua")
@@ -421,7 +422,7 @@ return function(mod)
       if not okB then mod.log:warn("dynamax: the Dynamax Band not registered (%s)", tostring(errB)) end
       local okU, ui = pcall(makeDmaxUi, mod, { dmax = Dmax, bosses = Bosses, sprites = Sprites, T = T,
         bigCry = function(species) return Raid and Raid.bigCry and Raid.bigCry(species) end,
-        fx = function() return Raid and Raid.Fx end })
+        fx = function() return Raid and Raid.Fx end, sounds = DmaxSounds })
       if okU and type(ui) == "table" then
         DmaxUi = ui
         Dmax.onDynamax = ui.onDynamax

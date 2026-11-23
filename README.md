@@ -109,7 +109,7 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - **Pixel art effects:** [pixelfx](https://github.com/patch-gg/pixelfx) by Patch, partly after Hugo
   Duprez's Sprite Fusion effects (MIT).
 - **Type icons:** [PokéSprite](https://github.com/msikma/pokesprite) by msikma and contributors.
-- **Dynamax Band, Dynamax icon and the giants' pattern:** from Lucidious89's [DBK] Dynamax plugin for Pokémon Essentials; the Dynamax scene follows its animation.
+- **Dynamax Band, Dynamax icon and the giants' pattern:** from Lucidious89's [DBK] Dynamax plugin for Pokémon Essentials; the Dynamax scene follows its animation, with the sounds it plays (from Pokémon Essentials and the Deluxe Battle Kit).
 - **Max Move power:** from Pokémon Showdown's data (MIT).
 
 Pokémon and their designs are © Nintendo / Creatures Inc. / GAME FREAK Inc. This is an unofficial

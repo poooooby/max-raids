@@ -376,6 +376,9 @@ local function body(game, log)
   end
   log(("  the Dynamax scene: %d frames, %d of %d shots"):format(sceneFrames, nextMark - 1, #marks))
   check(UI.scenes == scenes0 + 1, "the Dynamax scene played")
+  log(("  the scene's sounds: %d clips from the atlas (made in %.1f ms), the last %s"):format(UI.soundCount(),
+    UI.warmMs or -1, tostring(UI.lastClip)))
+  check(UI.soundCount() == 6 and UI.lastClip == "explosion3", "the scene played the plugin's own sounds")
   check(nextMark > #marks, "the scene went through all its parts")
   check(sceneHeld, "the battle held while it played")
   check((UI.patternDraws or 0) > 0, "the Dynamax pattern drawn (" .. tostring(UI.patternDraws) .. " passes)")

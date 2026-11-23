@@ -451,10 +451,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     SM.LAND = SM.DROP + S.DROP * S.DROP_HIT
   end
   -- its sounds: at a part's start, the game's own
+  -- its sounds, at a part's start: the [DBK] Dynamax plugin's own (the audio atlas, U.sounds: clip,
+  -- pitch as it plays them), else the game's own (se)
   local CUES = {
-    { at = "RECALL", se = "SE_BALL_OPEN" }, { at = "BAND", se = "SE_M_DETECT" }, { at = "SWELL", se = "SE_M_CHARGE" },
-    { at = "BURST", se = "SE_BALL_THROW" }, { at = "LAND", se = "SE_M_STRENGTH" }, { at = "OPEN", se = "SE_BALL_OPEN" },
-    { at = "GROW", se = "SE_M_MEGA_KICK" }, { at = "ROAR", se = "SE_M_EXPLOSION", cry = true },
+    { at = "RECALL", clip = "recall", se = "SE_BALL_OPEN" },
+    { at = "BAND", clip = "dx_action", se = "SE_M_DETECT" },
+    { at = "SWELL", clip = "psych_up", se = "SE_M_CHARGE" },
+    { at = "BURST", clip = "throw", se = "SE_BALL_THROW" },
+    { at = "LAND", clip = "earth1", se = "SE_M_STRENGTH" },
+    { at = "OPEN", clip = "recall", se = "SE_BALL_OPEN" },
+    { at = "GROW", clip = "psych_up", pitch = 0.6, se = "SE_M_MEGA_KICK" },
+    { at = "ROAR", clip = "explosion3", se = "SE_M_EXPLOSION", cry = true },
   }
   -- a ball's top colour by its item (Gen 3's numbers: Master 1 .. Premier 12)
   local BALL_RGB = {
@@ -561,6 +568,78 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
   local function playSe(name)
     if E.Audio and E.Audio.playSe and E.Se and E.Se[name] then pcall(E.Audio.playSe, E.Se[name]) end
   end
+
+  -- ------- the scene's sounds: one audio atlas (assets/dmax/sounds.ogg, data/dmax_sounds.lua - the
+  -- plugin's: Pokemon Essentials' and the Deluxe Battle Kit's), decoded once into one sound; a clip
+  -- plays from a copy of it, sought to its first sample and stopped past its last (the atlas's
+  -- silent gaps take a frame's overshoot), at the game's sound-effect volume
+
+  local snd = { tried = false, base = nil, playing = {} }
+  function U.warmSounds()
+    if snd.tried then return snd.ok end
+    snd.tried = true
+    local A = deps.sounds
+    if not (A and A.clips and love and love.sound and love.audio and mod.read) then return false end
+    local t0 = love.timer and love.timer.getTime() or 0
+    local ok, err = pcall(function()
+      local bytes = mod:read("assets/dmax/sounds.ogg")
+      if not bytes then error("assets/dmax/sounds.ogg missing") end
+      local whole = love.sound.newSoundData(love.filesystem.newFileData(bytes, "sounds.ogg"))
+      snd.base = love.audio.newSource(whole, "static")
+    end)
+    snd.ok = ok and snd.base ~= nil
+    U.warmMs = ((love.timer and love.timer.getTime() or 0) - t0) * 1000
+    if not snd.ok and mod.log then
+      mod.log:warn("dynamax: the scene's sounds failed (%s); the game's own instead", tostring(err))
+    end
+    return snd.ok
+  end
+  U.soundCount = function()
+    if not snd.base then return 0 end
+    local n = 0
+    for _ in pairs(deps.sounds.clips) do n = n + 1 end
+    return n
+  end
+  U.lastClip = nil   -- (drivers: the last clip played)
+  local function playClip(key, pitch)
+    local c = snd.base and deps.sounds.clips[key]
+    if not c then return false end
+    local Audio = E.Audio
+    if Audio and Audio._suspended then return true end
+    local ok, src = pcall(snd.base.clone, snd.base)
+    if not ok or not src then return false end
+    pcall(src.setVolume, src, min(1, (Audio and tonumber(Audio._sfxVolume)) or 1))
+    pcall(src.setPitch, src, pitch or 1)
+    pcall(src.seek, src, c.start, "samples")
+    pcall(src.play, src)
+    snd.playing[#snd.playing + 1] = { src = src, stop = c.start + c.count }
+    U.lastClip = key
+    return true
+  end
+  -- each update: a clip past its last sample stopped (and let go)
+  function U.tickClips()
+    local list = snd.playing
+    local i = 1
+    while i <= #list do
+      local p = list[i]
+      local okT, at = pcall(p.src.tell, p.src, "samples")
+      local okP, on = pcall(p.src.isPlaying, p.src)
+      if not okT or not (okP and on) or at >= p.stop then
+        pcall(p.src.stop, p.src)
+        table.remove(list, i)
+      else
+        i = i + 1
+      end
+    end
+  end
+  -- (the scene skipped or over early: what of it still sounds, stopped)
+  local function stopClips()
+    for i = #snd.playing, 1, -1 do
+      pcall(snd.playing[i].src.stop, snd.playing[i].src)
+      snd.playing[i] = nil
+    end
+  end
+
   local function stepScene(sc, dt)
     if scene ~= sc then return true end
     sc.t = sc.t + dt
@@ -568,12 +647,13 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     if sc.skip and sc.t < SM.OUT then
       sc.t = SM.OUT
       for i = 1, #CUES do sc.fired[i] = true end
+      stopClips()
     end
     pcall(prepScene, sc)
     for i, c in ipairs(CUES) do
       if not sc.fired[i] and sc.t >= SM[c.at] then
         sc.fired[i] = true
-        playSe(c.se)
+        if not (c.clip and playClip(c.clip, c.pitch)) then playSe(c.se) end
         if c.cry and deps.bigCry and sc.v.species then pcall(deps.bigCry, sc.v.species) end
       end
     end
@@ -601,6 +681,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     scene = sc
     U.scenes = U.scenes + 1
     pcall(sceneRes)
+    pcall(U.warmSounds)
     pcall(prepScene, sc)
     Anim._introTweening = (Anim._introTweening or 0) + 1
     local task
@@ -1303,6 +1384,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
         end
         -- (the Max Move pad in Kanto Gear's place: its state, its second screen)
         if U.padStep then pcall(U.padStep) end
+        if #snd.playing > 0 then U.tickClips() end
+        -- (the Dynamax scene's sounds made ready once a battle allows it: before the scene needs them)
+        if not snd.tried then
+          local st = E.Ui and E.Ui._st
+          if st and st.__mr and st.__mr.allowed then pcall(U.warmSounds) end
+        end
         return a, b
       end
     end
