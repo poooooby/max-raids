@@ -8,6 +8,21 @@
 --   SHOT_DIR=<dir> POKEPORT_GAME=emerald POKEPORT_VERSION=emerald \
 --   POKEPORT_DRIVER=mods/max_raids/tests/drivers/dmax_probe.lua love .
 
+-- a point of the game's UI (240 x 160) on the screen: where the Dynamax UI saw it go (WoobleView's
+-- uiMap), else the engine's fit
+local function uiScreen(Tt, nx, ny)
+  local ui = Tt.dmaxUi.uiNow
+  if ui and ui.live then
+    local Y = (ui.banded and ny < ui.split) and ui.topY or ui.y0
+    return ui.x0 + nx * ui.sx, Y + ny * ui.sy
+  end
+  local Viewport = require("src.render.GameViewport")
+  local Display = require("src.core.game3.display")
+  local vw, vh = Viewport.dimensions()
+  local sx, ox, oy, _, _, sy = Display.fit(vw, vh)
+  return ox + nx * sx, oy + ny * (sy or sx)
+end
+
 local function body(game, log)
   local U = require("tests.drivers.util")
   local dir = os.getenv("SHOT_DIR") or "/tmp/max_raids"
@@ -333,12 +348,8 @@ local function body(game, log)
   check(Dm.sel[0] == nil, "START: put back (START works as R)")
   -- a tap on the button picks it as R does (its middle, the game's 240 x 160 taken to the window)
   do
-    local Viewport = require("src.render.GameViewport")
-    local Display = require("src.core.game3.display")
-    local vw, vh = Viewport.dimensions()
-    local sx, ox, oy, _, _, sy = Display.fit(vw, vh)
     local B = Tt.dmaxUi.BUTTON
-    local wx, wy = ox + (B.x + B.w / 2) * sx, oy + (B.y + B.h / 2) * (sy or sx)
+    local wx, wy = uiScreen(Tt, B.x + B.w / 2, B.y + B.h / 2)
     game:pointerEvent("pressed", "mouse", "mouse", wx, wy)
     game:pointerEvent("released", "mouse", "mouse", wx, wy)
     U.wait(6)

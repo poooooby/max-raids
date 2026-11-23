@@ -52,6 +52,10 @@ return function(mod, deps)
     SPARK = { EVERY = { 0.05, 0.18 }, LIFE = { 0.09, 0.18 }, LEN = { 0.14, 0.3 }, SEGS = 6, JAG = 1.0,
       WIDTH = 0.01, MAX = 24, GLOW = { 0.9, 0.02, 0.14 }, GLOW_A = 0.75, CORE = { 1, 0.38, 0.52 } },
     RKEY_SRC = { 0, 0.30, 1, 0.40 },
+    -- the button and its R key when the battle draws no bar of its own (Kanto Gear's GEAR views):
+    -- across the middle of where the bar would be (its rows TOP..BOTTOM of the 160), drawn at the
+    -- window's resolution one screen pixel bigger a pixel than the game's (nearest, every pixel whole)
+    BAR = { TOP = 112, BOTTOM = 160 },
     -- the HP box's mark, inside the box: its top level with the HP bar's outline (barTop rows into the
     -- bar's tiles), midway across between the box's left edge (frameLeft into its picture: the
     -- same on every cart, singles and doubles) and the bar's; x / y the bar's place when none is drawn
@@ -1752,15 +1756,131 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     return Dm.sel[E.State.idOf(b)] == true or (Dm.can(st, b)) == true
   end
 
-  function U.drawOverlay(st)
-    local G = love.graphics
-    if E.Ui._mode ~= "moves" then return end
+  -- where the button and its R key stand, in the game's 240 x 160: their own place over the move
+  -- menu; when the battle draws no bar of its own (Ui.bottomUIVisible false: Kanto Gear's GEAR views
+  -- take its menus elsewhere), across the middle of where that bar would be, a pixel of theirs `n`
+  -- screen pixels where the game's are `s` (n = the next whole number past s: k = n / s bigger). The
+  -- pair's corner and scale; its pieces stand at BUTTON / RKEY's places from BUTTON's corner
+  local place = { x = 0, y = 0, k = 1, bar = false, n = 1, s = 1, ox = 0, oy = 0 }
+  -- where the game's UI went on the screen: WoobleView's uiMap (Fill Screen docks it at its own scale)
+  -- copied each HUD pass (taps come between frames, when its own is no longer good), else the
+  -- engine's own fit. A UI pixel (x, y) at screen (x0 + x * sx, Y + y * sy), Y the top band's
+  -- (topY) above `split` when banded, else y0
+  local ui = { live = false, x0 = 0, y0 = 0, sx = 1, sy = 1, topY = 0, split = 0, banded = false }
+  local function wvUiMap()
+    local okW, W = pcall(mod.find, mod, "gen3-hd-sprites")
+    local wx = okW and type(W) == "table" and W.exports or nil
+    if not (wx and type(wx.uiMap) == "function") then return nil end
+    local ok, m = pcall(wx.uiMap)
+    return ok and type(m) == "table" and m or nil
+  end
+  function U.noteUiMap()
+    local m = wvUiMap()
+    if m and tonumber(m.sx) and m.sx > 0 then
+      ui.live, ui.x0, ui.y0, ui.sx, ui.sy = true, m.x or 0, m.y or 0, m.sx, m.sy or m.sx
+      ui.topY, ui.split, ui.banded = m.topY or ui.y0, m.split or 0, m.banded == true
+    else
+      ui.live = false
+    end
+  end
+  -- the UI's mapping now: its scale and a UI row's screen y; false without one
+  local function uiMapping()
+    if ui.live then return true end
+    local okV, Viewport = pcall(require, "src.render.GameViewport")
+    local okD, Display = pcall(require, "src.core.game3.display")
+    if not (okV and okD and Viewport.dimensions and Display.fit) then return false end
+    local vw, vh = Viewport.dimensions()
+    local a, b2, c, _, _, f = Display.fit(vw, vh)
+    if not (a and a > 0) then return false end
+    ui.x0, ui.y0, ui.sx, ui.sy, ui.topY, ui.split, ui.banded = b2 or 0, c or 0, a, f or a, c or 0, 0, false
+    return true
+  end
+  local function uiRowY(y) return ((ui.banded and y < ui.split) and ui.topY or ui.y0) + y * ui.sy end
+  -- a screen point back to the UI's pixels (the lower band first: the button's rows)
+  local function screenToUi(x, y)
+    local ux = (x - ui.x0) / ui.sx
+    local uy = (y - ui.y0) / ui.sy
+    if ui.banded and uy < ui.split then uy = (y - ui.topY) / ui.sy end
+    return ux, uy
+  end
+  U.uiNow = ui
+  local cardAt, keyAt = { x = 0, y = 0, w = 0, h = 0 }, { x = 0, y = 0, w = 0, h = 0 }
+  function U.buttonPlace()
+    engine()
+    local Ui = E.Ui
+    local hidden = false
+    if Ui and Ui.bottomUIVisible then
+      local ok, v = pcall(Ui.bottomUIVisible)
+      hidden = ok and v == false
+    end
+    local B, R, A = U.BUTTON, U.RKEY, U.BAR
+    if hidden and uiMapping() then
+      local sx = ui.sx
+      local n = floor(sx + 1e-6) + 1
+      local k = n / sx
+      local w, h = (R.x + R.w - B.x) * k, B.h * k
+      -- (its corner on a whole screen pixel, where the UI's bar rows went)
+      place.x, place.y = 120 - w / 2, (A.TOP + A.BOTTOM) / 2 - h / 2
+      local wx = floor(ui.x0 + place.x * sx + 0.5)
+      local wy = floor(uiRowY(place.y) + 0.5)
+      place.k, place.bar, place.n, place.s, place.ox, place.oy = k, true, n, sx, wx, wy
+    else
+      place.x, place.y, place.k, place.bar = B.x, B.y, 1, false
+    end
+    return place
+  end
+
+  -- whether the button shows for the one choosing (and whether it is picked): nil when it does not
+  local function buttonOn(st)
+    if not (st and E.Ui and E.Ui._mode == "moves") then return nil end
     local b = activeBattler(st)
-    if not b or b.__mrDmax then return end
+    if not b or b.__mrDmax then return nil end
     local id = E.State.idOf(b)
     local on = Dm.sel[id] and true or false
-    if not on and not Dm.can(st, b) then return end
-    local B = U.BUTTON
+    if not on and not Dm.can(st, b) then return nil end
+    return on
+  end
+  local paintButton
+  function U.drawOverlay(st)
+    local on = buttonOn(st)
+    if on == nil then return end
+    local P0 = U.buttonPlace()
+    -- (no bar: drawn at the window's resolution instead - U.drawButtonHud)
+    if P0.bar then return end
+    local G = love.graphics
+    G.push()
+    G.translate(P0.x, P0.y)
+    paintButton(G, on)
+    G.pop()
+    G.setColor(1, 1, 1, 1)
+  end
+  -- render.hud (main.lua): the bar's place, at the window's resolution - a pixel of it n screen
+  -- pixels, nearest
+  function U.drawButtonHud()
+    engine()
+    U.noteUiMap()
+    local Ui = E.Ui
+    local st = Ui and Ui._st
+    if not (st and st.__mr and st.__mr.allowed and E.Battle and E.Battle.isActive and E.Battle.isActive()) then return end
+    if scene and not scene.ended then return end
+    local on = buttonOn(st)
+    if on == nil then return end
+    local P0 = U.buttonPlace()
+    if not P0.bar then return end
+    local G = love.graphics
+    G.push("all")
+    G.origin()
+    G.setScissor()
+    G.setShader()
+    G.translate(P0.ox, P0.oy)
+    G.scale(P0.n)
+    paintButton(G, on)
+    G.pop()
+  end
+  paintButton = function(G, on)
+    local B0 = U.BUTTON
+    local B = cardAt
+    B.x, B.y, B.w, B.h = 0, 0, B0.w, B0.h
     G.setColor(0, 0, 0, 0.55)
     G.rectangle("fill", B.x + 1, B.y + 1, B.w, B.h, 3, 3)
     if on then G.setColor(0.93, 0.2, 0.42, 1) else G.setColor(0.55, 0.08, 0.16, 1) end
@@ -1787,7 +1907,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       E.Font.draw(text, floor(tx + 0.5), B.y + U.TEXT_Y, { small = true, colors = E.Font.COLOR.WHITE })
     end
     -- the R shoulder button beside it, as the touch pad draws its own: a soft pill and the key cap
-    local R = U.RKEY
+    local R0 = U.RKEY
+    local R = keyAt
+    R.x, R.y, R.w, R.h = R0.x - B0.x, R0.y - B0.y, R0.w, R0.h
     local key = rKeyImage()
     if key then
       local rh = R.h * 1.08
@@ -1826,16 +1948,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     local st = Ui and Ui._st
     if not (st and st.__mr and st.__mr.allowed and Ui._mode == "moves") then return false end
     if not (E.Battle and E.Battle.isActive and E.Battle.isActive()) then return false end
-    local okV, Viewport = pcall(require, "src.render.GameViewport")
-    local okD, Display = pcall(require, "src.core.game3.display")
-    if not (okV and okD and Viewport.dimensions and Display.fit) then return false end
-    local vw, vh = Viewport.dimensions()
-    local sx, ox, oy, _, _, sy = Display.fit(vw, vh)
-    if not (sx and sx > 0) then return false end
-    local nx, ny = (ev.gameX - ox) / sx, (ev.gameY - oy) / (sy or sx)
+    if not uiMapping() then return false end
+    local nx, ny = screenToUi(ev.gameX, ev.gameY)
+    -- (in the pair's own units: its place and scale this frame)
+    local P0 = U.buttonPlace()
+    local lx, ly = (nx - P0.x) / P0.k, (ny - P0.y) / P0.k
     local B, R = U.BUTTON, U.RKEY
-    local onCard = nx >= B.x and ny >= B.y and nx <= B.x + B.w and ny <= B.y + B.h
-    local onKey = nx >= R.x and ny >= R.y and nx <= R.x + R.w and ny <= R.y + R.h
+    local kx, ky = R.x - B.x, R.y - B.y
+    local onCard = lx >= 0 and ly >= 0 and lx <= B.w and ly <= B.h
+    local onKey = lx >= kx and ly >= ky and lx <= kx + R.w and ly <= ky + R.h
     if not (onCard or onKey) then return false end
     local b = activeBattler(st)
     if not b or b.__mrDmax then return false end

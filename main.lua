@@ -612,6 +612,9 @@ return function(mod)
       -- place on this screen)
       local okS, errS = pcall(DmaxUi.drawScene, viewport)
       if not okS then okC, errC = false, errS end
+      -- (the DYNAMAX button where the battle's bar would be, when it draws none: at this resolution)
+      local okB, errB = pcall(DmaxUi.drawButtonHud)
+      if not okB then okC, errC = false, errB end
       if DmaxPad then
         local okD, errD = pcall(DmaxPad.drawMain, viewport)
         if not okD then okC, errC = false, errD end

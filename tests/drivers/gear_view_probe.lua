@@ -10,6 +10,21 @@
 --   POKEPORT_DRIVER=mods/max_raids/tests/drivers/gear_view_probe.lua love .
 local U = require("tests.drivers.util")
 
+-- a point of the game's UI (240 x 160) on the screen: where the Dynamax UI saw it go (WoobleView's
+-- uiMap), else the engine's fit
+local function uiScreen(Tt, nx, ny)
+  local ui = Tt.dmaxUi.uiNow
+  if ui and ui.live then
+    local Y = (ui.banded and ny < ui.split) and ui.topY or ui.y0
+    return ui.x0 + nx * ui.sx, Y + ny * ui.sy
+  end
+  local Viewport = require("src.render.GameViewport")
+  local Display = require("src.core.game3.display")
+  local vw, vh = Viewport.dimensions()
+  local sx, ox, oy, _, _, sy = Display.fit(vw, vh)
+  return ox + nx * sx, oy + ny * (sy or sx)
+end
+
 local function body(game, log)
   local dir = os.getenv("SHOT_DIR") or "/tmp/max_raids"
   local fails = 0
@@ -122,6 +137,35 @@ local function body(game, log)
   check(toMoves(), "the move menu")
   U.wait(10)
   check(not P.shown(), "no pad in the plain move menu (the Gear keeps its screen)")
+  -- (the DYNAMAX button: over the move menu while the battle draws its bar; with no bar - as the
+  -- Gear's GEAR views leave it, stood in for here - across the bar's middle, 1.5x; a tap there picks)
+  do
+    local UI = Tt.dmaxUi
+    local p0 = UI.buttonPlace()
+    check(not p0.bar and p0.x == UI.BUTTON.x and p0.y == UI.BUTTON.y and p0.k == 1,
+      "the DYNAMAX button over the move menu while the bar is drawn")
+    shot("v00a_button_menu")
+    local vis = Ui.bottomUIVisible
+    Ui.bottomUIVisible = function() return false end
+    U.wait(6)
+    local pl = UI.buttonPlace()
+    log(("  no bar: the button at %.1f,%.1f x%.2f (a pixel %d screen pixels, the game's %.2f)"):format(pl.x, pl.y, pl.k,
+      pl.n, pl.s))
+    check(pl.bar and pl.n == math.floor(pl.s + 1e-6) + 1 and pl.y > 112,
+      "no bar: the button across the bar's middle, one screen pixel bigger a pixel")
+    shot("v00b_button_bar")
+    local B = UI.BUTTON
+    local nx, ny = pl.x + B.w * pl.k / 2, pl.y + B.h * pl.k / 2
+    local wx, wy = uiScreen(Tt, nx, ny)
+    log(("  the tap at %.0f,%.0f (the UI mapped by %s)"):format(wx, wy, UI.uiNow.live and "WoobleView" or "the engine's fit"))
+    game:pointerEvent("pressed", "mouse", "mouse", wx, wy)
+    game:pointerEvent("released", "mouse", "mouse", wx, wy)
+    U.wait(6)
+    check(Dm.sel[0] == true, "no bar: a tap on it there picks Dynamax")
+    Dm.sel[0] = nil
+    Ui.bottomUIVisible = vis
+    U.wait(6)
+  end
   U.tap(game, "r")
   U.wait(10)
   check(Dm.sel[0] == true and P.shown(), "R: Dynamax picked, our pad up in the Gear's place")
