@@ -9,6 +9,11 @@
 --   everything else          the game's (moving, L / R and the edges switch boxes, B or CLOSE BOX close)
 --   Pick = pc_pick(mod, { T }) ; Pick.open(session, { onSelect = function(mon), onClose = function() })
 --   Pick.isOpen() ; Pick.state() (drivers) ; Pick.press(key) (drivers: a key through the filter)
+-- With OmniUI's overlay on (1Jamie's omni_ui) the box is its own screen, moved by its own controller
+-- (box_storage_ui.__storageController): A follows that controller's cursor, A on its party row or a
+-- Pokemon there does nothing (no action menu: no move, no release), and our menu is drawn over its
+-- screen in its own style (Pick.omniInstall: its public onPostRender("storage")). The summary is
+-- opened on copies, so a summary that reorders moves (OmniUI's does) never touches the box.
 
 return function(mod, deps)
   -- the words' language (src/i18n.lua; deps.T): English as it is without it
@@ -39,6 +44,7 @@ return function(mod, deps)
   Pick.ACTIONS = { T.mark("SELECT"), T.mark("SUMMARY"), T.mark("BACK") }
   local st = nil   -- { session, onSelect, onClose, menu = { cursor, mon, box, slot } | nil, summary }
   local origInput, origDraw = nil, nil
+  local omniIsOn = nil   -- (OmniUI's overlay on now: Pick.omniInstall)
 
   local function se(name)
     local id = SeIds and SeIds[name]
@@ -59,7 +65,19 @@ return function(mod, deps)
     return box and box.mons[slot], storage and storage.currentBox or 1
   end
 
-  -- the game's summary of the boxed Pokemon (the box's others with it, L / R through them), read only
+  -- a Pokemon's copy for the summary (tables copied whole, metatables kept)
+  local function copyOf(v, seen)
+    if type(v) ~= "table" then return v end
+    seen = seen or {}
+    if seen[v] then return seen[v] end
+    local c = {}
+    seen[v] = c
+    for k, x in pairs(v) do c[copyOf(k, seen)] = copyOf(x, seen) end
+    return setmetatable(c, getmetatable(v))
+  end
+
+  -- the game's summary of the boxed Pokemon (the box's others with it, L / R through them), read
+  -- only: on copies of them
   local function summary()
     local m = st.menu
     local storage = Storage and Storage.ensure(st.session)
@@ -69,7 +87,7 @@ return function(mod, deps)
     for s = 1, (Storage.IN_BOX_COUNT or 30) do
       local mon = box.mons[s]
       if mon then
-        mons[#mons + 1] = mon
+        mons[#mons + 1] = copyOf(mon)
         if s == m.slot then at = #mons end
       end
     end
@@ -105,6 +123,24 @@ return function(mod, deps)
       end
       return
     end
+    -- (OmniUI's controller holds the cursor: its box row picks, its party row and CLOSE / the
+    -- box's name are its own; select and start never reach it)
+    local ctrl = omniIsOn and omniIsOn() == true and Box.__storageController or nil
+    if type(ctrl) == "table" and ctrl.mode ~= nil then
+      if input:wasPressed("a") and ctrl.mode == "browse" then
+        if ctrl.zone == "box" then
+          local mon, boxId = boxedAt(tonumber(ctrl.boxSlot) or 0)
+          if mon then
+            st.menu = { cursor = 1, mon = mon, box = boxId, slot = ctrl.boxSlot }
+            se("SE_SELECT")
+          end
+          return
+        elseif ctrl.zone == "party" then
+          return
+        end
+      end
+      return origInput(without(input, BLOCK_MENUS))
+    end
     if Box.mode ~= "browse" then return origInput(input) end
     local slot = Box.cursorSlot
     if input:wasPressed("a") then
@@ -137,6 +173,53 @@ return function(mod, deps)
     end)
   end
 
+  -- OmniUI: our menu over its box screen, in its style (a card, its buttons), the Pokemon's name
+  -- on top; drawn after its screen through its public onPostRender
+  local omniLayout = nil
+  local cardOpts = { borderWidth = 2 }
+  local nameOpts = { font = "title", bold = true }
+  local btnOpts = {}
+  local NO_COLORS = {}
+  Pick.omniDraws = 0
+  local function omniDraw(_, _, vw, vh, theme)
+    if not (st and st.menu and omniLayout) then return end
+    local L = omniLayout
+    local C = type(theme) == "table" and (theme.colors or theme) or NO_COLORS
+    local n = #Pick.ACTIONS
+    local bw, bh, gap, pad, head = 200, 40, 8, 16, 36
+    local w = bw + pad * 2
+    local h = head + n * bh + (n - 1) * gap + pad * 2
+    local x = math.floor(((tonumber(vw) or 800) - w) / 2)
+    local y = math.floor(((tonumber(vh) or 600) - h) / 2)
+    cardOpts.color, cardOpts.borderColor = C.surface, C.accent or C.border
+    L.drawCard(x, y, w, h, cardOpts)
+    local m = st.menu
+    if m.name == nil then
+      m.name = ""
+      local Pokemon = engine("src.core.game3.pokemon")
+      if Pokemon and Pokemon.displayName then
+        local okN, s = pcall(Pokemon.displayName, m.mon)
+        if okN and type(s) == "string" then m.name = s end
+      end
+    end
+    nameOpts.color = C.heading
+    L.drawText(m.name, x + pad, y + pad, nameOpts)
+    for i, act in ipairs(Pick.ACTIONS) do
+      local by = y + pad + head + (i - 1) * (bh + gap)
+      btnOpts.kind, btnOpts.selected = i == 1 and "primary" or "ghost", i == m.cursor
+      L.drawButton(x + pad, by, bw, bh, T(act), btnOpts)
+    end
+    Pick.omniDraws = Pick.omniDraws + 1
+  end
+  function Pick.omniInstall(api, isOn)
+    if type(api) ~= "table" or type(api.onPostRender) ~= "function" or type(api.Layout) ~= "table" then
+      return false
+    end
+    omniLayout, omniIsOn = api.Layout, isOn
+    api.onPostRender("storage", "max_raids_pick", omniDraw)
+    return true
+  end
+
   function Pick.available() return Box ~= nil and Box.show ~= nil and Storage ~= nil end
   function Pick.isOpen() return st ~= nil end
   function Pick.state() return st end
@@ -151,6 +234,8 @@ return function(mod, deps)
       -- (the game closed it: B, CLOSE BOX, or our SELECT)
       if st ~= open then return end
       Box.handleInput, Box.draw = origInput, origDraw
+      -- (OmniUI's controller let go as its own close does: the next opening starts afresh)
+      if Box.__storageController ~= nil then Box.__storageController = nil end
       st = nil
       if open.onClose then open.onClose(open.picked) end
     end })

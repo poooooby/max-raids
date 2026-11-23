@@ -56,6 +56,9 @@ return function(mod, deps)
     -- across the middle of where the bar would be (its rows TOP..BOTTOM of the 160), drawn at the
     -- window's resolution one screen pixel bigger a pixel than the game's (nearest, every pixel whole)
     BAR = { TOP = 112, BOTTOM = 160 },
+    -- with OmniUI's battle deck (src/dmax_ui.lua's OmniUI section): the button's pixel in window
+    -- pixels (its deck is laid out in window pixels, not the game's), the mark round a giant's card
+    OMNI_N = 2, OMNI_RIM = { 0.93, 0.2, 0.42, 1 }, OMNI_ICON = 18,
     -- the HP box's mark, inside the box: its top level with the HP bar's outline (barTop rows into the
     -- bar's tiles), midway across between the box's left edge (frameLeft into its picture: the
     -- same on every cart, singles and doubles) and the bar's; x / y the bar's place when none is drawn
@@ -405,7 +408,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
 
   -- ------- the move menu on the Max Moves
 
-  local cache = { mon = nil, base = {}, max = {}, saved = {} }
+  local cache = { mon = nil, base = {}, max = {}, saved = {}, power = {} }
   local function activeBattler(st)
     if not st then return nil end
     if st.double then return E.State.battler(st, E.Ui._active or 0) end
@@ -424,6 +427,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       cache.mon = mon
       for i = 1, 4 do cache.base[i] = mon.moves[i] end
       Dm.maxMovesOf(b, cache.max)
+      for i = 1, 4 do
+        local mv = mon.moves[i]
+        local p = nil
+        if mv and mv ~= 0 and mv ~= "" then p = select(2, Dm.maxOf(b, mv)) end
+        cache.power[i] = p or false
+      end
     end
     return b, cache.max
   end
@@ -1761,7 +1770,121 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
   -- take its menus elsewhere), across the middle of where that bar would be, a pixel of theirs `n`
   -- screen pixels where the game's are `s` (n = the next whole number past s: k = n / s bigger). The
   -- pair's corner and scale; its pieces stand at BUTTON / RKEY's places from BUTTON's corner
-  local place = { x = 0, y = 0, k = 1, bar = false, n = 1, s = 1, ox = 0, oy = 0 }
+  local place = { x = 0, y = 0, k = 1, bar = false, n = 1, s = 1, ox = 0, oy = 0, w = 0, h = 0, omni = false }
+
+  -- ------- OmniUI (1Jamie's omni_ui, optional): with its overlay on it hides the battle's bar and HP
+  -- boxes and draws its own deck and cards over the battle, after every other mod's render.hud. So,
+  -- while it is on (U.omniInstall at game.ready, from main):
+  --   its move cards: they read the Pokemon's own moves as its draw runs, so main's render.hud wrap
+  --     outside its own (U.omniSwapIn / U.omniSwapOut) puts the Max Moves in their place for that
+  --     draw, each with its own Max power on the move's row for the while (the chosen one last)
+  --   the DYNAMAX button and the Dynamax scene: drawn after it, from that same wrap (U.buttonPlace's
+  --     omni place: in its move details card)
+  --   a giant's card: framed red with the Dynamax icon, through its public registerBattlerBadge
+  local omni = { api = nil, isOn = nil,
+    vp = { gameX = 0, gameY = 0, gameWidth = 240, gameHeight = 160, width = 240, height = 160 } }
+  function U.omniOn()
+    return omni.api ~= nil and omni.isOn ~= nil and omni.isOn() == true
+  end
+  -- (its deck laid out from this HUD pass's viewport: copied, as taps come between frames)
+  function U.noteViewport(viewport)
+    if type(viewport) ~= "table" then return end
+    local vp = omni.vp
+    vp.width = tonumber(viewport.width) or vp.width
+    vp.height = tonumber(viewport.height) or vp.height
+    vp.gameX = tonumber(viewport.gameX) or 0
+    vp.gameY = tonumber(viewport.gameY) or 0
+    vp.gameWidth = tonumber(viewport.gameWidth) or vp.width
+    vp.gameHeight = tonumber(viewport.gameHeight) or vp.height
+  end
+  local oSaved, oRows, oOld = {}, {}, {}
+  local oMon, oN = nil, 0
+  local function setPower(rom, n, p)
+    local row = n and rom[n]
+    if not (row and p) then return end
+    oN = oN + 1
+    oRows[oN], oOld[oN] = row, row.power
+    row.power = p
+  end
+  function U.omniSwapIn()
+    engine()
+    oMon, oN = nil, 0
+    local st = E.Ui and E.Ui._st
+    if not (st and st.__mr and st.__mr.allowed and moveMode()) then return false end
+    local vb, list = maxView(st)
+    if not vb then return false end
+    local mon = vb.mon
+    for i = 1, 4 do oSaved[i] = mon.moves[i]; mon.moves[i] = list[i] end
+    oMon = mon
+    local rom = E.Moves and E.Moves._rom
+    if type(rom) == "table" then
+      local sel = tonumber(E.Ui._moveIndex) or 1
+      for i = 1, 4 do
+        if i ~= sel then setPower(rom, tonumber(list[i]), cache.power[i]) end
+      end
+      setPower(rom, tonumber(list[sel]), cache.power[sel])
+    end
+    return true
+  end
+  function U.omniSwapOut()
+    for i = oN, 1, -1 do
+      oRows[i].power = oOld[i]
+      oRows[i] = nil
+    end
+    oN = 0
+    if oMon then
+      for i = 1, 4 do oMon.moves[i] = oSaved[i] end
+      oMon = nil
+    end
+  end
+  -- a card's mark: the giant on that side (its species, as the card names no battler) drawn giant
+  local function giantFor(side, species)
+    local foe = side == "enemy"
+    for _, v in pairs(Dm.vis) do
+      if (v.foe == true) == foe and v.species == species and (v.k or 1) > 1.01 then return v end
+    end
+    return nil
+  end
+  U.omniMarks = 0
+  local function omniBadge(side, slot, x, y, theme)
+    if type(slot) ~= "table" or slot.active == false or not (tonumber(x) and tonumber(y)) then return end
+    if not giantFor(side, slot.species) then return end
+    local G = love.graphics
+    -- (its card's size as OmniUI's BattleRenderer makes it)
+    local vw, vh = G.getDimensions()
+    local w = min(260, max(160, floor(vw * 0.44)))
+    local compact = vw < 480 or vh < 380
+    local h = side == "enemy" and (compact and 52 or 62) or (compact and 64 or 76)
+    local rad = 12
+    if type(theme) == "table" and type(theme.metrics) == "table" and type(theme.metrics.radius) == "table" then
+      rad = tonumber(theme.metrics.radius.card) or rad
+    end
+    local lw = G.getLineWidth()
+    G.setLineWidth(2)
+    G.setColor(U.OMNI_RIM)
+    G.rectangle("line", x - 1, y - 1, w + 2, h + 2, rad, rad)
+    G.setLineWidth(lw)
+    local img = iconImage()
+    if img then
+      local s = U.OMNI_ICON
+      G.setColor(1, 1, 1, 1)
+      G.draw(img, x + w - s * 0.6, y - s * 0.4, 0, s / img:getWidth(), s / img:getHeight())
+    end
+    G.setColor(1, 1, 1, 1)
+    U.omniMarks = U.omniMarks + 1
+  end
+  function U.omniInstall(api, isOn)
+    if type(api) ~= "table" then return false end
+    omni.api, omni.isOn = api, isOn
+    if type(api.registerBattlerBadge) == "function" and not omni.badges then
+      omni.badges = true
+      api.registerBattlerBadge({ id = "max_raids_dynamax_enemy", side = "enemy",
+        render = function(slot, x, y, theme) omniBadge("enemy", slot, x, y, theme) end })
+      api.registerBattlerBadge({ id = "max_raids_dynamax_player", side = "player",
+        render = function(slot, x, y, theme) omniBadge("player", slot, x, y, theme) end })
+    end
+    return true
+  end
   -- where the game's UI went on the screen: WoobleView's uiMap (Fill Screen docks it at its own scale)
   -- copied each HUD pass (taps come between frames, when its own is no longer good), else the
   -- engine's own fit. A UI pixel (x, y) at screen (x0 + x * sx, Y + y * sy), Y the top band's
@@ -1814,6 +1937,28 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       hidden = ok and v == false
     end
     local B, R, A = U.BUTTON, U.RKEY, U.BAR
+    place.omni = false
+    if U.omniOn() then
+      -- (OmniUI's battle deck: at its move details card's right, halfway down - beside its short type
+      -- and power rows, clear of the move's name and its description -, as its BattleRenderer lays
+      -- the deck out over the game's bottom 48 rows; over the deck's top in its stacked portrait one;
+      -- a pixel of the pair OMNI_N window pixels, nearest)
+      local vp = omni.vp
+      local gx, gy, gw, gh = vp.gameX, vp.gameY, vp.gameWidth, vp.gameHeight
+      local n = U.OMNI_N
+      local pw, ph = (R.x + R.w - B.x) * n, B.h * n
+      local bandY = gy + floor(gh * 112 / 160)
+      local ox, oy
+      if (vp.width / max(1, vp.height)) < 0.95 and gw < 520 then
+        ox, oy = gx + floor((gw - pw) / 2), bandY - ph - 8
+      else
+        local cx, cw = gx + 10, gw - 20
+        ox, oy = cx + floor(cw * 0.48) - 14 - pw, bandY + floor((gy + gh - bandY - ph) / 2)
+      end
+      place.x, place.y, place.k, place.bar, place.n, place.s = 0, 0, 1, true, n, n
+      place.ox, place.oy, place.w, place.h, place.omni = floor(ox + 0.5), floor(oy + 0.5), pw, ph, true
+      return place
+    end
     if hidden and uiMapping() then
       local sx = ui.sx
       local n = floor(sx + 1e-6) + 1
@@ -1828,6 +1973,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       place.x, place.y, place.k, place.bar = B.x, B.y, 1, false
     end
     return place
+  end
+
+  -- (drivers) the middle of the DYNAMAX card on the screen, wherever it is drawn now
+  function U.buttonScreen()
+    local P0 = U.buttonPlace()
+    local B = U.BUTTON
+    if P0.bar then return P0.ox + B.w / 2 * P0.n, P0.oy + B.h / 2 * P0.n end
+    if not uiMapping() then return nil end
+    return ui.x0 + (B.x + B.w / 2) * ui.sx, uiRowY(B.y + B.h / 2)
   end
 
   -- whether the button shows for the one choosing (and whether it is picked): nil when it does not
@@ -1948,11 +2102,18 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     local st = Ui and Ui._st
     if not (st and st.__mr and st.__mr.allowed and Ui._mode == "moves") then return false end
     if not (E.Battle and E.Battle.isActive and E.Battle.isActive()) then return false end
-    if not uiMapping() then return false end
-    local nx, ny = screenToUi(ev.gameX, ev.gameY)
-    -- (in the pair's own units: its place and scale this frame)
     local P0 = U.buttonPlace()
-    local lx, ly = (nx - P0.x) / P0.k, (ny - P0.y) / P0.k
+    local lx, ly
+    if P0.omni then
+      -- (OmniUI's deck: the pair in window pixels, OMNI_N to one of its own)
+      lx, ly = ((tonumber(ev.x) or -1) - P0.ox) / P0.n, ((tonumber(ev.y) or -1) - P0.oy) / P0.n
+    else
+      if not uiMapping() then return false end
+      local nx, ny = screenToUi(ev.gameX, ev.gameY)
+      -- (in the pair's own units: its place and scale this frame)
+      P0 = U.buttonPlace()
+      lx, ly = (nx - P0.x) / P0.k, (ny - P0.y) / P0.k
+    end
     local B, R = U.BUTTON, U.RKEY
     local kx, ky = R.x - B.x, R.y - B.y
     local onCard = lx >= 0 and ly >= 0 and lx <= B.w and ly <= B.h

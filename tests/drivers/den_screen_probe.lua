@@ -7,6 +7,11 @@
 --   POKEPORT_DRIVER=mods/max_raids/tests/drivers/den_screen_probe.lua love .
 
 local function body(game, log)
+  -- (PROBE_OMNI=0: OmniUI's overlay off for this run only - the loader's option, read live)
+  if os.getenv("PROBE_OMNI") == "0" and game.mods and game.mods.modOptions then
+    game.mods.modOptions.omni_ui = game.mods.modOptions.omni_ui or {}
+    game.mods.modOptions.omni_ui.overlay = false
+  end
   local U = require("tests.drivers.util")
   local dir = os.getenv("SHOT_DIR") or "/tmp/max_raids"
   local function waitFor(pred, limit)
@@ -85,6 +90,34 @@ local function body(game, log)
     waitFor(function() local B = require("src.ui.game3.box_storage_ui"); return B.open and not B.isPresentationBusy() end, 300)
     U.wait(20)
     shot("p06_pc")
+    -- (the D-pad as the player presses it: where the game's cursor goes, and OmniUI's when it draws
+    -- the boxes itself; put back on slot 1 after)
+    do
+      local B = require("src.ui.game3.box_storage_ui")
+      local function where(label)
+        local ctrl = B.__storageController
+        log(("  PC %s: the game's cursor %s; OmniUI's %s"):format(label, tostring(B.cursorSlot),
+          ctrl and ("%s %s"):format(tostring(ctrl.zone), tostring(ctrl.boxSlot)) or "none"))
+      end
+      where("opened")
+      U.tap(game, "right"); U.wait(6)
+      where("after right")
+      -- (A where the player sees the cursor: the second boxed one, with OmniUI or without)
+      where("before A")
+      U.tap(game, "a")
+      waitFor(function() return Pick.state() and Pick.state().menu ~= nil end, 60)
+      where("after A")
+      U.wait(4)
+      local m = Pick.state() and Pick.state().menu
+      log(("  PC: A's menu for slot %s, %s"):format(tostring(m and m.slot), tostring(m and m.mon and m.mon.species)))
+      check(m ~= nil and m.mon == boxed[2], "A on the second boxed Pokemon: its menu, for it")
+      shot("p06b_pc_second")
+      log("  PC: our menu drawn on OmniUI's screen " .. tostring(Pick.omniDraws) .. " times")
+      U.tap(game, "b"); U.wait(6)
+      check(Pick.state() and Pick.state().menu == nil, "B: its menu closes, the PC stays")
+      U.tap(game, "left"); U.wait(6)
+      where("back")
+    end
     -- (the cursor starts on slot 1, where the first boxed one is)
     Pick.press("a"); U.wait(4)
     check(Pick.state() and Pick.state().menu ~= nil, "A on a boxed Pokemon: SELECT / SUMMARY / BACK")
@@ -95,6 +128,15 @@ local function body(game, log)
     waitFor(function() return Pick.state() and Pick.state().summary end, 120)
     U.wait(40)
     check(Pick.state() and Pick.state().summary, "SUMMARY: the game's summary")
+    do
+      local sm = nil
+      for _, name in ipairs({ "src.ui.game3.summary_menu", "src.ui.game3.rse.summary_menu" }) do
+        local S = package.loaded[name]
+        if not sm and type(S) == "table" and S._party then sm = S._party[S._cursor or 1] end
+      end
+      check(sm ~= nil and sm ~= boxed[1] and sm.species == boxed[1].species,
+        "the summary shows a copy of the boxed Pokemon (a move swap there cannot reach the box)")
+    end
     shot("p08_pc_summary")
     U.tap(game, "b")
     waitFor(function() return Pick.state() and not Pick.state().summary end, 300)

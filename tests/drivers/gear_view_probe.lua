@@ -26,6 +26,12 @@ local function uiScreen(Tt, nx, ny)
 end
 
 local function body(game, log)
+  -- (OmniUI's overlay off for this run - the loader's option, read live - as these checks are of the
+  -- battle's own bar; PROBE_OMNI=1 leaves it as set)
+  if os.getenv("PROBE_OMNI") ~= "1" and game.mods and game.mods.modOptions then
+    game.mods.modOptions.omni_ui = game.mods.modOptions.omni_ui or {}
+    game.mods.modOptions.omni_ui.overlay = false
+  end
   local dir = os.getenv("SHOT_DIR") or "/tmp/max_raids"
   local fails = 0
   local function check(ok, what) if not ok then fails = fails + 1 end; log((ok and "ok   " or "FAIL ") .. what) end

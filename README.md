@@ -59,6 +59,9 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - 📟 **Kanto Gear's GEAR battle view:** while you choose a Dynamax move, a Max Move pad takes the
   Gear's screen (its second screen, its half of the window, or the whole screen, as its Display Mode
   is set), then hands it back.
+- 🖥️ **OmniUI:** with its modern battle screen, the DYNAMAX button sits in its move details, its move
+  cards show the Max Moves with their power, and a Dynamaxed Pokémon's card is framed red. The den's
+  PC works on its storage screen.
 - 👑 **Leaders Dynamax too:** once you have the band, Gym Leaders, the Elite Four, the Champion and
   rivals Dynamax their last Pokémon, Gigantamaxing it when it has a Gigantamax form.
 - 🎮 **One screen or two:** the battle menu can go on a second screen, following Kanto Gear's Display

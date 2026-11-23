@@ -10,22 +10,12 @@
 --   SHOT_DIR=<dir> POKEPORT_GAME=emerald POKEPORT_VERSION=emerald \
 --   POKEPORT_DRIVER=mods/max_raids/tests/drivers/dmax_probe.lua love .
 
--- a point of the game's UI (240 x 160) on the screen: where the Dynamax UI saw it go (WoobleView's
--- uiMap), else the engine's fit
-local function uiScreen(Tt, nx, ny)
-  local ui = Tt.dmaxUi.uiNow
-  if ui and ui.live then
-    local Y = (ui.banded and ny < ui.split) and ui.topY or ui.y0
-    return ui.x0 + nx * ui.sx, Y + ny * ui.sy
-  end
-  local Viewport = require("src.render.GameViewport")
-  local Display = require("src.core.game3.display")
-  local vw, vh = Viewport.dimensions()
-  local sx, ox, oy, _, _, sy = Display.fit(vw, vh)
-  return ox + nx * sx, oy + ny * (sy or sx)
-end
-
 local function body(game, log)
+  -- (PROBE_OMNI=0: OmniUI's overlay off for this run only - the loader's option, read live)
+  if os.getenv("PROBE_OMNI") == "0" and game.mods and game.mods.modOptions then
+    game.mods.modOptions.omni_ui = game.mods.modOptions.omni_ui or {}
+    game.mods.modOptions.omni_ui.overlay = false
+  end
   local U = require("tests.drivers.util")
   local dir = os.getenv("SHOT_DIR") or "/tmp/max_raids"
   local fails = 0
@@ -487,6 +477,18 @@ local function body(game, log)
   log("  Max Moves: " .. table.concat(names, ", "))
   check(names[1] == "G-MAX WILDFIRE" and names[3] == "MAX GUARD" and names[4] == "MAX AIRSTREAM",
     "Flamethrower -> G-Max Wildfire, Growl -> Max Guard, Wing Attack -> Max Airstream")
+  -- (OmniUI's move cards: the Max Moves in the Pokemon's place, each with its own power, for its draw)
+  log("  OmniUI's overlay: " .. tostring(Tt.dmaxUi.omniOn()))
+  if Tt.dmaxUi.omniOn() then
+    local mon = st.player.mon
+    local m1 = mon.moves[1]
+    local swapped = Tt.dmaxUi.omniSwapIn()
+    local during, power = mon.moves[1], Moves.get(mon.moves[1]).power
+    Tt.dmaxUi.omniSwapOut()
+    log(("  OmniUI: slot 1 during its draw %s, power %s"):format(Moves.displayName(during), tostring(power)))
+    check(swapped and Moves.displayName(during) == "G-MAX WILDFIRE" and power ~= 100 and mon.moves[1] == m1
+      and Moves.get(during).power == 100, "OmniUI: its cards read G-Max Wildfire at its own power, put back after")
+  end
   U.wait(20)
   shot("d01_moves_dynamax")
   boxLog("before")
@@ -495,8 +497,9 @@ local function body(game, log)
   check(Dm.sel[0] == nil, "START: put back (START works as R)")
   -- a tap on the button picks it as R does (its middle, the game's 240 x 160 taken to the window)
   do
-    local B = Tt.dmaxUi.BUTTON
-    local wx, wy = uiScreen(Tt, B.x + B.w / 2, B.y + B.h / 2)
+    local wx, wy = Tt.dmaxUi.buttonScreen()
+    log(("  the button's middle: %s,%s (%s)"):format(tostring(wx), tostring(wy),
+      Tt.dmaxUi.buttonPlace().omni and "on OmniUI's deck" or "the battle's"))
     game:pointerEvent("pressed", "mouse", "mouse", wx, wy)
     game:pointerEvent("released", "mouse", "mouse", wx, wy)
     U.wait(6)
@@ -545,6 +548,10 @@ local function body(game, log)
   check(st.player.mon.maxHp == math.floor(baseMax * 2.0), ("max HP x2.0 at Level 10: %d -> %d"):format(baseMax,
     st.player.mon.maxHp))
   check(giantSeen, "drawn giant")
+  if Tt.dmaxUi.omniOn() then
+    U.wait(10)
+    check((Tt.dmaxUi.omniMarks or 0) > 0, "OmniUI: the giant's card marked (" .. tostring(Tt.dmaxUi.omniMarks) .. ")")
+  end
   local d = st.enemySide and st.enemySide.__ndx
   check(d and d.mrField and d.mrField.type == "FIRE", "G-Max Wildfire: her side surrounded by fire")
   check(rec and rec.turns == 2, "two turns left")

@@ -493,6 +493,23 @@ return function(mod)
     end
   end
 
+  -- ------- OmniUI (1Jamie's omni_ui, optional; loaded by game.ready): the Dynamax button, the Max
+  -- Moves on its move cards and a giant's mark on its battle deck (src/dmax_ui.lua), the den's PC
+  -- on its box screen (src/pc_pick.lua), through its public API
+  mod.events:on("game.ready", function()
+    local okO, errO = pcall(function()
+      local found = mod.find and mod:find("omni_ui")
+      local api = type(found) == "table" and found.exports or nil
+      if type(api) ~= "table" or type(api.onPostRender) ~= "function" then return end
+      local hooked = false
+      local function overlayOn() return modOption("omni_ui", "overlay") == true end
+      if DmaxUi and DmaxUi.omniInstall(api, overlayOn) then hooked = true end
+      if Pick and Pick.omniInstall(api, overlayOn) then hooked = true end
+      if hooked then mod.log:info("OmniUI: the Dynamax button, Max Moves, marks and the den's PC on its screens") end
+    end)
+    if not okO then mod.log:warn("OmniUI hookup failed: %s", tostring(errO)) end
+  end)
+
   -- ------- PERF.OVERLAY: the engine's frame profiler (its F3 overlay) shown, the raid's parts timed
   -- as its sections (a push / pop that returns at once while it is off), the raid's doings added to
   -- its slow-frame label, and the slowest frames listed at the top right
@@ -609,12 +626,14 @@ return function(mod)
       G.setShader()
       local okC, errC = pcall(DmaxUi.drawEnergy, viewport)
       -- (and the Dynamax scene over the whole battle while it plays; the Max Move pad in Kanto Gear's
-      -- place on this screen)
-      local okS, errS = pcall(DmaxUi.drawScene, viewport)
-      if not okS then okC, errC = false, errS end
-      -- (the DYNAMAX button where the battle's bar would be, when it draws none: at this resolution)
-      local okB, errB = pcall(DmaxUi.drawButtonHud)
-      if not okB then okC, errC = false, errB end
+      -- place on this screen) - with OmniUI's overlay, after its own draw instead (below)
+      if not DmaxUi.omniOn() then
+        local okS, errS = pcall(DmaxUi.drawScene, viewport)
+        if not okS then okC, errC = false, errS end
+        -- (the DYNAMAX button where the battle's bar would be, when it draws none: at this resolution)
+        local okB, errB = pcall(DmaxUi.drawButtonHud)
+        if not okB then okC, errC = false, errB end
+      end
       if DmaxPad then
         local okD, errD = pcall(DmaxPad.drawMain, viewport)
         if not okD then okC, errC = false, errD end
@@ -634,6 +653,36 @@ return function(mod)
     end
     return res
   end)
+
+  -- OmniUI's overlay (1Jamie's omni_ui) draws its battle deck after every render.hud below its own
+  -- (priority 100); this one is outside it: the Max Moves put in the Pokemon's place for its draw
+  -- (its move cards read them as it draws), then the Dynamax scene and the DYNAMAX button over it
+  -- (src/dmax_ui.lua's OmniUI section)
+  local omniWarned = false
+  mod.hooks:wrap("render.hud", function(next, game, viewport)
+    if not (DmaxUi and DmaxUi.omniOn()) then return next(game, viewport) end
+    DmaxUi.noteViewport(viewport)
+    local okS, swapped = pcall(DmaxUi.omniSwapIn)
+    local ok, res = pcall(next, game, viewport)
+    if okS and swapped then pcall(DmaxUi.omniSwapOut) end
+    local err = not ok and res or nil
+    if not Raid.active() then
+      local G = love.graphics
+      G.push("all")
+      G.origin()
+      G.setScissor()
+      G.setShader()
+      local okD, errD = pcall(DmaxUi.drawScene, viewport)
+      if okD then okD, errD = pcall(DmaxUi.drawButtonHud) end
+      G.pop()
+      if not okD then err = err or errD end
+    end
+    if err and not omniWarned then
+      omniWarned = true
+      mod.log:warn("dynamax: drawing with OmniUI failed: %s", tostring(err))
+    end
+    if ok then return res end
+  end, 110)
 
   -- taps and clicks on the battle pad (the main window's)
   -- (the game kept in Kanto Gear's game rect while our Max Move pad holds the Gear's: src/dmax_pad.lua)
