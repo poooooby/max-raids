@@ -719,9 +719,13 @@ return function(mod, deps)
       local attItem, defItem = nil, nil
       if o.magicRoom then attItem, defItem, att.item, def.item = att.item, def.item, 0, 0 end
       -- (a spread move's cut is the sim's: Sword / Shield's 3 / 4, not Gen 3's half)
+      -- (no critical hit asked - Lucky Chant, a driver's measure: the engine reads forceCrit false as
+      -- "never", nil as its own roll; `o.noCrit and false or nil` was always nil)
+      local forceCrit = nil
+      if o.noCrit then forceCrit = false end
       local ok, dmg, info = pcall(Damage.calc, att, def, mv.ref, { adapter = engineAdapter, st = st, rng = rng,
         weather = st.weather, weatherKind = o.weather, power = o.power, highCrit = (att.critUp or 0) > 0 or nil,
-        forceCrit = o.noCrit and false or nil, mudSport = o.mudSport, waterSport = o.waterSport,
+        forceCrit = forceCrit, mudSport = o.mudSport, waterSport = o.waterSport,
         reflect = o.reflect or nil, lightScreen = o.lightScreen or nil, doubleScreens = o.doubleScreens or nil })
       if o.magicRoom then att.item, def.item = attItem, defItem end
       att.expHelpingHand = helpedWas

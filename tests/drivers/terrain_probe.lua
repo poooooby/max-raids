@@ -4,7 +4,8 @@
 --   Thunderbolt from a grounded member: x1.3 on Electric Terrain, as it is on Grassy
 --   Dragon Claw on the (grounded) boss: x0.5 on Misty Terrain
 --   Earthquake: as it is on Grassy here (Gen 8's halving is not in WoobleDex's rules)
--- and the sim's own Grassy heal and Psychic priority block (tests/raid_sim_test.lua has the rest).
+-- and the sim's own Grassy heal and Psychic priority block (tests/raid_sim_test.lua has the rest);
+-- then the weather's: rain / sun x1.5 and halving, Thunder's accuracy, hail's and the sandstorm's chip.
 --   SHOT_DIR=<dir> POKEPORT_GAME=emerald POKEPORT_VERSION=emerald \
 --   POKEPORT_DRIVER=mods/max_raids/tests/drivers/terrain_probe.lua love .
 
@@ -35,6 +36,9 @@ local function body(game, log)
   local function mv(name) return C.moves.byName["MOVE_" .. name] end
   s0.party[1].moves = { mv("THUNDERBOLT"), mv("BITE"), mv("QUICK_ATTACK"), mv("ROAR") }
   s0.party[2].moves = { mv("DRAGON_CLAW"), mv("EARTHQUAKE"), mv("FLY"), mv("ROAR") }
+  s0.party[1].moves[4] = mv("THUNDER")
+  s0.party[3].moves = { mv("SURF"), mv("MUD_SHOT"), mv("PROTECT"), mv("ROAR") }
+  s0.party[4].moves = { mv("FLAMETHROWER"), mv("PSYCHIC"), mv("CALM_MIND"), mv("ROAR") }
   U.wait(30)
   local X = game.mods.exports.max_raids
   local R = X.raid
@@ -42,7 +46,7 @@ local function body(game, log)
   waitFor(function() return X.state().phase == "command" and not R.current().say end, 20000)
   local cur = R.current()
   local sim, A, boss = cur.sim, cur.adapter, cur.boss
-  local m1, m2 = cur.members[1].b, cur.members[2].b
+  local m1, m2, m3, m4 = cur.members[1].b, cur.members[2].b, cur.members[3].b, cur.members[4].b
   local nd = game.mods.exports.national_dex_gen3
   check(nd ~= nil and nd.battle ~= nil, "WoobleDex's battle exports (its terrain rules)")
 
@@ -93,6 +97,65 @@ local function body(game, log)
   local blocked = false
   for _, e in ipairs(ev2) do if e.text and e.text:find("Psychic Terrain") then blocked = true end end
   check(blocked, "Psychic Terrain: Quick Attack on the grounded boss is blocked")
+  -- the weather's effects, the same way: Surf / Flamethrower in rain and sun, Thunder's accuracy in
+  -- rain, hail's and the sandstorm's chip at the turn's end (the sim's; the damage the engine's)
+  sim.ndx.terrain, sim.ndx.terrainTurns = nil, nil
+  local surf, flame, thunder = m3.moves[1], m4.moves[1], m1.moves[4]
+  local function wmean(att, mvx, kind)
+    sim.weather, sim.weatherTurns = kind, kind and 5 or nil
+    local total, hits, lo, hi = 0, 0, 1e9, 0
+    for _ = 1, N do
+      local dmg = A.damage(att, boss, mvx, false, { weather = sim.weather, turn = sim.turnNo, field = sim:ndxField(), noCrit = true })
+      if dmg and dmg > 0 then total, hits, lo, hi = total + dmg, hits + 1, math.min(lo, dmg), math.max(hi, dmg) end
+    end
+    sim.weather, sim.weatherTurns = nil, nil
+    log(("    %s in %s: %d..%d over %d hits (user %d/%d HP)"):format(mvx.name, tostring(kind), lo, hi, hits, att.mon.hp, att.mon.maxHp))
+    return hits > 0 and total / hits or 0
+  end
+  local function wratio(att, mvx, kind)
+    local base, on = wmean(att, mvx, nil), wmean(att, mvx, kind)
+    log(("  %s in %s: %.1f -> %.1f (x%.2f)"):format(mvx.name, tostring(kind), base, on, base > 0 and on / base or 0))
+    return base > 0 and on / base or 0
+  end
+  check(near(wratio(m3, surf, "RAIN"), 1.5), "rain: a Water move x1.5")
+  check(near(wratio(m4, flame, "RAIN"), 0.5), "rain: a Fire move halved")
+  check(near(wratio(m4, flame, "SUN"), 1.5), "sun: a Fire move x1.5")
+  check(near(wratio(m3, surf, "SUN"), 0.5), "sun: a Water move halved")
+  check(near(wratio(m3, surf, "HAIL"), 1.0), "hail: Surf as it is")
+  -- Thunder: never misses in rain, 50% in sun (A.hits)
+  local function hitRate(kind)
+    local n = 0
+    for _ = 1, 200 do if A.hits(m1, boss, thunder, false, kind) then n = n + 1 end end
+    return n / 200
+  end
+  log(("  Thunder hits: none %.2f, rain %.2f, sun %.2f"):format(hitRate(nil), hitRate("RAIN"), hitRate("SUN")))
+  check(hitRate("RAIN") == 1, "rain: Thunder never misses")
+  check(math.abs(hitRate("SUN") - 0.5) < 0.12, "sun: Thunder hits half the time")
+  -- hail chips 1/16 off everyone but Ice; sand spares Rock / Ground / Steel (Swampert is Ground)
+  -- (whoever is on the field: a member knocked out in the Psychic turn sits this one out)
+  for _, m in ipairs({ m1, m2, m3, m4 }) do m.mon.hp = m.mon.maxHp end
+  boss.mon.hp = boss.mon.maxHp
+  sim.weather, sim.weatherTurns = "HAIL", 5
+  local onField = {}
+  for i = 1, 4 do onField[i] = sim:present(i) end
+  local hev = {}
+  sim:endTurn(hev)
+  for _, e in ipairs(hev) do log(("    end of turn: %s %s %s"):format(e.kind, tostring(e.who and e.who.name), tostring(e.text))) end
+  local allChipped, nOn = true, 0
+  for i, m in ipairs({ m1, m2, m3, m4 }) do
+    if onField[i] then
+      nOn = nOn + 1
+      if m.mon.hp ~= m.mon.maxHp - math.floor(m.mon.maxHp / 16) then allChipped = false end
+    end
+  end
+  log(("  hail: %d on the field, Manectric %d/%d, the boss %d/%d"):format(nOn, m1.mon.hp, m1.mon.maxHp, boss.mon.hp, boss.mon.maxHp))
+  check(nOn > 0 and allChipped and boss.mon.hp < boss.mon.maxHp, "hail: 1/16 off everyone on the field and the boss at the turn's end")
+  for _, m in ipairs({ m1, m2, m3, m4 }) do m.mon.hp = m.mon.maxHp end
+  sim.weather, sim.weatherTurns = "SAND", 5
+  sim:endTurn({})
+  log(("  sand: Manectric %d/%d, Swampert %d/%d"):format(m1.mon.hp, m1.mon.maxHp, m3.mon.hp, m3.mon.maxHp))
+  check(m1.mon.hp < m1.mon.maxHp and m3.mon.hp == m3.mon.maxHp, "sandstorm: buffets Manectric, spares Swampert (Ground)")
+  sim.weather, sim.weatherTurns = nil, nil
   log(("%d failures"):format(fails))
 end
 
