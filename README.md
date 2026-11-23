@@ -56,6 +56,9 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
   and the giant bursts out of a giant ball. Its moves become Max Moves, with their weather, terrain
   and stat changes. A Pokémon with the Gigantamax Factor Gigantamaxes and uses its G-Max Move. A
   Dynamaxed Pokémon glows red under a drifting Dynamax pattern.
+- 📟 **Kanto Gear's GEAR battle view:** while you choose a Dynamax move, a Max Move pad takes the
+  Gear's screen (its second screen, its half of the window, or the whole screen, as its Display Mode
+  is set), then hands it back.
 - 👑 **Leaders Dynamax too:** once you have the band, Gym Leaders, the Elite Four, the Champion and
   rivals Dynamax their last Pokémon, Gigantamaxing it when it has a Gigantamax form.
 - 🎮 **One screen or two:** the battle menu can go on a second screen, following Kanto Gear's Display
