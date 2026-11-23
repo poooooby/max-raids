@@ -1,7 +1,7 @@
 {
   "id": "max_raids",
   "name": "Galar Rising",
-  "version": "0.7.0-beta.5",
+  "version": "1.0.0",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -23,7 +23,7 @@
   ],
   "conflicts": [],
   "incompatible": [],
-  "description": "Sword and Shield's Max Raid Battles on the Gen 3 games: dens on the routes, a giant Dynamax or Gigantamax boss against four of your party on the raid battlefield in 3D, your own Dynamax, barriers, Max Moves and a catch at the end.",
+  "description": "Sword and Shield's Max Raid Battles on the Gen 3 games: dens on the routes, a giant Dynamax or Gigantamax boss against four of your party on the raid battlefield in 3D, your own Dynamax, barriers, Max Moves and a catch at the end; Dynamax and Gigantamax in the game's own Gym, League and rival battles, with the weather and terrain their Max Moves bring.",
   "dependency_sources": {
     "national_dex_gen3": "https://github.com/poooooby/national_dex_gen3",
     "g9-battle-sprites-gen3": "https://github.com/poooooby/g9-battle-sprites-gen3"

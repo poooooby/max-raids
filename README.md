@@ -7,7 +7,7 @@ first Gym Badge, Pokémon Dens appear along the routes. Choose four of your Pok�
 Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 
 > [!NOTE]
-> **Requires [WoobleDex](https://github.com/poooooby/national_dex_gen3) 1.6.3 or newer and
+> **Requires [WoobleDex](https://github.com/poooooby/national_dex_gen3) 1.19.5 or newer and
 > [WoobleSpritePack](https://github.com/poooooby/g9-battle-sprites-gen3).**
 
 ## 📸 Showcase
