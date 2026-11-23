@@ -51,8 +51,8 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - 🎁 **Rewards:** Exp. Candies, TMs, berries, treasures, Dynamax Candy, Max Mushrooms and more.
 - 💎 **Dynamax Crystals** let you call a legendary or mythical Pokémon at any den.
 - 🔴 **Dynamax in your own battles:** the dens' awakening gives you a Dynamax Band. In Gym Leader,
-  Elite Four, Champion and rival battles, one of your Pokémon can Dynamax once per battle for three
-  turns. A short scene plays as it grows: your Pokémon returns to its ball, you raise the band,
+  Elite Four, Champion and rival battles (or wherever the DYNAMAX option says), one of your Pokémon
+  can Dynamax once per battle for three turns. A short scene plays as it grows: your Pokémon returns to its ball, you raise the band,
   and the giant bursts out of a giant ball. Its moves become Max Moves, with their weather, terrain
   and stat changes. A Pokémon with the Gigantamax Factor Gigantamaxes and uses its G-Max Move. A
   Dynamaxed Pokémon glows red under a drifting Dynamax pattern.

@@ -126,7 +126,7 @@ return function(mod, deps)
     return ad:displayName(b)
   end
   local function dx() local d = dex() return d and d.dynamax or nil end
-  -- WoobleDex's battle field (its exports.battle, 1.20.0 on): terrains, Gravity, hazards, Aurora Veil,
+  -- WoobleDex's battle field (its exports.battle, 1.19.3 on): terrains, Gravity, hazards, Aurora Veil,
   -- moves that ignore abilities, the Move Split's classes; an older one has none (our own below)
   local function bx() local d = dex() local b = d and d.battle return type(b) == "table" and b or nil end
   -- words to the battle's box: broken at the spaces into lines that fit its width (the game's font
