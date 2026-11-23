@@ -42,6 +42,9 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - ⭐ **Star levels from 1★ to 5★** that rise with your Gym Badges, as in Sword and Shield.
 - 🌌 **Sword and Shield's raid battle in 3D:** the battlefield, Max and G-Max Moves with their
   effects, barriers, and a camera that follows the fight.
+- 🌦️ **Weather and terrain in the den:** Max Moves and moves like Rain Dance bring rain, harsh
+  sunlight, sandstorms or hail over the den, and the terrains light up its ground, each with its
+  effect on the battle.
 - 💥 **Dynamax your own:** each of your four can Dynamax once per raid, and a Pokémon with the
   Gigantamax Factor Gigantamaxes.
 - ⏳ **Ten turns, four faints:** win before either runs out. Your Pokémon fight as copies, so
@@ -52,10 +55,13 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 - 💎 **Dynamax Crystals** let you call a legendary or mythical Pokémon at any den.
 - 🔴 **Dynamax in your own battles:** the dens' awakening gives you a Dynamax Band. In Gym Leader,
   Elite Four, Champion and rival battles (or wherever the DYNAMAX option says), one of your Pokémon
-  can Dynamax once per battle for three turns. A short scene plays as it grows: your Pokémon returns to its ball, you raise the band,
+  can Dynamax once per battle for three turns. A short scene plays as it grows, always at normal speed even when the battle is sped up: your Pokémon returns to its ball, you raise the band,
   and the giant bursts out of a giant ball. Its moves become Max Moves, with their weather, terrain
   and stat changes. A Pokémon with the Gigantamax Factor Gigantamaxes and uses its G-Max Move. A
   Dynamaxed Pokémon glows red under a drifting Dynamax pattern.
+- 🌦️ **Weather and terrain you can see:** in the game's own battles, rain, harsh sunlight, a
+  sandstorm or hail stays on screen while it lasts, and a terrain lights the ground under each
+  Pokémon. When a Max Move brings the weather, the game's own weather animation plays at once.
 - 📟 **Kanto Gear's GEAR battle view:** while you choose a Dynamax move, a Max Move pad takes the
   Gear's screen (its second screen, its half of the window, or the whole screen, as its Display Mode
   is set), then hands it back.

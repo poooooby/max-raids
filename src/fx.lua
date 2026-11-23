@@ -2184,7 +2184,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     end
   end
 
-  local drawLasting, stepField, stepTeam   -- (below: what lasts)
+  local drawLasting, stepField, stepTeam, drawWeatherScreen   -- (below: what lasts)
 
   -- ------- the clock
 
@@ -2262,6 +2262,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if not Sc then return end
     Fx.drawLayer(G2, "front", now)
     G2.push("all")
+    drawWeatherScreen(G2, w, h, now)
     if charge then drawCharge(G2, w, h, now) end
     G2.setBlendMode("add")
     for _, f in ipairs(flashes) do
@@ -2894,6 +2895,223 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     G2.setBlendMode("alpha")
   end
 
+  -- ------- the weather and the terrain over the den (the raid's field: `weather` / `terrain` the kind
+  -- shown, `weatherT` / `terrainT` when it came, `weatherWas` / `terrainWas` the last one fading from
+  -- `weatherOff` / `terrainOff`). Each piece at a fixed spot of the den by its index (rnd), moving
+  -- on the clock, drawn in the layer of its depth; nothing made a frame.
+  -- RAIN: streaks slanting down, a ring where each lands; HAIL: ice falling, drifting; SAND: dust
+  -- streaking across low; SUN: no pieces - the screen's warm light and rays (Fx.draw). The terrains:
+  -- the ground lit in its colour under the whole den, and ELECTRIC sparks crackling over it, GRASSY
+  -- blades swaying up from it, MISTY pink mist drifting low, PSYCHIC rings pulsing out and motes rising.
+  Fx.WEATHER = {
+    AREA = { X0 = -10, X1 = 10, Z0 = -16, Z1 = 1.5, TOP = 7 },
+    RAIN = { N = 170, PER = { 0.45, 0.7 }, LEN = 0.9, SLANT = 0.16, W = 0.022, C = { 0.8, 0.88, 1 }, A = 0.6,
+      WASH = { 0.16, 0.22, 0.36, 0.22 } },
+    HAIL = { N = 100, PER = { 0.95, 1.35 }, DRIFT = 0.7, SIZE = 0.085, C = { 0.88, 0.96, 1 }, A = 0.95,
+      WASH = { 0.72, 0.86, 1, 0.12 } },
+    SAND = { N = 150, PER = { 1.1, 1.8 }, LEN = 1.5, HIGH = 3.6, W = 0.05, C = { 0.9, 0.74, 0.48 }, A = 0.6,
+      PUFFS = 14, PUFF_A = 0.2, WASH = { 0.78, 0.6, 0.34, 0.24 } },
+    SUN = { WASH = { 1, 0.7, 0.36, 0.14 }, RAYS = 6, RAY_A = 0.13, GLOW = { 1, 0.86, 0.55, 0.5 } },
+  }
+  Fx.TERRAIN = {
+    -- (the lit ground: a disc round CX, CZ out to R + W / 2, all of it in front of the camera)
+    CX = 0, CZ = -6.5, R = 3.2, W = 6.4, A = 0.55,
+    ELECTRIC = { 1, 0.88, 0.22 }, GRASSY = { 0.36, 0.92, 0.38 }, MISTY = { 1, 0.62, 0.86 },
+    PSYCHIC = { 0.8, 0.42, 1 },
+    PIECES = 70,
+  }
+  -- how much of it shows (in over 0.5 s, out over the team's FADE_S)
+  local function fieldAlpha(t0, off, now)
+    local a = t0 and min(1, (now - t0) / 0.5) or 1
+    if off then a = a * max(0, 1 - (now - off) / Fx.TEAM.FADE_S) end
+    return a
+  end
+  local function perOf(R, j, seed) return R[1] + (R[2] - R[1]) * rnd(seed, j) end
+  local function drawWeatherKind(G2, layer, kind, a, now)
+    local W, AR = Fx.WEATHER, Fx.WEATHER.AREA
+    local D = W[kind]
+    if not D or a <= 0 or kind == "SUN" then return end
+    if kind == "RAIN" then
+      G2.setColor(D.C[1], D.C[2], D.C[3], D.A * a)
+      for j = 1, D.N do
+        local Z = AR.Z0 + (AR.Z1 - AR.Z0) * rnd(103, j)
+        if layerOf(Z) == layer then
+          local per = perOf(D.PER, j, 101)
+          local u = (now / per + rnd(102, j)) % 1
+          local X = AR.X0 + (AR.X1 - AR.X0) * rnd(104, j)
+          local Y = AR.TOP * (1 - u)
+          local x1, y1, k = P(X, Y, Z)
+          local x2, y2 = P(X + D.SLANT, Y + D.LEN, Z)
+          if x1 and x2 then
+            G2.setLineWidth(max(1, k * D.W))
+            G2.line(x1, y1, x2, y2)
+          end
+          if u > 0.92 then
+            G2.setColor(1, 1, 1, 1)
+            groundRing(G2, X, 0.02, Z, 0.05 + 0.3 * (u - 0.92) / 0.08, 0.06, D.C[1], D.C[2], D.C[3], a * 0.5 * (1 - u) / 0.08)
+            G2.setColor(D.C[1], D.C[2], D.C[3], D.A * a)
+          end
+        end
+      end
+    elseif kind == "HAIL" then
+      for j = 1, D.N do
+        local Z = AR.Z0 + (AR.Z1 - AR.Z0) * rnd(113, j)
+        if layerOf(Z) == layer then
+          local per = perOf(D.PER, j, 111)
+          local u = (now / per + rnd(112, j)) % 1
+          local X = AR.X0 + (AR.X1 - AR.X0) * rnd(114, j) + D.DRIFT * u
+          local x, y, k = P(X, AR.TOP * (1 - u), Z)
+          if x then
+            local s = max(1.2, k * D.SIZE * (0.7 + 0.6 * rnd(115, j)))
+            G2.setColor(D.C[1], D.C[2], D.C[3], D.A * a)
+            G2.polygon("fill", x, y - s, x + s * 0.8, y, x, y + s, x - s * 0.8, y)
+            G2.setColor(1, 1, 1, a * 0.9)
+            G2.rectangle("fill", x - s * 0.25, y - s * 0.45, s * 0.35, s * 0.35)
+          end
+        end
+      end
+    elseif kind == "SAND" then
+      for j = 1, D.N do
+        local Z = AR.Z0 + (AR.Z1 - AR.Z0) * rnd(123, j)
+        if layerOf(Z) == layer then
+          local per = perOf(D.PER, j, 121)
+          local u = (now / per + rnd(122, j)) % 1
+          local X = AR.X0 - 2 + (AR.X1 - AR.X0 + 4) * u
+          local Y = 0.15 + D.HIGH * rnd(124, j) * rnd(125, j)
+          local x1, y1, k = P(X, Y, Z)
+          local x2, y2 = P(X - D.LEN, Y + 0.05, Z)
+          if x1 and x2 then
+            G2.setLineWidth(max(1, k * D.W))
+            G2.setColor(D.C[1], D.C[2], D.C[3], D.A * a * sin(u * pi))
+            G2.line(x1, y1, x2, y2)
+          end
+        end
+      end
+      -- (and clouds of it rolling across, low)
+      for j = 1, D.PUFFS do
+        local Z = AR.Z0 + (AR.Z1 - AR.Z0) * rnd(126, j)
+        if layerOf(Z) == layer then
+          local u = (now / (3 + 2 * rnd(127, j)) + rnd(128, j)) % 1
+          local x, y, k = P(AR.X0 - 3 + (AR.X1 - AR.X0 + 6) * u, 0.6 + rnd(129, j), Z)
+          if x then glowAt(G2, x, y, k * 3.2, D.C[1], D.C[2], D.C[3], D.PUFF_A * a * sin(u * pi)) end
+        end
+      end
+    end
+  end
+  local function drawWeather(G2, layer, fs, now)
+    if fs.weather then drawWeatherKind(G2, layer, fs.weather, fieldAlpha(fs.weatherT, nil, now), now) end
+    if fs.weatherWas and fs.weatherOff and now - fs.weatherOff < Fx.TEAM.FADE_S then
+      drawWeatherKind(G2, layer, fs.weatherWas, fieldAlpha(nil, fs.weatherOff, now), now)
+    end
+    G2.setLineWidth(1)
+  end
+  -- the screen's part of the weather: a wash over the den (the sun's added, with its glow and rays)
+  Fx.washes = 0
+  local function weatherWash(G2, w, h, kind, a, now)
+    local D = Fx.WEATHER[kind]
+    if not D or a <= 0 then return end
+    Fx.washes = Fx.washes + 1
+    local C = D.WASH
+    if kind == "SUN" then
+      G2.setBlendMode("add")
+      G2.setColor(C[1], C[2], C[3], C[4] * a * (0.85 + 0.15 * sin(now * 1.3)))
+      G2.rectangle("fill", 0, 0, w, h)
+      local g = D.GLOW
+      glowAt(G2, w * 0.12, h * 0.02, h * 0.9, g[1], g[2], g[3], g[4] * a)
+      for q = 1, D.RAYS do
+        local f = (q - 0.5) / D.RAYS
+        local sway = 0.03 * sin(now * 0.4 + q * 1.7)
+        local bx, by = w * (-0.1 + 1.3 * (f + sway)), h * 1.1
+        band(G2, w * 0.12, h * 0.02, h * 0.02, bx, by, h * (0.12 + 0.1 * rnd(131, q)), 1, 0.85, 0.55,
+          D.RAY_A * a * (0.7 + 0.3 * sin(now * 0.9 + q)))
+      end
+      G2.setBlendMode("alpha")
+    else
+      G2.setColor(C[1], C[2], C[3], C[4] * a)
+      G2.rectangle("fill", 0, 0, w, h)
+    end
+  end
+  local function drawTerrainKind(G2, layer, kind, a, now, E, B)
+    local TR = Fx.TERRAIN
+    local C = TR[kind]
+    if not C or a <= 0 then return end
+    G2.setBlendMode("add")
+    if layer == "back" then
+      -- the ground lit under the whole den, breathing (the ring's colours its own: white over them)
+      G2.setColor(1, 1, 1, 1)
+      groundRing(G2, TR.CX, 0.02, TR.CZ, TR.R, TR.W, C[1], C[2], C[3], TR.A * a * (0.85 + 0.15 * sin(now * 1.6)))
+      if kind == "PSYCHIC" then
+        for q = 0, 2 do
+          local u = (now * 0.35 + q / 3) % 1
+          groundRing(G2, TR.CX, 0.03, TR.CZ, 1 + 9 * u, 0.25, C[1], C[2], C[3], a * 0.45 * (1 - u))
+        end
+      end
+    end
+    local AR = Fx.WEATHER.AREA
+    for j = 1, TR.PIECES do
+      local Z = AR.Z0 + (AR.Z1 - AR.Z0) * rnd(143, j)
+      if layerOf(Z) == layer then
+        local X = AR.X0 + (AR.X1 - AR.X0) * rnd(144, j)
+        if kind == "ELECTRIC" then
+          -- (a spark now and then at each spot: a jagged line over the ground)
+          local u = (now * (1.5 + rnd(145, j)) + rnd(146, j)) % 1
+          if u < 0.25 then
+            local f = 1 - u / 0.25
+            local x1, y1, k = P(X, 0.05, Z)
+            local x2, y2 = P(X + 0.3, 0.32, Z + 0.1)
+            local x3, y3 = P(X + 0.55, 0.12, Z - 0.05)
+            local x4, y4 = P(X + 0.9, 0.04, Z)
+            if x1 and x2 and x3 and x4 then
+              G2.setLineWidth(max(1, k * 0.03))
+              G2.setColor(C[1], C[2], C[3], a * f)
+              G2.line(x1, y1, x2, y2, x3, y3, x4, y4)
+              glowAt(G2, x2, y2, k * 0.9, C[1], C[2], C[3], a * 0.5 * f)
+            end
+          end
+        elseif kind == "GRASSY" then
+          -- (a tuft: three blades, laid over the ground - not added, which turned them yellow on its red)
+          local hgt = 0.3 + 0.35 * rnd(147, j)
+          G2.setBlendMode("alpha")
+          G2.setColor(C[1] * 0.8, C[2] * 0.85, C[3] * 0.7, a * 0.85)
+          for q = -1, 1 do
+            local sway = 0.08 * sin(now * 1.8 + j + q) + q * 0.08
+            local x1, y1, k = P(X + q * 0.05, 0.01, Z)
+            local x2, y2 = P(X + q * 0.05 + sway, hgt * (1 - 0.25 * q * q), Z)
+            if x1 and x2 then
+              G2.setLineWidth(max(1, k * 0.035))
+              G2.line(x1, y1, x2, y2)
+            end
+          end
+        elseif kind == "MISTY" then
+          local u = (now * 0.12 + rnd(148, j)) % 1
+          local x, y, k = P(X + 1.5 * sin(u * 2 * pi), 0.25 + 0.2 * rnd(149, j), Z)
+          if x then glowAt(G2, x, y, k * 2.2, C[1], C[2], C[3], a * 0.32 * sin(u * pi)) end
+        elseif kind == "PSYCHIC" then
+          local u = (now * 0.25 + rnd(150, j)) % 1
+          local x, y, k = P(X + 0.15 * sin(now * 2 + j), 0.1 + 2.4 * u, Z)
+          if x then glowAt(G2, x, y, k * 0.25, C[1], C[2], C[3], a * 0.8 * sin(u * pi)) end
+        end
+      end
+    end
+    G2.setBlendMode("alpha")
+    G2.setLineWidth(1)
+  end
+  local function drawTerrain(G2, layer, fs, now, E, B)
+    if fs.terrain then drawTerrainKind(G2, layer, fs.terrain, fieldAlpha(fs.terrainT, nil, now), now, E, B) end
+    if fs.terrainWas and fs.terrainOff and now - fs.terrainOff < Fx.TEAM.FADE_S then
+      drawTerrainKind(G2, layer, fs.terrainWas, fieldAlpha(nil, fs.terrainOff, now), now, E, B)
+    end
+  end
+  -- (the screen's: Fx.draw)
+  function drawWeatherScreen(G2, w, h, now)
+    local fs = team and team.sides and team.sides.field
+    if not fs then return end
+    if fs.weather then weatherWash(G2, w, h, fs.weather, fieldAlpha(fs.weatherT, nil, now), now) end
+    if fs.weatherWas and fs.weatherOff and now - fs.weatherOff < Fx.TEAM.FADE_S then
+      weatherWash(G2, w, h, fs.weatherWas, fieldAlpha(nil, fs.weatherOff, now), now)
+    end
+  end
+
   -- one side's panes, in order from the side out
   local PANE_ORDER = { "reflect", "light", "veil" }
   local TURN_PANES = { wide = true, quick = true, crafty = true }
@@ -2907,6 +3125,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     if fs.gravity or (fs.gravityOff and now - fs.gravityOff < Fx.TEAM.FADE_S) then
       drawGravity(G2, layer, fs.gravity, not fs.gravity and fs.gravityOff or nil, now, E, team.boss)
     end
+    -- the terrain on the ground, the weather in the air
+    drawTerrain(G2, layer, fs, now, E, team.boss)
+    drawWeather(G2, layer, fs, now)
     if E then
       if layer == "mid" then
         drawDome(G2, E, true, ts.safeguard, ts.safeguard == nil and ts.safeguardOff or nil, now)

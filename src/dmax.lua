@@ -677,6 +677,7 @@ return function(mod, deps)
       if not (cur and cur == E.Rules.weather.kind(w.kind)) then
         ad:setWeather(w.kind, 5)
         ad:sayText(w.text)
+        if w.anim then ad:playAnim("general", w.anim, nil, nil) end
       end
     end
     local t = D.TERRAIN[typeName]

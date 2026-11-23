@@ -92,8 +92,9 @@ G.MOVES = {
 
 -- the plain Max Moves, by the type of the move they come from (a Dynamax boss's, and a G-Max boss's
 -- without a G-Max move of its own): name, and effect as above (+ { kind = "boost", self = { stat = n } }:
--- the boss's own stats). Weather and terrain (Max Flare, Geyser, Hailstorm, Rockfall, Overgrowth,
--- Lightning, Mindstorm, Starfall) do nothing in a raid here: the sim has no weather or terrain.
+-- the boss's own stats; { kind = "weather", weather } five turns of the sim's weather - Max Flare,
+-- Geyser, Hailstorm, Rockfall -; { kind = "terrain", terrain } five turns of its terrain - Max
+-- Overgrowth, Lightning, Mindstorm, Starfall -; either the move's own, whoever uses it).
 -- EVIDENCE: Bulbapedia "Max Move" (each move's effect).
 G.MAX = {
   NORMAL = { name = "Max Strike", effect = { kind = "stages", foe = { speed = -1 } } },
@@ -101,19 +102,19 @@ G.MAX = {
   FLYING = { name = "Max Airstream", effect = { kind = "boost", self = { speed = 1 } } },
   POISON = { name = "Max Ooze", effect = { kind = "boost", self = { spAtk = 1 } } },
   GROUND = { name = "Max Quake", effect = { kind = "boost", self = { spDef = 1 } } },
-  ROCK = { name = "Max Rockfall" },
+  ROCK = { name = "Max Rockfall", effect = { kind = "weather", weather = "SAND" } },
   BUG = { name = "Max Flutterby", effect = { kind = "stages", foe = { spAtk = -1 } } },
   GHOST = { name = "Max Phantasm", effect = { kind = "stages", foe = { defense = -1 } } },
   STEEL = { name = "Max Steelspike", effect = { kind = "boost", self = { defense = 1 } } },
-  FIRE = { name = "Max Flare" },
-  WATER = { name = "Max Geyser" },
-  GRASS = { name = "Max Overgrowth" },
-  ELECTRIC = { name = "Max Lightning" },
-  PSYCHIC = { name = "Max Mindstorm" },
-  ICE = { name = "Max Hailstorm" },
+  FIRE = { name = "Max Flare", effect = { kind = "weather", weather = "SUN" } },
+  WATER = { name = "Max Geyser", effect = { kind = "weather", weather = "RAIN" } },
+  GRASS = { name = "Max Overgrowth", effect = { kind = "terrain", terrain = "GRASSY" } },
+  ELECTRIC = { name = "Max Lightning", effect = { kind = "terrain", terrain = "ELECTRIC" } },
+  PSYCHIC = { name = "Max Mindstorm", effect = { kind = "terrain", terrain = "PSYCHIC" } },
+  ICE = { name = "Max Hailstorm", effect = { kind = "weather", weather = "HAIL" } },
   DRAGON = { name = "Max Wyrmwind", effect = { kind = "stages", foe = { attack = -1 } } },
   DARK = { name = "Max Darkness", effect = { kind = "stages", foe = { spDef = -1 } } },
-  FAIRY = { name = "Max Starfall" },
+  FAIRY = { name = "Max Starfall", effect = { kind = "terrain", terrain = "MISTY" } },
 }
 
 -- the words when an effect takes hold (src/raid_sim.lua fills {BOSS} / {MON})

@@ -1082,6 +1082,33 @@ do
   check((s3.gravity or 0) == 0, "Gravity wears off after five turns")
 end
 
+-- the plain Max Moves' weather and terrain (Gmax.MAX): Max Flare's sun and Max Overgrowth's grass, five
+-- turns each, the words; the same again carries on without words; the boss's too
+do
+  local G = assert(loadstring(read("data/raid_gmax.lua"), "@data/raid_gmax.lua"))()
+  local flare = mv("Max Flare", { power = 1 }); flare.isGmax = true; flare.gmaxEffect = G.MAX.FIRE.effect
+  local growth = mv("Max Overgrowth", { power = 1 }); growth.isGmax = true; growth.gmaxEffect = G.MAX.GRASS.effect
+  local m = team(1, 1000, { 90 })
+  m[1].moves = { flare, growth }
+  local boss = battler("Boss", 100000, 1, { mv("Tap", { power = 0, status = true }) }, true)
+  local s = newSim(boss, m, 151)
+  local ev = s:turn({ pick(1) })
+  check(s.weather == "SUN" and s.weatherTurns == 4, "Max Flare: harsh sunlight, four turns left after its first ("
+    .. tostring(s.weather) .. " " .. tostring(s.weatherTurns) .. ")")
+  check(has(ev, function(e) return e.kind == "field" and e.weather == "SUN" end) ~= nil, "Max Flare: the sun's event")
+  ev = s:turn({ pick(1) })
+  check(has(ev, function(e) return e.kind == "field" and e.weather == "SUN" end) == nil and s.weatherTurns == 3,
+    "Max Flare again in sun: no new sun, the turns run on")
+  ev = s:turn({ pick(2) })
+  check(s:terrain() == "GRASSY" and has(ev, function(e) return e.kind == "field" and e.terrain == "GRASSY" end) ~= nil,
+    "Max Overgrowth: Grassy Terrain (" .. tostring(s:terrain()) .. ")")
+  local rock = mv("Max Rockfall", { power = 1 }); rock.isGmax = true; rock.gmaxEffect = G.MAX.ROCK.effect
+  local boss2 = battler("Boss", 100000, 1, { rock }, true)
+  local s2 = newSim(boss2, team(1, 1000, { 90 }), 152)
+  s2:turn({ pick(1) })
+  check(s2.weather == "SAND", "the boss's Max Rockfall: a sandstorm (" .. tostring(s2.weather) .. ")")
+end
+
 -- the same seed, the same turn
 do
   local function run()

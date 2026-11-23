@@ -1702,6 +1702,8 @@ return function(mod, deps)
     -- (a status taking hold, a G-Max field's turn)
     for _, se in pairs(Sounds.STATUS or {}) do add(se) end
     for _, se in pairs(Sounds.FIELD or {}) do add(se) end
+    for _, se in pairs(Sounds.WEATHER or {}) do add(se) end
+    for _, se in pairs(Sounds.TERRAIN or {}) do add(se) end
     -- (the four's Max forms, for a Dynamax)
     for _, m in ipairs(mons) do
       for _, mv in ipairs(m.b and m.b.maxMoves or {}) do moveSounds(mv) end
@@ -2223,6 +2225,15 @@ return function(mod, deps)
     r.evT = r.t
     showFor(e)
     if e.fieldType then r.fieldShown = e.fieldType end
+    -- the weather / terrain shown (Fx draws them from the field's record): from this event on, the
+    -- last one fading
+    if e.kind == "field" and (e.weather ~= nil or e.terrain ~= nil) then
+      local f = sideFx().field
+      local what = e.weather ~= nil and "weather" or "terrain"
+      local kind = e[what]
+      if f[what] and f[what] ~= kind then f[what .. "Was"], f[what .. "Off"] = f[what], r.t end
+      if kind then f[what], f[what .. "T"] = kind, r.t else f[what] = nil end
+    end
     -- the barrier's pills follow the events (gone once broken); one shown at the blow that brought it
     -- is left as it is (setting it again would bring back pills a later break took away)
     if e.kind == "shield" and r.boss and not e.shown then shieldLook(e) end
@@ -2240,6 +2251,8 @@ return function(mod, deps)
       elseif (e.kind == "status" or e.kind == "cant") and e.attract then Rd.se(Sounds.SHAPE.heart)
       elseif (e.kind == "status" or e.kind == "cant") and e.torment then Rd.se(Sounds.SIDE.torment)
       elseif e.kind == "field" and (e.fieldType or e.foeField) then Rd.se(Sounds.FIELD[e.fieldType or e.foeField])
+      elseif e.kind == "field" and e.weather then Rd.se(Sounds.WEATHER and Sounds.WEATHER[e.weather])
+      elseif e.kind == "field" and e.terrain then Rd.se(Sounds.TERRAIN and Sounds.TERRAIN[e.terrain])
       elseif e.kind == "shield" then
         -- (its sound played with its look)
       elseif (e.kind == "damage" or e.kind == "residual") and not e.looked then

@@ -785,6 +785,8 @@ function Sim:gmaxEffect(ev, att, mv, hit)
   if not e or not alive(att) then return end
   if e.scope == "foes" then hit = self:onSide(att.boss and "team" or "boss") end
   if e.kind == "gravity" then self:setGravity(ev, att, e.turns or 5)
+  elseif e.kind == "weather" then self:setWeather(ev, att, e.weather)
+  elseif e.kind == "terrain" then self:setTerrain(ev, att, e.terrain)
   else self:gmaxMain(ev, att, mv, hit, e) end
   if e.torment and not self.over and alive(att) then
     for _, m in ipairs(self:onSide(att.boss and "team" or "boss")) do self:torment(ev, m) end
@@ -1137,8 +1139,8 @@ Sim.TERRAIN = {
   PSYCHIC_TERRAIN = { kind = "PSYCHIC", up = T.mark("The battlefield got weird!"),
     down = T.mark("The weirdness disappeared from the battlefield!") },
 }
-local TERRAIN_DOWN = {}
-for _, t in pairs(Sim.TERRAIN) do TERRAIN_DOWN[t.kind] = t.down end
+local TERRAIN_DOWN, TERRAIN_UP = {}, {}
+for _, t in pairs(Sim.TERRAIN) do TERRAIN_DOWN[t.kind], TERRAIN_UP[t.kind] = t.down, t.up end
 -- the field's own timers: their words when they end
 Sim.FIELD_END = { trickRoom = T.mark("The twisted dimensions returned to normal!"),
   wonderRoom = T.mark("Wonder Room wore off, and Defense and Sp. Def stats returned to normal!"),
@@ -1371,6 +1373,22 @@ function Sim:ruleAfter(ev, att, def, mv, dealt)
         text = T("Pointed stones float in the air around %s!", def.boss and def.name or T("your team")) }
     end
   end
+end
+
+-- a Max Move's weather / terrain (Max Flare, Max Overgrowth ...): five turns, the words; nothing when
+-- that one already holds (it simply carries on). True when it changed
+function Sim:setWeather(ev, att, kind)
+  if not (kind and Sim.WEATHER_TEXT[kind]) or self.weather == kind then return false end
+  self.weather, self.weatherTurns = kind, 5
+  ev[#ev + 1] = { kind = "field", who = att, weather = kind, text = T(Sim.WEATHER_TEXT[kind].up) }
+  return true
+end
+function Sim:setTerrain(ev, att, kind)
+  if not (kind and TERRAIN_UP[kind]) or self:terrain() == kind then return false end
+  local f = self.ndx
+  f.terrain, f.terrainTurns = kind, 5
+  ev[#ev + 1] = { kind = "field", who = att, terrain = kind, text = T(TERRAIN_UP[kind]) }
+  return true
 end
 
 function Sim:endTerrain(ev)

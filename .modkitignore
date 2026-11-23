@@ -33,6 +33,8 @@ tests/drivers/day_probe.lua
 tests/dyna_test.lua
 tests/drivers/dyna_probe.lua
 tests/drivers/dynamax_probe.lua
+tests/drivers/weather_probe.lua
+tests/drivers/dmax_weather_probe.lua
 tests/drivers/crystal_probe.lua
 tests/drivers/portrait_probe.lua
 tests/drivers/team_moves_probe.lua

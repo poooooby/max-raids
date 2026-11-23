@@ -84,12 +84,13 @@ D.GMAX_ORDER = { "VINE_LASH", "WILDFIRE", "CANNONADE", "BEFUDDLE", "VOLT_CRASH",
 
 -- the plain Max Moves' weather and terrain (the stat changes are data/raid_gmax.lua MAX's): the
 -- engine's weather kinds (effects/weather.lua) with the game's own words, the National Dex's terrain
--- kinds (its words src/dmax.lua's)
+-- kinds (its words src/dmax.lua's); `anim` the cart's own animation of that weather (B_ANIM_*_CONTINUES),
+-- played as the Max Move sets it, as the turn's end plays it
 D.WEATHER = {
-  FIRE = { kind = "SUNNY", text = "STRINGID_SUNLIGHTGOTBRIGHT" },
-  WATER = { kind = "RAINY", text = "STRINGID_STARTEDTORAIN" },
-  ROCK = { kind = "SANDSTORM", text = "STRINGID_SANDSTORMBREWED" },
-  ICE = { kind = "HAIL", text = "STRINGID_STARTEDHAIL" },
+  FIRE = { kind = "SUNNY", text = "STRINGID_SUNLIGHTGOTBRIGHT", anim = "SUN_CONTINUES" },
+  WATER = { kind = "RAINY", text = "STRINGID_STARTEDTORAIN", anim = "RAIN_CONTINUES" },
+  ROCK = { kind = "SANDSTORM", text = "STRINGID_SANDSTORMBREWED", anim = "SANDSTORM_CONTINUES" },
+  ICE = { kind = "HAIL", text = "STRINGID_STARTEDHAIL", anim = "HAIL_CONTINUES" },
 }
 D.TERRAIN = {
   ELECTRIC = { kind = "ELECTRIC" }, GRASS = { kind = "GRASSY" }, PSYCHIC = { kind = "PSYCHIC" },

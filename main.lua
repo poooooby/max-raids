@@ -142,6 +142,7 @@ return function(mod)
   local makeDmax = loadSibling(mod, "src/dmax.lua")
   local makeDmaxUi = loadSibling(mod, "src/dmax_ui.lua")
   local makeDmaxPad = loadSibling(mod, "src/dmax_pad.lua")
+  local makeBattleWeather = loadSibling(mod, "src/battle_weather.lua")
   if not (N and Bosses and Sprites and makeScene and makePad and makeRaid) then
     mod.log:error("Galar Rising is missing files; it stays off -- reinstall the mod")
     return
@@ -397,6 +398,7 @@ return function(mod)
   -- Dynamax Band registered now, as the National Dex registers its own; the battle's wraps at
   -- game.ready, after the National Dex's
   local Dmax, DmaxUi, DmaxPad = nil, nil, nil
+  local BattleWeather = nil  -- (src/battle_weather.lua: the weather and terrain over the game's own battles)
   local dmaxForced = nil  -- (drivers: _test.dmaxMode("league" | "trainers" | "all" | "off"))
   local BAND = { id = "DYNAMAX_BAND", name = "DYNAMAX BAND", index = 959 }
   if DmaxData and makeDmaxRules and makeDmax and makeDmaxUi and Battle then
@@ -436,6 +438,11 @@ return function(mod)
           else
             mod.log:warn("dynamax: its move pad failed to build: %s", tostring(pad))
           end
+        end
+        if makeBattleWeather then
+          local okW, bw = pcall(makeBattleWeather, mod, { ui = ui, dex = dexExports })
+          if okW and type(bw) == "table" then BattleWeather = bw
+          else mod.log:warn("the battles' weather failed to build: %s", tostring(bw)) end
         end
       else
         mod.log:warn("dynamax: its battle screen failed to build: %s", tostring(ui))
@@ -624,6 +631,14 @@ return function(mod)
       G.origin()
       G.setScissor()
       G.setShader()
+      -- (the battle's weather and terrain, as long as they last, under all of it)
+      if BattleWeather then
+        local okW, errW = pcall(BattleWeather.draw, viewport)
+        if not okW and not cloudWarned then
+          cloudWarned = true
+          mod.log:warn("the battle's weather failed to draw: %s", tostring(errW))
+        end
+      end
       local okC, errC = pcall(DmaxUi.drawEnergy, viewport)
       -- (and the Dynamax scene over the whole battle while it plays; the Max Move pad in Kanto Gear's
       -- place on this screen) - with OmniUI's overlay, after its own draw instead (below)
@@ -729,6 +744,13 @@ return function(mod)
     return next(game, ev)
   end)
 
+  -- the Dynamax scene at the game's own speed: the game's speed-up runs several of its steps a frame,
+  -- and the scene steps with them (its parts and its sounds) - 1x while it plays, the black's lift too
+  mod.hooks:wrap("core.logic_speed", function(next, game, ...)
+    if DmaxUi and DmaxUi.sceneOn and DmaxUi.sceneOn() then return 1 end
+    return next(game, ...)
+  end)
+
   -- ------- Kanto Gear: while a raid is up the Gear stands down entirely (its panel, its second
   -- screen, its touches), through its public third-party modules API - a module whose shown()
   -- is true makes it step aside (kanto_gear runtime/modules.lua anyShown). The module is never
@@ -794,6 +816,7 @@ return function(mod)
     padSecond = function(on) padForced = on end, difficulty = function(v) difficultyForced = v end,
     moveInfo = function(v) moveInfoForced = v end,
     gearOptions = function(t) gearForced = t end, padWanted = function() return padWanted() end,
-    dmax = Dmax, dmaxUi = DmaxUi, dmaxPad = function() return DmaxPad end, dmaxMode = function(v) dmaxForced = v end, band = BAND }
+    dmax = Dmax, dmaxUi = DmaxUi, dmaxPad = function() return DmaxPad end, dmaxMode = function(v) dmaxForced = v end, band = BAND,
+    battleWeather = function() return BattleWeather end }
   mod.log:info("Galar Rising ready (%d bosses)", #(Bosses.ORDER or {}))
 end

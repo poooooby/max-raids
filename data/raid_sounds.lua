@@ -60,6 +60,11 @@ S.SIDE = {
 S.STATUS = { BRN = "SE_M_EMBER", PSN = "SE_M_TOXIC", TOX = "SE_M_TOXIC", PAR = "SE_M_THUNDER_WAVE",
   SLP = "SE_M_YAWN", FRZ = "SE_M_ICY_WIND" }
 S.FIELD = { FIRE = "SE_M_FLAME_WHEEL", WATER = "SE_M_WHIRLPOOL", GRASS = "SE_M_BIND", ROCK = "SE_M_ROCK_THROW" }
+-- the weather and terrains taking hold (src/raid_sim.lua `field` events: weather / terrain): Gen 3's
+-- Rain Dance, Sandstorm and Hail; Morning Sun for the sun; the terrains' nearest moves
+S.WEATHER = { RAIN = "SE_M_RAIN_DANCE", SUN = "SE_M_MORNING_SUN", SAND = "SE_M_SANDSTORM", HAIL = "SE_M_HAIL" }
+S.TERRAIN = { ELECTRIC = "SE_M_THUNDER_WAVE", GRASSY = "SE_M_SWEET_SCENT", MISTY = "SE_M_MIST",
+  PSYCHIC = "SE_M_PSYBEAM" }
 
 S.CATCH = {
   -- (a list: the first this game has - FireRed's SE_BALL_CLICK is SE_RG_BALL_CLICK in Emerald)

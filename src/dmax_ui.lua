@@ -15,6 +15,7 @@
 --   Anim.faintMon     a faint puts it back to its size
 --   battle.overlay    the button and the HP box's mark, at the game's 240 x 160
 local floor, max, min = math.floor, math.max, math.min
+local bottomSeen, bottomFrame = nil, -1  -- (Ui.bottomUIVisible's answer in Ui.draw, and its frame)
 
 return function(mod, deps)
   local Dm = deps.dmax
@@ -653,9 +654,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     end
   end
 
+  -- (the game's own clock however fast the game runs: its speed-up runs several steps a frame - main's
+  -- core.logic_speed wrap holds it at 1x while the scene plays, and a held fast-forward, which no
+  -- mod is asked about, is divided out here)
+  local gameRef = nil
+  local function realDt(dt)
+    local fs = gameRef and tonumber(gameRef._frameSpeed) or 1
+    return dt / max(1, fs)
+  end
   local function stepScene(sc, dt)
     if scene ~= sc then return true end
-    sc.t = sc.t + dt
+    sc.t = sc.t + realDt(dt)
     -- (skipped: on to the black at its end, its sounds left unplayed)
     if sc.skip and sc.t < SM.OUT then
       sc.t = SM.OUT
@@ -1143,6 +1152,17 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       end
     end
     function U.frameNo() return frameNo end
+    -- (whether the battle draws its bar: Ui.draw asks it once a frame - each ask runs every mod's
+    -- battle.bottom_ui_visible hook, ~1 KB of garbage -, so its answer is kept for the button's
+    -- place that frame: U.bottomShown)
+    local bottomAsk = Ui.bottomUIVisible
+    if type(bottomAsk) == "function" then
+      Ui.bottomUIVisible = function(...)
+        local v = bottomAsk(...)
+        if select("#", ...) == 0 then bottomSeen, bottomFrame = v, frameNo end
+        return v
+      end
+    end
     local saved = {}
     -- (WoobleView told how each giant is drawn - exports.giant: its camera fits it at that size,
     -- its feet where its own picture's stand)
@@ -1383,7 +1403,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
         end
         local sc = scene
         -- (the black lifting off after it, on the game's clock)
-        if sc and sc.ended then sc.back = sc.back + (tonumber(dt) or 1 / 60) end
+        gameRef = type(game) == "table" and game or gameRef
+        if sc and sc.ended then sc.back = sc.back + realDt(tonumber(dt) or 1 / 60) end
         if sc and not sc.ended and sc.t > U.SCENE.SKIP_AFTER then
           local input = type(game) == "table" and game.input or nil
           if input and input.wasPressed and (input:wasPressed("a") or input:wasPressed("b")) then sc.skip = true end
@@ -1932,7 +1953,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
     engine()
     local Ui = E.Ui
     local hidden = false
-    if Ui and Ui.bottomUIVisible then
+    if U.frameNo and bottomFrame == U.frameNo() then
+      hidden = bottomSeen == false
+    elseif Ui and Ui.bottomUIVisible then
       local ok, v = pcall(Ui.bottomUIVisible)
       hidden = ok and v == false
     end
@@ -1973,6 +1996,23 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) { return vec4(color.rgb, Te
       place.x, place.y, place.k, place.bar = B.x, B.y, 1, false
     end
     return place
+  end
+
+  -- a point of the game's UI (240 x 160) on the screen now (WoobleView's uiMap, else the engine's
+  -- fit) and the screen pixels to one of its pixels; nil without a mapping
+  function U.uiPoint(x, y)
+    if not uiMapping() then return nil end
+    return ui.x0 + x * ui.sx, uiRowY(y), ui.sx
+  end
+
+  -- whether the battle draws its bar now (Ui.bottomUIVisible: false under Kanto Gear's GEAR views,
+  -- OmniUI, our Max Move pad): its answer this frame from Ui.draw, else asked
+  function U.bottomShown()
+    if U.frameNo and bottomFrame == U.frameNo() then return bottomSeen ~= false end
+    engine()
+    if not (E.Ui and E.Ui.bottomUIVisible) then return true end
+    local ok, v = pcall(E.Ui.bottomUIVisible)
+    return not ok or v ~= false
   end
 
   -- (drivers) the middle of the DYNAMAX card on the screen, wherever it is drawn now
