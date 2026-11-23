@@ -32,6 +32,14 @@ Dynamax or Gigantamax Pokémon in 3D, then try to catch it.
 
 *Win, catch it and collect your rewards.*
 
+<p align="center"><img src="assets/gdmaxintro.png" width="760" alt="The Dynamax scene in a Gym battle: Gigantamax Charizard rising out of its giant ball in a burst of pink light"></p>
+
+*Dynamax in the game's own battles: your Pokémon returns to its ball, you raise the band, and the giant bursts out.*
+
+<p align="center"><img src="assets/gdmaxgym.png" width="760" alt="Rustboro Gym in WoobleView's 3D Battle Scene: Gigantamax Charizard choosing between G-Max Wildfire, Max Strike, Max Guard and Max Airstream against Roxanne's Gigantamax Coalossal"></p>
+
+*Gym Leaders Dynamax their ace too. Pick your Max Move.*
+
 ## ✨ Features
 
 - 🗺️ **Dens on every route:** one or two per route, each with a new raid every day. A den you've
