@@ -5,6 +5,8 @@
 --   HP x2.0, G-Max Wildfire's field on her side, its chip at the turn's end; three turns, then over
 --   (HP back to its share); the battle left: the party's max HP its own again.
 --   A wild battle under GYMS & LEAGUE: no Dynamax. Shots d*.png.
+--   A giant called back (PROBE_RECALL_ONLY=1 alone): its Dynamax over quietly, HP its share, Gardevoir
+--   never giant, Wildfire's flames kept; Charizard back plain, no second Dynamax. Shots r*.png.
 --   SHOT_DIR=<dir> POKEPORT_GAME=emerald POKEPORT_VERSION=emerald \
 --   POKEPORT_DRIVER=mods/max_raids/tests/drivers/dmax_probe.lua love .
 
@@ -284,6 +286,151 @@ local function body(game, log)
     waitFor(function() return not Battle.isActive() end, 600)
     U.wait(30)
   end
+  -- ------- a giant called back: Charizard Gigantamaxes, then Gardevoir is sent in (the switch first
+  -- in the turn: the Dynamax ends quietly, HP back to its share), then Charizard comes back plain -
+  -- no Max Moves, no second Dynamax - and the battle's end leaves the party as it was
+  local function recallSection()
+    local UI = Tt.dmaxUi
+    if dx then dx.setFactor(zard, true) end
+    for _, m in ipairs(session.party) do m.hp = m.maxHp end
+    local by3 = C.trainers.byName
+    local tid3 = by3.TRAINER_ROXANNE_1 or by3.TRAINER_ROXANNE or by3.TRAINER_LEADER_BROCK
+    local okR, errR = BattleBridge.start(Runtime._mod, game, Trainers.foeFromId(tid3), { wild = false, trainerId = tid3 })
+    check(okR == true, "recall: her battle starts " .. tostring(errR or ""))
+    check(toCommand(), "recall: its command menu")
+    local st = Battle.getState()
+    local said = {}
+    do
+      local ad = Battle._adapter
+      local pushEvent = ad.pushEvent
+      ad.pushEvent = function(self, ev, ...)
+        if type(ev) == "table" and ev.kind == "msg" then
+          said[#said + 1] = tostring(ev.text)
+          log("  says: " .. tostring(ev.text):gsub("\n", " / "))
+        end
+        return pushEvent(self, ev, ...)
+      end
+    end
+    local function sturdy()
+      for _, m in ipairs(st.foeParty or {}) do m.maxHp, m.hp = 999, 999 end
+      if st.enemy and st.enemy.mon then st.enemy.mon.maxHp, st.enemy.mon.hp = 999, 999 end
+    end
+    sturdy()
+    -- (turn 1: R, Flamethrower as G-Max Wildfire; the scene skipped)
+    for _ = 1, 6 do
+      if Ui._mode == "moves" then break end
+      U.tap(game, "a")
+      waitFor(function() return Ui._mode == "moves" end, 40)
+    end
+    U.tap(game, "r")
+    U.wait(6)
+    check(Dm.sel[0] == true, "recall: Dynamax picked")
+    U.tap(game, "a")
+    if waitFor(function() return UI.sceneOn() and (UI.sceneT() or 0) > 0.6 end, 900) then U.tap(game, "b") end
+    toCommand()
+    local zb = st.player
+    local rec = zb.__mrDmax
+    local zmon = zb.mon
+    check(rec ~= nil and rec.gmax ~= nil, "recall: Charizard Gigantamaxed")
+    U.wait(40)
+    local v0 = Dm.vis[0]
+    check(v0 and (v0.k or 1) > 1.3, "recall: drawn giant (" .. tostring(v0 and v0.k) .. ")")
+    shot("r01_giant")
+    local hpDyn, dynMax = zmon.hp, zmon.maxHp
+    local want = hpDyn <= 0 and 0 or math.min(baseMax, math.max(1, math.floor(hpDyn * baseMax / dynMax + 0.5)))
+    -- (turn 2: Gardevoir sent in, as the party screen's choice does)
+    local said0 = #said
+    sturdy()
+    Ui._pendingCommand = { kind = "switch", user = "player", slot = 2 }
+    Ui._mode = "none"
+    local minK, maxKAfter, sawSwitch = 9, 0, false
+    local Seq = require("src.core.game3.battle.switch_seq")
+    local Anim = require("src.core.game3.battle.anim")
+    local lastKind, fr, withdrawShot = nil, 0, false
+    for _ = 1, 6000 do
+      if atCommand() or not Battle.isActive() then break end
+      fr = fr + 1
+      local v = Dm.vis[0]
+      local step = Seq._steps and Seq._i and Seq._steps[Seq._i]
+      local kind = step and step.kind or "-"
+      local p = Anim.present(0) or Anim.present("player")
+      if kind ~= lastKind then
+        lastKind = kind
+        log(("  recall f%d: step %s, drawn %.2f (wants %s), the sprite's scale %s visible %s"):format(fr, kind,
+          v and v.k or 1, tostring(v and v.want), tostring(p and p.scale), tostring(p and p.visible)))
+        if kind == "withdraw" then shot("r01a_come_back") end
+      end
+      if kind == "withdraw" and p and (p.scale or 1) < 0.6 and not withdrawShot then
+        withdrawShot = true
+        log(("  recall f%d: mid-withdraw, drawn %.2f, scale %.2f"):format(fr, v and v.k or 1, p.scale))
+        check(v and (v.k or 1) > 1.3, "recall: still giant as it goes back into its ball")
+        shot("r01b_withdraw")
+      end
+      if v then minK = math.min(minK, v.k or 1) end
+      if st.player ~= zb or (st.player and st.player.mon ~= zmon) then sawSwitch = true end
+      if sawSwitch and v then maxKAfter = math.max(maxKAfter, v.k or 1) end
+      if not pump() then U.wait(1) end
+    end
+    local cur = st.player
+    log(("  recall: in now %s; Charizard %d/%d (was %d/%d, its share %d); smallest drawn %.2f, after the switch %.2f"):format(
+      tostring(cur and cur.mon and cur.mon.species), zmon.hp, zmon.maxHp, hpDyn, dynMax, want, minK, maxKAfter))
+    check(cur and cur.mon and cur.mon.species == sp("GARDEVOIR"), "recall: Gardevoir in")
+    check(rec.done and zb.__mrDmax == nil and (cur == nil or cur.__mrDmax == nil), "recall: the Dynamax over")
+    check(zmon.maxHp == baseMax, "recall: Charizard's max HP its own (" .. tostring(zmon.maxHp) .. ")")
+    check(zmon.hp == want and zmon.hp > 0, ("recall: its HP its share of the giant's: %d -> %d"):format(hpDyn, zmon.hp))
+    check(maxKAfter <= 1.001, "recall: Gardevoir never drawn giant (" .. ("%.2f"):format(maxKAfter) .. ")")
+    local ended = false
+    for i = said0 + 1, #said do if said[i]:find("Dynamax") and said[i]:find("ended") then ended = true end end
+    check(not ended, "recall: quietly (no \"Dynamax ended\" words)")
+    U.wait(40)
+    check((UI.energyCount() or 0) == 0 and (UI.boltCount() or 0) == 0, "recall: no energy or electricity left")
+    do
+      local core = wvx and wvx._core and wvx._core()
+      if core and core.hudHeld ~= nil then check(core.hudHeld == 0, "recall: WoobleView's HUD let go") end
+    end
+    check(st.__mr.used and not Dm.can(st, cur), "recall: once a battle - Gardevoir may not")
+    local d = st.enemySide and st.enemySide.__ndx
+    log("  recall: G-Max Wildfire's field " .. tostring(d and d.mrField and d.mrField.turns))
+    check(d and d.mrField ~= nil, "recall: G-Max Wildfire's flames stay on her side")
+    shot("r02_gardevoir")
+    -- (turn 3: Charizard back, plain)
+    sturdy()
+    Ui._pendingCommand = { kind = "switch", user = "player", slot = 1 }
+    Ui._mode = "none"
+    toCommand()
+    cur = st.player
+    check(cur and cur.mon and cur.mon.species == sp("CHARIZARD"), "recall: Charizard back")
+    check(cur and cur.__mrDmax == nil and cur.mon.maxHp == baseMax, "recall: back at its own size and max HP")
+    check(not Dm.can(st, cur), "recall: no second Dynamax for it")
+    for _ = 1, 6 do
+      if Ui._mode == "moves" then break end
+      U.tap(game, "a")
+      waitFor(function() return Ui._mode == "moves" end, 40)
+    end
+    U.tap(game, "r")
+    U.wait(6)
+    check(Dm.sel[0] == nil, "recall: R does nothing now")
+    local names = {}
+    for i = 1, 4 do names[i] = Moves.displayName(cur.mon.moves[i]) end
+    check(names[1] == "FLAMETHROWER", "recall: its own moves (" .. table.concat(names, ", ") .. ")")
+    U.wait(20)
+    local v = Dm.vis[0]
+    check(v == nil or (v.k or 1) <= 1.001, "recall: drawn its own size")
+    shot("r03_back")
+    U.tap(game, "b")
+    U.wait(10)
+    Battle.abort("run")
+    waitFor(function() return not Battle.isActive() end, 600)
+    U.wait(30)
+    check(session.party[1].maxHp == baseMax and session.party[1].hp <= baseMax,
+      ("recall: the party's Charizard after: %d/%d"):format(session.party[1].hp, session.party[1].maxHp))
+  end
+  if os.getenv("PROBE_RECALL_ONLY") == "1" then
+    recallSection()
+    log(("%d failures"):format(fails))
+    return
+  end
+
   if os.getenv("PROBE_FOE_ONLY") == "1" then
     foeSection()
     log(("%d failures"):format(fails))
@@ -703,6 +850,7 @@ local function body(game, log)
     U.wait(30)
     check(session.party[1].maxHp == baseMax, "after the double battle: its own max HP")
   end
+  recallSection()
   foeSection()
   log(("%d failures"):format(fails))
 end
